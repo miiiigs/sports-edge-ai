@@ -1,0 +1,1274 @@
+{
+  "evaluation_mode": "finalization",
+  "history_season_codes": [
+    "2122",
+    "2223",
+    "2324",
+    "2425"
+  ],
+  "test_season_code": "2526",
+  "model_name": "poisson_1x2_v3",
+  "test_set_status_note": "If this test season has already been inspected in earlier development cycles, treat this output as historical evidence rather than a perfectly untouched final test.",
+  "result": {
+    "model_name": "poisson_1x2_v3",
+    "season_code": "2526",
+    "competition_ids": [
+      "ENG1",
+      "ENG2",
+      "ENG3",
+      "ENG4",
+      "ESP1"
+    ],
+    "bookmaker": "Bet365",
+    "min_team_matches": 6,
+    "prior_weight": 5.0,
+    "half_life_matches": 18.0,
+    "strength_regularization": 0.03,
+    "optimizer_learning_rate": 0.6,
+    "optimizer_max_iterations": 250,
+    "edge_threshold": 0.03,
+    "max_fair_odds": null,
+    "allowed_selections": [
+      "home",
+      "draw",
+      "away"
+    ],
+    "history_season_codes": [
+      "2122",
+      "2223",
+      "2324",
+      "2425"
+    ],
+    "event_count": 2416,
+    "predicted_count": 1986,
+    "history_semantics": {
+      "mode": "all_stored_prior_matches_before_each_target_event_filtered_to_history_seasons",
+      "prior_history_rows_available": 4811648,
+      "prior_season_rows_used": 4811648
+    },
+    "prediction_metrics": {
+      "multiclass_log_loss": 1.0454242304072074,
+      "multiclass_brier": 0.6290143305529475
+    },
+    "market_benchmark": {
+      "matched_market_count": 1986,
+      "multiclass_log_loss": 1.0081066147197726,
+      "multiclass_brier": 0.6038528076830302
+    },
+    "candidate_metrics": {
+      "candidate_count": 1235,
+      "total_units": -272.91,
+      "roi_per_bet": -0.22097975708502027,
+      "win_rate": 0.22995951417004049
+    },
+    "reports": {
+      "by_competition": {
+        "ENG1": {
+          "sample_count": 342,
+          "model_log_loss": 1.0365444106627693,
+          "model_brier": 0.6227074292053512,
+          "market_log_loss": 0.9988718445897494,
+          "market_brier": 0.5982785870458446,
+          "candidate_count": 217,
+          "roi_per_bet": -0.32175115207373267,
+          "average_offered_odds": 4.506682027649769
+        },
+        "ENG2": {
+          "sample_count": 462,
+          "model_log_loss": 1.0696506080178687,
+          "model_brier": 0.6463962701500194,
+          "market_log_loss": 1.0258082947254614,
+          "market_brier": 0.6182546306771167,
+          "candidate_count": 285,
+          "roi_per_bet": -0.25905263157894737,
+          "average_offered_odds": 4.5097192982456145
+        },
+        "ENG3": {
+          "sample_count": 420,
+          "model_log_loss": 1.0598266165512906,
+          "model_brier": 0.6395609274995437,
+          "market_log_loss": 1.019298842988039,
+          "market_brier": 0.6102876036034235,
+          "candidate_count": 264,
+          "roi_per_bet": -0.16583333333333333,
+          "average_offered_odds": 3.807651515151515
+        },
+        "ENG4": {
+          "sample_count": 420,
+          "model_log_loss": 1.062920002577089,
+          "model_brier": 0.6423311511144445,
+          "market_log_loss": 1.0167937228492707,
+          "market_brier": 0.6101659349710664,
+          "candidate_count": 279,
+          "roi_per_bet": -0.22734767025089606,
+          "average_offered_odds": 4.018566308243727
+        },
+        "ESP1": {
+          "sample_count": 342,
+          "model_log_loss": 0.9824040122920206,
+          "model_brier": 0.5825344148033393,
+          "market_log_loss": 0.9690153689150257,
+          "market_brier": 0.5743165898090691,
+          "candidate_count": 190,
+          "roi_per_bet": -0.11605263157894737,
+          "average_offered_odds": 4.5941052631578945
+        }
+      },
+      "by_selection": {
+        "home": {
+          "sample_count": 1986,
+          "mean_predicted_probability": 0.4368481887635783,
+          "realized_rate": 0.4390735146022155,
+          "calibration_gap": -0.0022253258386372154,
+          "brier": 0.23470098627446426,
+          "binary_log_loss": 0.6616425859177754,
+          "candidate_count": 617,
+          "roi_per_bet": -0.15419773095623987,
+          "average_offered_odds": 3.3635332252836303
+        },
+        "draw": {
+          "sample_count": 1986,
+          "mean_predicted_probability": 0.25413646490249947,
+          "realized_rate": 0.2512588116817724,
+          "calibration_gap": 0.0028776532207270833,
+          "brier": 0.18757005090232637,
+          "binary_log_loss": 0.562142432797773,
+          "candidate_count": 16,
+          "roi_per_bet": -0.703125,
+          "average_offered_odds": 7.25
+        },
+        "away": {
+          "sample_count": 1986,
+          "mean_predicted_probability": 0.30901534633392225,
+          "realized_rate": 0.30966767371601206,
+          "calibration_gap": -0.0006523273820898123,
+          "brier": 0.20674329337615788,
+          "binary_log_loss": 0.6015590360859797,
+          "candidate_count": 602,
+          "roi_per_bet": -0.27661129568106313,
+          "average_offered_odds": 5.1016611295681065
+        }
+      },
+      "by_competition_selection": {
+        "ENG1": {
+          "home": {
+            "sample_count": 342,
+            "mean_predicted_probability": 0.4368034860700511,
+            "realized_rate": 0.4239766081871345,
+            "calibration_gap": 0.012826877882916587,
+            "brier": 0.22561066510900316,
+            "binary_log_loss": 0.6421193455864848,
+            "candidate_count": 105,
+            "roi_per_bet": -0.3168571428571429,
+            "average_offered_odds": 3.765904761904762
+          },
+          "draw": {
+            "sample_count": 342,
+            "mean_predicted_probability": 0.23259246888159024,
+            "realized_rate": 0.26900584795321636,
+            "calibration_gap": -0.03641337907162612,
+            "brier": 0.19678930437179323,
+            "binary_log_loss": 0.5829863871893122,
+            "candidate_count": 1,
+            "roi_per_bet": -1.0,
+            "average_offered_odds": 7.0
+          },
+          "away": {
+            "sample_count": 342,
+            "mean_predicted_probability": 0.33060404504835866,
+            "realized_rate": 0.30701754385964913,
+            "calibration_gap": 0.02358650118870953,
+            "brier": 0.20030745972455505,
+            "binary_log_loss": 0.5857685125763641,
+            "candidate_count": 111,
+            "roi_per_bet": -0.3202702702702702,
+            "average_offered_odds": 5.184954954954955
+          }
+        },
+        "ENG2": {
+          "home": {
+            "sample_count": 462,
+            "mean_predicted_probability": 0.4418979381764865,
+            "realized_rate": 0.42424242424242425,
+            "calibration_gap": 0.017655513934062228,
+            "brier": 0.24054240925830334,
+            "binary_log_loss": 0.6740586924109525,
+            "candidate_count": 142,
+            "roi_per_bet": -0.11049295774647888,
+            "average_offered_odds": 3.3871830985915494
+          },
+          "draw": {
+            "sample_count": 462,
+            "mean_predicted_probability": 0.261971330668608,
+            "realized_rate": 0.2554112554112554,
+            "calibration_gap": 0.006560075257352582,
+            "brier": 0.1909121958042141,
+            "binary_log_loss": 0.5700787828018327,
+            "candidate_count": 2,
+            "roi_per_bet": -1.0,
+            "average_offered_odds": 6.875
+          },
+          "away": {
+            "sample_count": 462,
+            "mean_predicted_probability": 0.2961307311549055,
+            "realized_rate": 0.3203463203463203,
+            "calibration_gap": -0.02421558919141481,
+            "brier": 0.21494166508750145,
+            "binary_log_loss": 0.6204997105775836,
+            "candidate_count": 141,
+            "roi_per_bet": -0.3981560283687943,
+            "average_offered_odds": 5.6066666666666665
+          }
+        },
+        "ENG3": {
+          "home": {
+            "sample_count": 420,
+            "mean_predicted_probability": 0.4294975464431559,
+            "realized_rate": 0.4452380952380952,
+            "calibration_gap": -0.015740548794939302,
+            "brier": 0.24287063079053337,
+            "binary_log_loss": 0.6787147601964326,
+            "candidate_count": 136,
+            "roi_per_bet": -0.11970588235294119,
+            "average_offered_odds": 3.0158088235294116
+          },
+          "draw": {
+            "sample_count": 420,
+            "mean_predicted_probability": 0.25883381976306813,
+            "realized_rate": 0.25476190476190474,
+            "calibration_gap": 0.004071915001163384,
+            "brier": 0.18960856589525554,
+            "binary_log_loss": 0.5668632997031806,
+            "candidate_count": 0,
+            "roi_per_bet": null,
+            "average_offered_odds": null
+          },
+          "away": {
+            "sample_count": 420,
+            "mean_predicted_probability": 0.311668633793776,
+            "realized_rate": 0.3,
+            "calibration_gap": 0.011668633793776029,
+            "brier": 0.20708173081375453,
+            "binary_log_loss": 0.6038252221068069,
+            "candidate_count": 128,
+            "roi_per_bet": -0.21484375,
+            "average_offered_odds": 4.648984375
+          }
+        },
+        "ENG4": {
+          "home": {
+            "sample_count": 420,
+            "mean_predicted_probability": 0.429287534973132,
+            "realized_rate": 0.4166666666666667,
+            "calibration_gap": 0.012620868306465305,
+            "brier": 0.23843054295407085,
+            "binary_log_loss": 0.6697227320538076,
+            "candidate_count": 139,
+            "roi_per_bet": -0.2394244604316547,
+            "average_offered_odds": 3.2275539568345324
+          },
+          "draw": {
+            "sample_count": 420,
+            "mean_predicted_probability": 0.2595284639617813,
+            "realized_rate": 0.23809523809523808,
+            "calibration_gap": 0.021433225866543226,
+            "brier": 0.18181403485855738,
+            "binary_log_loss": 0.5499738531165241,
+            "candidate_count": 1,
+            "roi_per_bet": -1.0,
+            "average_offered_odds": 4.0
+          },
+          "away": {
+            "sample_count": 420,
+            "mean_predicted_probability": 0.31118400106508676,
+            "realized_rate": 0.34523809523809523,
+            "calibration_gap": -0.034054094173008476,
+            "brier": 0.22208657330181578,
+            "binary_log_loss": 0.6353727888601787,
+            "candidate_count": 139,
+            "roi_per_bet": -0.20971223021582736,
+            "average_offered_odds": 4.809712230215827
+          }
+        },
+        "ESP1": {
+          "home": {
+            "sample_count": 342,
+            "mean_predicted_probability": 0.44838341817582256,
+            "realized_rate": 0.49415204678362573,
+            "calibration_gap": -0.045768628607803175,
+            "brier": 0.221287208256541,
+            "binary_log_loss": 0.6335043766174387,
+            "candidate_count": 95,
+            "roi_per_bet": 0.03557894736842104,
+            "average_offered_odds": 3.5802105263157893
+          },
+          "draw": {
+            "sample_count": 342,
+            "mean_predicted_probability": 0.252706084811481,
+            "realized_rate": 0.23976608187134502,
+            "calibration_gap": 0.012940002940135975,
+            "brier": 0.17840132227695488,
+            "binary_log_loss": 0.5397237581254659,
+            "candidate_count": 12,
+            "roi_per_bet": -0.6041666666666666,
+            "average_offered_odds": 7.604166666666667
+          },
+          "away": {
+            "sample_count": 342,
+            "mean_predicted_probability": 0.2989104970126965,
+            "realized_rate": 0.26608187134502925,
+            "calibration_gap": 0.032828625667667255,
+            "brier": 0.18284588426984366,
+            "binary_log_loss": 0.5474543376393611,
+            "candidate_count": 83,
+            "roi_per_bet": -0.21903614457831325,
+            "average_offered_odds": 5.319397590361445
+          }
+        }
+      },
+      "calibration_buckets_by_selection": {
+        "home": [
+          {
+            "bucket": "0-10%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "10-20%",
+            "sample_count": 16,
+            "mean_predicted_probability": 0.172860128596459,
+            "realized_rate": 0.0625,
+            "calibration_gap": 0.110360128596459
+          },
+          {
+            "bucket": "20-30%",
+            "sample_count": 86,
+            "mean_predicted_probability": 0.2541520823611154,
+            "realized_rate": 0.29069767441860467,
+            "calibration_gap": -0.03654559205748925
+          },
+          {
+            "bucket": "30-40%",
+            "sample_count": 526,
+            "mean_predicted_probability": 0.3641510637758028,
+            "realized_rate": 0.35361216730038025,
+            "calibration_gap": 0.010538896475422554
+          },
+          {
+            "bucket": "40-50%",
+            "sample_count": 978,
+            "mean_predicted_probability": 0.4450588089876985,
+            "realized_rate": 0.434560327198364,
+            "calibration_gap": 0.01049848178933449
+          },
+          {
+            "bucket": "50-60%",
+            "sample_count": 288,
+            "mean_predicted_probability": 0.5354354359242909,
+            "realized_rate": 0.5694444444444444,
+            "calibration_gap": -0.03400900852015354
+          },
+          {
+            "bucket": "60-70%",
+            "sample_count": 66,
+            "mean_predicted_probability": 0.6490314008490022,
+            "realized_rate": 0.7424242424242424,
+            "calibration_gap": -0.09339284157524019
+          },
+          {
+            "bucket": "70-80%",
+            "sample_count": 25,
+            "mean_predicted_probability": 0.7319086021833863,
+            "realized_rate": 0.84,
+            "calibration_gap": -0.1080913978166137
+          },
+          {
+            "bucket": "80-90%",
+            "sample_count": 1,
+            "mean_predicted_probability": 0.8074939510111795,
+            "realized_rate": 1,
+            "calibration_gap": -0.1925060489888205
+          },
+          {
+            "bucket": "90-100%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          }
+        ],
+        "draw": [
+          {
+            "bucket": "0-10%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "10-20%",
+            "sample_count": 71,
+            "mean_predicted_probability": 0.17768212239445091,
+            "realized_rate": 0.15492957746478872,
+            "calibration_gap": 0.022752544929662194
+          },
+          {
+            "bucket": "20-30%",
+            "sample_count": 1900,
+            "mean_predicted_probability": 0.2565927551528854,
+            "realized_rate": 0.25526315789473686,
+            "calibration_gap": 0.0013295972581485183
+          },
+          {
+            "bucket": "30-40%",
+            "sample_count": 15,
+            "mean_predicted_probability": 0.3048902543917145,
+            "realized_rate": 0.2,
+            "calibration_gap": 0.10489025439171451
+          },
+          {
+            "bucket": "40-50%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "50-60%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "60-70%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "70-80%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "80-90%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "90-100%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          }
+        ],
+        "away": [
+          {
+            "bucket": "0-10%",
+            "sample_count": 8,
+            "mean_predicted_probability": 0.09011883862933556,
+            "realized_rate": 0,
+            "calibration_gap": 0.09011883862933556
+          },
+          {
+            "bucket": "10-20%",
+            "sample_count": 123,
+            "mean_predicted_probability": 0.15959476363418562,
+            "realized_rate": 0.11382113821138211,
+            "calibration_gap": 0.04577362542280351
+          },
+          {
+            "bucket": "20-30%",
+            "sample_count": 811,
+            "mean_predicted_probability": 0.2621601098316712,
+            "realized_rate": 0.2638717632552404,
+            "calibration_gap": -0.001711653423569215
+          },
+          {
+            "bucket": "30-40%",
+            "sample_count": 852,
+            "mean_predicted_probability": 0.33944672136604104,
+            "realized_rate": 0.3532863849765258,
+            "calibration_gap": -0.013839663610484776
+          },
+          {
+            "bucket": "40-50%",
+            "sample_count": 130,
+            "mean_predicted_probability": 0.43618789350974607,
+            "realized_rate": 0.4230769230769231,
+            "calibration_gap": 0.013110970432823
+          },
+          {
+            "bucket": "50-60%",
+            "sample_count": 52,
+            "mean_predicted_probability": 0.546411344216295,
+            "realized_rate": 0.4807692307692308,
+            "calibration_gap": 0.06564211344706422
+          },
+          {
+            "bucket": "60-70%",
+            "sample_count": 9,
+            "mean_predicted_probability": 0.6343663277424461,
+            "realized_rate": 0.5555555555555556,
+            "calibration_gap": 0.07881077218689048
+          },
+          {
+            "bucket": "70-80%",
+            "sample_count": 1,
+            "mean_predicted_probability": 0.7058025005813996,
+            "realized_rate": 1,
+            "calibration_gap": -0.2941974994186004
+          },
+          {
+            "bucket": "80-90%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          },
+          {
+            "bucket": "90-100%",
+            "sample_count": 0,
+            "mean_predicted_probability": null,
+            "realized_rate": null,
+            "calibration_gap": null
+          }
+        ]
+      },
+      "by_edge_bucket": {
+        "3-5%": {
+          "candidate_count": 268,
+          "roi_per_bet": -0.16742537313432837,
+          "average_offered_odds": 3.816231343283582
+        },
+        "5-8%": {
+          "candidate_count": 367,
+          "roi_per_bet": -0.17482288828337875,
+          "average_offered_odds": 4.083869209809264
+        },
+        "8-10%": {
+          "candidate_count": 193,
+          "roi_per_bet": -0.1416580310880829,
+          "average_offered_odds": 4.166994818652849
+        },
+        "10-15%": {
+          "candidate_count": 281,
+          "roi_per_bet": -0.2754448398576513,
+          "average_offered_odds": 4.45779359430605
+        },
+        "15-20%": {
+          "candidate_count": 110,
+          "roi_per_bet": -0.4688181818181818,
+          "average_offered_odds": 5.286727272727273
+        },
+        "20%+": {
+          "candidate_count": 16,
+          "roi_per_bet": -0.473125,
+          "average_offered_odds": 6.41
+        }
+      },
+      "candidate_by_selection": {
+        "home": {
+          "candidate_count": 617,
+          "roi_per_bet": -0.15419773095623987,
+          "average_offered_odds": 3.3635332252836303
+        },
+        "draw": {
+          "candidate_count": 16,
+          "roi_per_bet": -0.703125,
+          "average_offered_odds": 7.25
+        },
+        "away": {
+          "candidate_count": 602,
+          "roi_per_bet": -0.27661129568106313,
+          "average_offered_odds": 5.1016611295681065
+        }
+      }
+    },
+    "model_evaluation": {
+      "event_count": 2416,
+      "predicted_count": 1986,
+      "history_semantics": {
+        "mode": "all_stored_prior_matches_before_each_target_event_filtered_to_history_seasons",
+        "prior_history_rows_available": 4811648,
+        "prior_season_rows_used": 4811648
+      },
+      "prediction_metrics": {
+        "multiclass_log_loss": 1.0454242304072074,
+        "multiclass_brier": 0.6290143305529475
+      },
+      "market_benchmark": {
+        "matched_market_count": 1986,
+        "multiclass_log_loss": 1.0081066147197726,
+        "multiclass_brier": 0.6038528076830302
+      },
+      "reports": {
+        "by_competition": {
+          "ENG1": {
+            "sample_count": 342,
+            "model_log_loss": 1.0365444106627693,
+            "model_brier": 0.6227074292053512,
+            "market_log_loss": 0.9988718445897494,
+            "market_brier": 0.5982785870458446,
+            "candidate_count": 217,
+            "roi_per_bet": -0.32175115207373267,
+            "average_offered_odds": 4.506682027649769
+          },
+          "ENG2": {
+            "sample_count": 462,
+            "model_log_loss": 1.0696506080178687,
+            "model_brier": 0.6463962701500194,
+            "market_log_loss": 1.0258082947254614,
+            "market_brier": 0.6182546306771167,
+            "candidate_count": 285,
+            "roi_per_bet": -0.25905263157894737,
+            "average_offered_odds": 4.5097192982456145
+          },
+          "ENG3": {
+            "sample_count": 420,
+            "model_log_loss": 1.0598266165512906,
+            "model_brier": 0.6395609274995437,
+            "market_log_loss": 1.019298842988039,
+            "market_brier": 0.6102876036034235,
+            "candidate_count": 264,
+            "roi_per_bet": -0.16583333333333333,
+            "average_offered_odds": 3.807651515151515
+          },
+          "ENG4": {
+            "sample_count": 420,
+            "model_log_loss": 1.062920002577089,
+            "model_brier": 0.6423311511144445,
+            "market_log_loss": 1.0167937228492707,
+            "market_brier": 0.6101659349710664,
+            "candidate_count": 279,
+            "roi_per_bet": -0.22734767025089606,
+            "average_offered_odds": 4.018566308243727
+          },
+          "ESP1": {
+            "sample_count": 342,
+            "model_log_loss": 0.9824040122920206,
+            "model_brier": 0.5825344148033393,
+            "market_log_loss": 0.9690153689150257,
+            "market_brier": 0.5743165898090691,
+            "candidate_count": 190,
+            "roi_per_bet": -0.11605263157894737,
+            "average_offered_odds": 4.5941052631578945
+          }
+        },
+        "by_selection": {
+          "home": {
+            "sample_count": 1986,
+            "mean_predicted_probability": 0.4368481887635783,
+            "realized_rate": 0.4390735146022155,
+            "calibration_gap": -0.0022253258386372154,
+            "brier": 0.23470098627446426,
+            "binary_log_loss": 0.6616425859177754,
+            "candidate_count": 617,
+            "roi_per_bet": -0.15419773095623987,
+            "average_offered_odds": 3.3635332252836303
+          },
+          "draw": {
+            "sample_count": 1986,
+            "mean_predicted_probability": 0.25413646490249947,
+            "realized_rate": 0.2512588116817724,
+            "calibration_gap": 0.0028776532207270833,
+            "brier": 0.18757005090232637,
+            "binary_log_loss": 0.562142432797773,
+            "candidate_count": 16,
+            "roi_per_bet": -0.703125,
+            "average_offered_odds": 7.25
+          },
+          "away": {
+            "sample_count": 1986,
+            "mean_predicted_probability": 0.30901534633392225,
+            "realized_rate": 0.30966767371601206,
+            "calibration_gap": -0.0006523273820898123,
+            "brier": 0.20674329337615788,
+            "binary_log_loss": 0.6015590360859797,
+            "candidate_count": 602,
+            "roi_per_bet": -0.27661129568106313,
+            "average_offered_odds": 5.1016611295681065
+          }
+        },
+        "by_competition_selection": {
+          "ENG1": {
+            "home": {
+              "sample_count": 342,
+              "mean_predicted_probability": 0.4368034860700511,
+              "realized_rate": 0.4239766081871345,
+              "calibration_gap": 0.012826877882916587,
+              "brier": 0.22561066510900316,
+              "binary_log_loss": 0.6421193455864848,
+              "candidate_count": 105,
+              "roi_per_bet": -0.3168571428571429,
+              "average_offered_odds": 3.765904761904762
+            },
+            "draw": {
+              "sample_count": 342,
+              "mean_predicted_probability": 0.23259246888159024,
+              "realized_rate": 0.26900584795321636,
+              "calibration_gap": -0.03641337907162612,
+              "brier": 0.19678930437179323,
+              "binary_log_loss": 0.5829863871893122,
+              "candidate_count": 1,
+              "roi_per_bet": -1.0,
+              "average_offered_odds": 7.0
+            },
+            "away": {
+              "sample_count": 342,
+              "mean_predicted_probability": 0.33060404504835866,
+              "realized_rate": 0.30701754385964913,
+              "calibration_gap": 0.02358650118870953,
+              "brier": 0.20030745972455505,
+              "binary_log_loss": 0.5857685125763641,
+              "candidate_count": 111,
+              "roi_per_bet": -0.3202702702702702,
+              "average_offered_odds": 5.184954954954955
+            }
+          },
+          "ENG2": {
+            "home": {
+              "sample_count": 462,
+              "mean_predicted_probability": 0.4418979381764865,
+              "realized_rate": 0.42424242424242425,
+              "calibration_gap": 0.017655513934062228,
+              "brier": 0.24054240925830334,
+              "binary_log_loss": 0.6740586924109525,
+              "candidate_count": 142,
+              "roi_per_bet": -0.11049295774647888,
+              "average_offered_odds": 3.3871830985915494
+            },
+            "draw": {
+              "sample_count": 462,
+              "mean_predicted_probability": 0.261971330668608,
+              "realized_rate": 0.2554112554112554,
+              "calibration_gap": 0.006560075257352582,
+              "brier": 0.1909121958042141,
+              "binary_log_loss": 0.5700787828018327,
+              "candidate_count": 2,
+              "roi_per_bet": -1.0,
+              "average_offered_odds": 6.875
+            },
+            "away": {
+              "sample_count": 462,
+              "mean_predicted_probability": 0.2961307311549055,
+              "realized_rate": 0.3203463203463203,
+              "calibration_gap": -0.02421558919141481,
+              "brier": 0.21494166508750145,
+              "binary_log_loss": 0.6204997105775836,
+              "candidate_count": 141,
+              "roi_per_bet": -0.3981560283687943,
+              "average_offered_odds": 5.6066666666666665
+            }
+          },
+          "ENG3": {
+            "home": {
+              "sample_count": 420,
+              "mean_predicted_probability": 0.4294975464431559,
+              "realized_rate": 0.4452380952380952,
+              "calibration_gap": -0.015740548794939302,
+              "brier": 0.24287063079053337,
+              "binary_log_loss": 0.6787147601964326,
+              "candidate_count": 136,
+              "roi_per_bet": -0.11970588235294119,
+              "average_offered_odds": 3.0158088235294116
+            },
+            "draw": {
+              "sample_count": 420,
+              "mean_predicted_probability": 0.25883381976306813,
+              "realized_rate": 0.25476190476190474,
+              "calibration_gap": 0.004071915001163384,
+              "brier": 0.18960856589525554,
+              "binary_log_loss": 0.5668632997031806,
+              "candidate_count": 0,
+              "roi_per_bet": null,
+              "average_offered_odds": null
+            },
+            "away": {
+              "sample_count": 420,
+              "mean_predicted_probability": 0.311668633793776,
+              "realized_rate": 0.3,
+              "calibration_gap": 0.011668633793776029,
+              "brier": 0.20708173081375453,
+              "binary_log_loss": 0.6038252221068069,
+              "candidate_count": 128,
+              "roi_per_bet": -0.21484375,
+              "average_offered_odds": 4.648984375
+            }
+          },
+          "ENG4": {
+            "home": {
+              "sample_count": 420,
+              "mean_predicted_probability": 0.429287534973132,
+              "realized_rate": 0.4166666666666667,
+              "calibration_gap": 0.012620868306465305,
+              "brier": 0.23843054295407085,
+              "binary_log_loss": 0.6697227320538076,
+              "candidate_count": 139,
+              "roi_per_bet": -0.2394244604316547,
+              "average_offered_odds": 3.2275539568345324
+            },
+            "draw": {
+              "sample_count": 420,
+              "mean_predicted_probability": 0.2595284639617813,
+              "realized_rate": 0.23809523809523808,
+              "calibration_gap": 0.021433225866543226,
+              "brier": 0.18181403485855738,
+              "binary_log_loss": 0.5499738531165241,
+              "candidate_count": 1,
+              "roi_per_bet": -1.0,
+              "average_offered_odds": 4.0
+            },
+            "away": {
+              "sample_count": 420,
+              "mean_predicted_probability": 0.31118400106508676,
+              "realized_rate": 0.34523809523809523,
+              "calibration_gap": -0.034054094173008476,
+              "brier": 0.22208657330181578,
+              "binary_log_loss": 0.6353727888601787,
+              "candidate_count": 139,
+              "roi_per_bet": -0.20971223021582736,
+              "average_offered_odds": 4.809712230215827
+            }
+          },
+          "ESP1": {
+            "home": {
+              "sample_count": 342,
+              "mean_predicted_probability": 0.44838341817582256,
+              "realized_rate": 0.49415204678362573,
+              "calibration_gap": -0.045768628607803175,
+              "brier": 0.221287208256541,
+              "binary_log_loss": 0.6335043766174387,
+              "candidate_count": 95,
+              "roi_per_bet": 0.03557894736842104,
+              "average_offered_odds": 3.5802105263157893
+            },
+            "draw": {
+              "sample_count": 342,
+              "mean_predicted_probability": 0.252706084811481,
+              "realized_rate": 0.23976608187134502,
+              "calibration_gap": 0.012940002940135975,
+              "brier": 0.17840132227695488,
+              "binary_log_loss": 0.5397237581254659,
+              "candidate_count": 12,
+              "roi_per_bet": -0.6041666666666666,
+              "average_offered_odds": 7.604166666666667
+            },
+            "away": {
+              "sample_count": 342,
+              "mean_predicted_probability": 0.2989104970126965,
+              "realized_rate": 0.26608187134502925,
+              "calibration_gap": 0.032828625667667255,
+              "brier": 0.18284588426984366,
+              "binary_log_loss": 0.5474543376393611,
+              "candidate_count": 83,
+              "roi_per_bet": -0.21903614457831325,
+              "average_offered_odds": 5.319397590361445
+            }
+          }
+        },
+        "calibration_buckets_by_selection": {
+          "home": [
+            {
+              "bucket": "0-10%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "10-20%",
+              "sample_count": 16,
+              "mean_predicted_probability": 0.172860128596459,
+              "realized_rate": 0.0625,
+              "calibration_gap": 0.110360128596459
+            },
+            {
+              "bucket": "20-30%",
+              "sample_count": 86,
+              "mean_predicted_probability": 0.2541520823611154,
+              "realized_rate": 0.29069767441860467,
+              "calibration_gap": -0.03654559205748925
+            },
+            {
+              "bucket": "30-40%",
+              "sample_count": 526,
+              "mean_predicted_probability": 0.3641510637758028,
+              "realized_rate": 0.35361216730038025,
+              "calibration_gap": 0.010538896475422554
+            },
+            {
+              "bucket": "40-50%",
+              "sample_count": 978,
+              "mean_predicted_probability": 0.4450588089876985,
+              "realized_rate": 0.434560327198364,
+              "calibration_gap": 0.01049848178933449
+            },
+            {
+              "bucket": "50-60%",
+              "sample_count": 288,
+              "mean_predicted_probability": 0.5354354359242909,
+              "realized_rate": 0.5694444444444444,
+              "calibration_gap": -0.03400900852015354
+            },
+            {
+              "bucket": "60-70%",
+              "sample_count": 66,
+              "mean_predicted_probability": 0.6490314008490022,
+              "realized_rate": 0.7424242424242424,
+              "calibration_gap": -0.09339284157524019
+            },
+            {
+              "bucket": "70-80%",
+              "sample_count": 25,
+              "mean_predicted_probability": 0.7319086021833863,
+              "realized_rate": 0.84,
+              "calibration_gap": -0.1080913978166137
+            },
+            {
+              "bucket": "80-90%",
+              "sample_count": 1,
+              "mean_predicted_probability": 0.8074939510111795,
+              "realized_rate": 1,
+              "calibration_gap": -0.1925060489888205
+            },
+            {
+              "bucket": "90-100%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            }
+          ],
+          "draw": [
+            {
+              "bucket": "0-10%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "10-20%",
+              "sample_count": 71,
+              "mean_predicted_probability": 0.17768212239445091,
+              "realized_rate": 0.15492957746478872,
+              "calibration_gap": 0.022752544929662194
+            },
+            {
+              "bucket": "20-30%",
+              "sample_count": 1900,
+              "mean_predicted_probability": 0.2565927551528854,
+              "realized_rate": 0.25526315789473686,
+              "calibration_gap": 0.0013295972581485183
+            },
+            {
+              "bucket": "30-40%",
+              "sample_count": 15,
+              "mean_predicted_probability": 0.3048902543917145,
+              "realized_rate": 0.2,
+              "calibration_gap": 0.10489025439171451
+            },
+            {
+              "bucket": "40-50%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "50-60%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "60-70%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "70-80%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "80-90%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "90-100%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            }
+          ],
+          "away": [
+            {
+              "bucket": "0-10%",
+              "sample_count": 8,
+              "mean_predicted_probability": 0.09011883862933556,
+              "realized_rate": 0,
+              "calibration_gap": 0.09011883862933556
+            },
+            {
+              "bucket": "10-20%",
+              "sample_count": 123,
+              "mean_predicted_probability": 0.15959476363418562,
+              "realized_rate": 0.11382113821138211,
+              "calibration_gap": 0.04577362542280351
+            },
+            {
+              "bucket": "20-30%",
+              "sample_count": 811,
+              "mean_predicted_probability": 0.2621601098316712,
+              "realized_rate": 0.2638717632552404,
+              "calibration_gap": -0.001711653423569215
+            },
+            {
+              "bucket": "30-40%",
+              "sample_count": 852,
+              "mean_predicted_probability": 0.33944672136604104,
+              "realized_rate": 0.3532863849765258,
+              "calibration_gap": -0.013839663610484776
+            },
+            {
+              "bucket": "40-50%",
+              "sample_count": 130,
+              "mean_predicted_probability": 0.43618789350974607,
+              "realized_rate": 0.4230769230769231,
+              "calibration_gap": 0.013110970432823
+            },
+            {
+              "bucket": "50-60%",
+              "sample_count": 52,
+              "mean_predicted_probability": 0.546411344216295,
+              "realized_rate": 0.4807692307692308,
+              "calibration_gap": 0.06564211344706422
+            },
+            {
+              "bucket": "60-70%",
+              "sample_count": 9,
+              "mean_predicted_probability": 0.6343663277424461,
+              "realized_rate": 0.5555555555555556,
+              "calibration_gap": 0.07881077218689048
+            },
+            {
+              "bucket": "70-80%",
+              "sample_count": 1,
+              "mean_predicted_probability": 0.7058025005813996,
+              "realized_rate": 1,
+              "calibration_gap": -0.2941974994186004
+            },
+            {
+              "bucket": "80-90%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            },
+            {
+              "bucket": "90-100%",
+              "sample_count": 0,
+              "mean_predicted_probability": null,
+              "realized_rate": null,
+              "calibration_gap": null
+            }
+          ]
+        }
+      }
+    },
+    "policy_evaluation": {
+      "policy": {
+        "edge_threshold": 0.03,
+        "max_fair_odds": null,
+        "allowed_selections": [
+          "home",
+          "draw",
+          "away"
+        ]
+      },
+      "candidate_metrics": {
+        "candidate_count": 1235,
+        "total_units": -272.91,
+        "roi_per_bet": -0.22097975708502027,
+        "win_rate": 0.22995951417004049
+      },
+      "reports": {
+        "by_edge_bucket": {
+          "3-5%": {
+            "candidate_count": 268,
+            "roi_per_bet": -0.16742537313432837,
+            "average_offered_odds": 3.816231343283582
+          },
+          "5-8%": {
+            "candidate_count": 367,
+            "roi_per_bet": -0.17482288828337875,
+            "average_offered_odds": 4.083869209809264
+          },
+          "8-10%": {
+            "candidate_count": 193,
+            "roi_per_bet": -0.1416580310880829,
+            "average_offered_odds": 4.166994818652849
+          },
+          "10-15%": {
+            "candidate_count": 281,
+            "roi_per_bet": -0.2754448398576513,
+            "average_offered_odds": 4.45779359430605
+          },
+          "15-20%": {
+            "candidate_count": 110,
+            "roi_per_bet": -0.4688181818181818,
+            "average_offered_odds": 5.286727272727273
+          },
+          "20%+": {
+            "candidate_count": 16,
+            "roi_per_bet": -0.473125,
+            "average_offered_odds": 6.41
+          }
+        },
+        "candidate_by_selection": {
+          "home": {
+            "candidate_count": 617,
+            "roi_per_bet": -0.15419773095623987,
+            "average_offered_odds": 3.3635332252836303
+          },
+          "draw": {
+            "candidate_count": 16,
+            "roi_per_bet": -0.703125,
+            "average_offered_odds": 7.25
+          },
+          "away": {
+            "candidate_count": 602,
+            "roi_per_bet": -0.27661129568106313,
+            "average_offered_odds": 5.1016611295681065
+          }
+        }
+      }
+    },
+    "sample_predictions": [
+      {
+        "event_id": "evt_football_20250815_liverpool_bournemouth",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-15",
+        "home_team": "Liverpool",
+        "away_team": "Bournemouth",
+        "probabilities": {
+          "home": 0.6975390478570813,
+          "draw": 0.17235329531116866,
+          "away": 0.13010765683174988
+        },
+        "fair_odds": {
+          "home": 1.433611498986491,
+          "draw": 5.802035860089523,
+          "away": 7.685942736584372
+        },
+        "actual_result": "home",
+        "candidate": null
+      },
+      {
+        "event_id": "evt_football_20250816_aston_villa_newcastle",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Aston Villa",
+        "away_team": "Newcastle",
+        "probabilities": {
+          "home": 0.3972881877295597,
+          "draw": 0.24214035889174204,
+          "away": 0.3605714533786977
+        },
+        "fair_odds": {
+          "home": 2.517064516100629,
+          "draw": 4.1298361189226105,
+          "away": 2.7733754034868894
+        },
+        "actual_result": "draw",
+        "candidate": null
+      },
+      {
+        "event_id": "evt_football_20250816_brighton_fulham",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Brighton",
+        "away_team": "Fulham",
+        "probabilities": {
+          "home": 0.4600354388747101,
+          "draw": 0.2420258242234778,
+          "away": 0.29793873690181283
+        },
+        "fair_odds": {
+          "home": 2.1737455758758366,
+          "draw": 4.131790494706204,
+          "away": 3.3563947085187347
+        },
+        "actual_result": "draw",
+        "candidate": {
+          "competition_id": "ENG1",
+          "selection": "away",
+          "available_price": 4.33,
+          "fair_probability": 0.29793873690181283,
+          "fair_odds": 3.3563947085187347,
+          "edge": 0.06699185468472277,
+          "unit_return": -1.0,
+          "edge_bucket": "5-8%"
+        }
+      },
+      {
+        "event_id": "evt_football_20250816_tottenham_burnley",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Tottenham",
+        "away_team": "Burnley",
+        "probabilities": {
+          "home": 0.6056487585812369,
+          "draw": 0.20477339292852503,
+          "away": 0.1895778484902383
+        },
+        "fair_odds": {
+          "home": 1.651122017227528,
+          "draw": 4.883446944442847,
+          "away": 5.274877882430931
+        },
+        "actual_result": "home",
+        "candidate": null
+      },
+      {
+        "event_id": "evt_football_20250816_wolves_man_city",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Wolves",
+        "away_team": "Man City",
+        "probabilities": {
+          "home": 0.1628275976227102,
+          "draw": 0.2034236830883332,
+          "away": 0.6337487192889565
+        },
+        "fair_odds": {
+          "home": 6.141465050151462,
+          "draw": 4.915848463749264,
+          "away": 1.5779124589347722
+        },
+        "actual_result": "away",
+        "candidate": null
+      }
+    ]
+  }
+}

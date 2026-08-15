@@ -1,0 +1,24 @@
+{
+  "agents": [
+    {
+      "agent_id": "T01",
+      "zone": "A_BLIND",
+      "allowed_features": [
+        "player_a",
+        "player_b"
+      ],
+      "description": "Reference tennis Elo player-strength agent."
+    },
+    {
+      "agent_id": "T19",
+      "zone": "A_BLIND",
+      "allowed_features": [
+        "hold_break",
+        "serve_point_prob_a",
+        "serve_point_prob_b",
+        "upstream_dq"
+      ],
+      "description": "Reference tennis point-level simulator."
+    }
+  ]
+}

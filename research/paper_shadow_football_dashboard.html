@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sports AI Paper Shadow Dashboard</title>
+  <style>
+    :root {
+      --bg: #f6f1e8;
+      --panel: #fffaf2;
+      --ink: #1b1815;
+      --muted: #62584d;
+      --accent: #0f766e;
+      --accent-soft: #d6f3ef;
+      --border: #dbcdb9;
+      --good: #166534;
+      --warn: #9a3412;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background:
+        radial-gradient(circle at top left, #f9e5b5 0%, transparent 30%),
+        linear-gradient(180deg, #f3ede2 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 2.2rem;
+      letter-spacing: 0.02em;
+    }
+    .sub {
+      color: var(--muted);
+      margin-bottom: 24px;
+      max-width: 760px;
+      line-height: 1.5;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 12px 30px rgba(60, 46, 20, 0.08);
+    }
+    .card {
+      padding: 16px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+    .value {
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+    .panel {
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .panel h2 {
+      margin-top: 0;
+      font-size: 1.2rem;
+    }
+    .assessment {
+      margin: 0;
+      padding-left: 18px;
+      line-height: 1.55;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: #fdf8ef;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .legend div {
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      border: 1px solid #9fd8d2;
+    }
+    .foot {
+      color: var(--muted);
+      margin-top: 18px;
+      line-height: 1.5;
+    }
+    @media (max-width: 720px) {
+      .wrap {
+        padding: 20px 14px 36px;
+      }
+      h1 {
+        font-size: 1.7rem;
+      }
+      table {
+        font-size: 0.85rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Paper / Shadow Review Dashboard</h1>
+    <p class="sub">
+      This view is for judging whether the current lane looks promising. Read CLV first,
+      calibration second, and ROI only after that. A lane is good when it beats the close
+      over a real sample and the probabilities are not obviously miscalibrated.
+    </p>
+
+    <section class="grid">
+      <div class="card"><div class="label">Candidates</div><div class="value">27</div></div>
+<div class="card"><div class="label">Watches</div><div class="value">0</div></div>
+<div class="card"><div class="label">Passes</div><div class="value">0</div></div>
+<div class="card"><div class="label">Avg CLV</div><div class="value">N/A</div></div>
+<div class="card"><div class="label">CLV Sample</div><div class="value">0</div></div>
+<div class="card"><div class="label">ROI / Bet</div><div class="value">-0.636</div></div>
+<div class="card"><div class="label">Win Rate</div><div class="value">+18.52%</div></div>
+<div class="card"><div class="label">Brier</div><div class="value">0.1322</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Assessment</h2>
+      <ul class="assessment">
+        <li>Funnel: 27 candidates, 0 watches, 0 passes.</li>
+<li>CLV: unavailable for the historical close-only rows in this lane, so judge these on outcome and calibration until entry-time prices exist.</li>
+<li>Prediction quality: log loss 0.4363, Brier 0.1322.</li>
+<li>Calibration: not enough settled volume yet for a trustworthy slope.</li>
+<li>Returns: -17.18 units total, -0.636 units per settled bet, win rate 18.5%.</li>
+<li>Candidate quality: avg edge +1.61%, avg data quality 0.8, avg uncertainty 0.18.</li>
+<li>Action: keep logging; the main goal right now is to gather enough graded observations.</li>
+      </ul>
+      <div class="legend">
+        <div><strong>Good:</strong> average CLV is positive across a decent sample, and calibration is not obviously broken.</div>
+        <div><strong>Weak:</strong> CLV is flat or negative even when a few bets win.</div>
+        <div><strong>Too Early:</strong> very small sample, so the right action is keep logging rather than overreacting.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Decision Ledger</h2>
+      <table><thead><tr><th>created_at</th><th>event_id</th><th>competition</th><th>market</th><th>selection</th><th>available_price</th><th>closing_price</th><th>fair_probability</th><th>edge</th><th>decision</th><th>result_status</th><th>settlement</th><th>clv</th></tr></thead><tbody><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250928_barcelona_sociedad</td><td>ESP1</td><td>1X2</td><td>home_Barcelona_Sociedad</td><td>1.360</td><td>N/A</td><td>+75.82%</td><td>+2.29%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>WIN</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250914_osasuna_vallecano</td><td>ESP1</td><td>1X2</td><td>home_Osasuna_Vallecano</td><td>2.800</td><td>N/A</td><td>+36.66%</td><td>+0.94%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>WIN</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20251026_bournemouth_nott_m_forest</td><td>ENG1</td><td>1X2</td><td>draw_Bournemouth_Nott&#x27;m Forest</td><td>3.750</td><td>N/A</td><td>+27.33%</td><td>+0.66%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20251004_arsenal_west_ham</td><td>ENG1</td><td>1X2</td><td>draw_Arsenal_West Ham</td><td>8.000</td><td>N/A</td><td>+13.68%</td><td>+1.18%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250920_wolves_leeds</td><td>ENG1</td><td>1X2</td><td>home_Wolves_Leeds</td><td>3.100</td><td>N/A</td><td>+34.17%</td><td>+1.91%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250927_chelsea_brighton</td><td>ENG1</td><td>1X2</td><td>home_Chelsea_Brighton</td><td>2.000</td><td>N/A</td><td>+51.25%</td><td>+1.25%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250816_aston_villa_newcastle</td><td>ENG1</td><td>1X2</td><td>home_Aston Villa_Newcastle</td><td>2.450</td><td>N/A</td><td>+41.96%</td><td>+1.14%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20251019_celta_sociedad</td><td>ESP1</td><td>1X2</td><td>away_Celta_Sociedad</td><td>3.900</td><td>N/A</td><td>+27.45%</td><td>+1.80%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250921_vallecano_celta</td><td>ESP1</td><td>1X2</td><td>away_Vallecano_Celta</td><td>3.900</td><td>N/A</td><td>+27.61%</td><td>+1.97%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250920_brighton_tottenham</td><td>ENG1</td><td>1X2</td><td>away_Brighton_Tottenham</td><td>3.300</td><td>N/A</td><td>+31.32%</td><td>+1.02%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250831_celta_villarreal</td><td>ESP1</td><td>1X2</td><td>home_Celta_Villarreal</td><td>3.200</td><td>N/A</td><td>+32.96%</td><td>+1.71%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250914_barcelona_valencia</td><td>ESP1</td><td>1X2</td><td>home_Barcelona_Valencia</td><td>1.360</td><td>N/A</td><td>+75.78%</td><td>+2.25%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>WIN</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250831_aston_villa_crystal_palace</td><td>ENG1</td><td>1X2</td><td>home_Aston Villa_Crystal Palace</td><td>2.150</td><td>N/A</td><td>+48.20%</td><td>+1.68%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250925_osasuna_elche</td><td>ESP1</td><td>1X2</td><td>away_Osasuna_Elche</td><td>5.000</td><td>N/A</td><td>+20.52%</td><td>+0.52%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250831_espanol_osasuna</td><td>ESP1</td><td>1X2</td><td>home_Espanol_Osasuna</td><td>2.550</td><td>N/A</td><td>+40.87%</td><td>+1.66%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>WIN</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20251019_liverpool_man_united</td><td>ENG1</td><td>1X2</td><td>home_Liverpool_Man United</td><td>1.700</td><td>N/A</td><td>+60.03%</td><td>+1.21%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250815_girona_vallecano</td><td>ESP1</td><td>1X2</td><td>home_Girona_Vallecano</td><td>2.450</td><td>N/A</td><td>+42.68%</td><td>+1.86%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250817_nott_m_forest_brentford</td><td>ENG1</td><td>1X2</td><td>away_Nott&#x27;m Forest_Brentford</td><td>4.200</td><td>N/A</td><td>+26.42%</td><td>+2.61%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20251101_tottenham_chelsea</td><td>ENG1</td><td>1X2</td><td>home_Tottenham_Chelsea</td><td>3.100</td><td>N/A</td><td>+34.42%</td><td>+2.16%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250830_leeds_newcastle</td><td>ENG1</td><td>1X2</td><td>home_Leeds_Newcastle</td><td>3.900</td><td>N/A</td><td>+30.75%</td><td>+5.11%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250822_west_ham_chelsea</td><td>ENG1</td><td>1X2</td><td>away_West Ham_Chelsea</td><td>1.750</td><td>N/A</td><td>+58.33%</td><td>+1.19%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>WIN</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250924_getafe_alaves</td><td>ESP1</td><td>1X2</td><td>away_Getafe_Alaves</td><td>4.500</td><td>N/A</td><td>+24.65%</td><td>+2.43%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250816_mallorca_barcelona</td><td>ESP1</td><td>1X2</td><td>home_Mallorca_Barcelona</td><td>9.500</td><td>N/A</td><td>+11.52%</td><td>+1.00%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20251020_west_ham_brentford</td><td>ENG1</td><td>1X2</td><td>home_West Ham_Brentford</td><td>2.800</td><td>N/A</td><td>+37.09%</td><td>+1.38%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250927_tottenham_wolves</td><td>ENG1</td><td>1X2</td><td>away_Tottenham_Wolves</td><td>6.500</td><td>N/A</td><td>+16.33%</td><td>+0.95%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250830_wolves_everton</td><td>ENG1</td><td>1X2</td><td>home_Wolves_Everton</td><td>3.400</td><td>N/A</td><td>+30.27%</td><td>+0.85%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr><tr><td>2026-08-14T17:24:04+00:00</td><td>evt_football_20250824_osasuna_valencia</td><td>ESP1</td><td>1X2</td><td>away_Osasuna_Valencia</td><td>3.400</td><td>N/A</td><td>+30.14%</td><td>+0.72%</td><td>BET_CANDIDATE</td><td>SETTLED</td><td>LOSS</td><td>N/A</td></tr></tbody></table>
+    </section>
+
+    <p class="foot">
+      Interpretation rule: if you see strong short-term wins but weak CLV, treat that as bad.
+      If you see temporary losses but positive CLV, that can still be good. The close is the
+      main truth source for whether the lane is finding real price value.
+    </p>
+  </div>
+</body>
+</html>

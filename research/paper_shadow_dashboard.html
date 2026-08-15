@@ -1,0 +1,1275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sports Edge AI - Live Research Dashboard</title>
+  <style>
+    :root {
+      --ink: #171c1f;
+      --muted: #5f6b71;
+      --paper: #f8f5ee;
+      --panel: rgba(255, 252, 246, 0.92);
+      --line: #d6cec1;
+      --accent: #0d5c63;
+      --accent-soft: #dff0ef;
+      --olive: #4d6b50;
+      --sand: #c89d66;
+      --rose: #9b4f3f;
+      --shadow: 0 18px 40px rgba(32, 27, 18, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(200, 157, 102, 0.24), transparent 28%),
+        radial-gradient(circle at top right, rgba(13, 92, 99, 0.18), transparent 24%),
+        linear-gradient(180deg, #f2ede3 0%, var(--paper) 100%);
+      font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+    }
+    h1, h2, h3 {
+      font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      margin: 0;
+      letter-spacing: 0.01em;
+    }
+    p {
+      margin: 0;
+    }
+    .shell {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 28px 18px 42px;
+    }
+    .hero {
+      background: linear-gradient(135deg, rgba(13, 92, 99, 0.96), rgba(23, 28, 31, 0.94));
+      color: #f9f7f2;
+      border-radius: 28px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -10% -40% auto;
+      width: 340px;
+      height: 340px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255,255,255,0.14), transparent 65%);
+      pointer-events: none;
+    }
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+    .hero-copy {
+      max-width: 820px;
+    }
+    .hero-copy h1 {
+      font-size: clamp(2rem, 4vw, 3.2rem);
+      margin-bottom: 10px;
+    }
+    .hero-copy p {
+      color: rgba(249, 247, 242, 0.84);
+      line-height: 1.55;
+      max-width: 760px;
+    }
+    .hero-meta {
+      display: grid;
+      gap: 8px;
+      min-width: 240px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(10px);
+    }
+    .hero-meta strong {
+      font-size: 0.95rem;
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .hero .eyebrow {
+      color: rgba(249, 247, 242, 0.76);
+    }
+    .tabs {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 18px 0 22px;
+    }
+    .tab-button {
+      border: 1px solid var(--line);
+      background: rgba(255, 252, 246, 0.8);
+      color: var(--ink);
+      padding: 10px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .tab-button:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+    }
+    .tab-button.active {
+      background: var(--accent);
+      color: #f7f4ef;
+      border-color: var(--accent);
+    }
+    .tab-panel {
+      display: none;
+      animation: fadeIn 180ms ease;
+    }
+    .tab-panel.active {
+      display: block;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .status-grid, .results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .stat-card, .panel, .model-card, .flow-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+    }
+    .stat-card {
+      padding: 16px 18px;
+    }
+    .stat {
+      margin-top: 8px;
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: var(--accent);
+    }
+    .panel {
+      padding: 22px;
+      margin-bottom: 18px;
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .muted-copy {
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1.8fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+    .match-callout {
+      border-radius: 20px;
+      padding: 18px;
+      background: linear-gradient(180deg, rgba(13, 92, 99, 0.08), rgba(13, 92, 99, 0.02));
+      border: 1px solid rgba(13, 92, 99, 0.16);
+    }
+    .callout-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .callout-value {
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin-bottom: 10px;
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .metric {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(13, 92, 99, 0.12);
+      background: rgba(255, 255, 255, 0.55);
+    }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.83rem;
+      margin-bottom: 6px;
+    }
+    .metric strong {
+      font-size: 1.1rem;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .detail-block {
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(13, 92, 99, 0.10);
+    }
+    .detail-block h3 {
+      margin-bottom: 12px;
+      font-size: 1.05rem;
+    }
+    .detail-list, .assessment-list, .trail, .metric-list {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .detail-list li, .assessment-list li {
+      margin-bottom: 8px;
+      line-height: 1.45;
+    }
+    .trail {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 14px;
+    }
+    .trail-step {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .trail-step p {
+      margin-top: 4px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .trail-bullet {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      margin-top: 6px;
+      background: linear-gradient(180deg, var(--sand), var(--accent));
+      box-shadow: 0 0 0 5px rgba(13, 92, 99, 0.08);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .badge-good {
+      background: rgba(77, 107, 80, 0.12);
+      color: var(--olive);
+      border: 1px solid rgba(77, 107, 80, 0.22);
+    }
+    .badge-watch {
+      background: rgba(200, 157, 102, 0.16);
+      color: #875b24;
+      border: 1px solid rgba(200, 157, 102, 0.26);
+    }
+    .badge-muted {
+      background: rgba(95, 107, 113, 0.12);
+      color: var(--muted);
+      border: 1px solid rgba(95, 107, 113, 0.18);
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.94rem;
+    }
+    .data-table th, .data-table td {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid rgba(214, 206, 193, 0.75);
+      vertical-align: top;
+    }
+    .data-table th {
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      background: rgba(255, 255, 255, 0.65);
+      position: sticky;
+      top: 0;
+    }
+    .row-sub {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-top: 4px;
+      line-height: 1.35;
+    }
+    .model-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    .model-card {
+      padding: 18px;
+    }
+    .metric-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .metric-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      line-height: 1.4;
+    }
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .flow-card {
+      padding: 18px;
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.9)),
+        linear-gradient(135deg, rgba(200, 157, 102, 0.08), rgba(13, 92, 99, 0.08));
+    }
+    .flow-card h3 {
+      margin: 8px 0 10px;
+    }
+    .flow-card p {
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .lock-chip {
+      margin-top: 14px;
+      display: inline-flex;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(13, 92, 99, 0.12);
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .footer-note {
+      margin-top: 16px;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 0.94rem;
+    }
+    @media (max-width: 980px) {
+      .hero-grid, .detail-grid, .flow-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 720px) {
+      .shell {
+        padding: 16px 12px 28px;
+      }
+      .hero {
+        padding: 20px;
+        border-radius: 22px;
+      }
+      .panel, .model-card {
+        padding: 18px;
+      }
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+      .data-table {
+        font-size: 0.86rem;
+      }
+      .data-table th, .data-table td {
+        padding: 10px 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-top">
+        <div class="hero-copy">
+          <div class="eyebrow">Sports Edge AI</div>
+          <h1>Live Research Dashboard</h1>
+          <p>
+            This client view shows what the system is doing today, why a match qualified or failed,
+            how the lock-and-audit chain works, and where the football model stands historically.
+            The goal is disciplined evidence gathering first, not forced picks.
+          </p>
+        </div>
+        <div class="hero-meta">
+          <strong>Generated Aug 15, 2026 16:35 UTC</strong>
+          <span>Live model: poisson_1x2_v3 | Run date: 2026-08-15 | Saved: Aug 15, 2026 12:48 UTC</span>
+          <span>Client reading rule: look at edge and process today, then CLV and calibration as the sample grows.</span>
+        </div>
+      </div>
+    </section>
+
+    <nav class="tabs" aria-label="Dashboard sections">
+      <button class="tab-button active" data-tab="today">Today</button>
+      <button class="tab-button" data-tab="candidates">Candidates</button>
+      <button class="tab-button" data-tab="results">Results</button>
+      <button class="tab-button" data-tab="models">Models</button>
+      <button class="tab-button" data-tab="process">How It Works</button>
+    </nav>
+
+    <section id="today" class="tab-panel active">
+      <div class="status-grid">
+        <div class="stat-card"><div class="eyebrow">Verified Fixtures</div><div class="stat">34</div></div>
+<div class="stat-card"><div class="eyebrow">Blind Predictions</div><div class="stat">5</div></div>
+<div class="stat-card"><div class="eyebrow">Market Snapshots</div><div class="stat">5</div></div>
+<div class="stat-card"><div class="eyebrow">Valid Candidates</div><div class="stat">1</div></div>
+<div class="stat-card"><div class="eyebrow">Late Snapshots Rejected</div><div class="stat">1</div></div>
+<div class="stat-card"><div class="eyebrow">Invalidated Audit Rows</div><div class="stat">2</div></div>
+      </div>
+      
+    <section class="panel hero-panel">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Today's live result</div>
+          <h2>Portsmouth vs QPR</h2>
+        </div>
+        <span class="badge badge-good">PAPER SHADOW CANDIDATE</span>
+      </div>
+      <div class="hero-grid">
+        <div class="match-callout">
+          <div class="callout-title">Recommendation</div>
+          <div class="callout-value">Home - PAPER/SHADOW</div>
+          <p class="muted-copy">best edge +3.55% on home</p>
+        </div>
+        <div class="metric-grid">
+          <div class="metric"><span>Bookmaker odds</span><strong>2.40</strong></div>
+          <div class="metric"><span>Fair odds</span><strong>2.21</strong></div>
+          <div class="metric"><span>Model probability</span><strong>45.2%</strong></div>
+          <div class="metric"><span>Market break-even</span><strong>41.7%</strong></div>
+          <div class="metric"><span>De-vig market probability</span><strong>N/A</strong></div>
+          <div class="metric"><span>Edge</span><strong>+3.55%</strong></div>
+          <div class="metric"><span>Robust edge</span><strong>N/A</strong></div>
+          <div class="metric"><span>Data quality</span><strong>79%</strong></div>
+          <div class="metric"><span>Confidence</span><strong>Moderate</strong></div>
+          <div class="metric"><span>Kickoff</span><strong>Aug 15, 2026 14:00 UTC</strong></div>
+          <div class="metric"><span>Reason code</span><strong>N/A</strong></div>
+        </div>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-block">
+          <h3>Why it qualified</h3>
+          <ul class="detail-list">
+            <li>Independent model probability: 45.2%</li>
+            <li>Bookmaker price: 2.40</li>
+            <li>Calculated edge: +3.55%</li>
+            <li>Model vs de-vig market: N/A</li>
+            <li>Expected value: N/A</li>
+            <li>Bookmaker overround: N/A</li>
+            <li>Price source tier: SECONDARY_BOOKMAKER_LISTING</li>
+          </ul>
+        </div>
+        <div class="detail-block">
+          <h3>Risk flags</h3>
+          <ul class="detail-list">
+            <li>Model fit did not fully converge, so confidence is reduced.</li><li>Price came from a secondary bookmaker listing and should be checked against the book before real staking.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+    
+      
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Candidate Lifecycle</h2>
+          <p class="muted-copy">This is the full evidence chain the client ultimately cares about: candidate, price capture, closing line, result, and interpretation.</p>
+        </div>
+      </div>
+      <div class="results-grid">
+        <div class="stat-card"><div class="eyebrow">Entry Price</div><div class="stat">2.40</div></div>
+        <div class="stat-card"><div class="eyebrow">Closing Price</div><div class="stat">N/A</div></div>
+        <div class="stat-card"><div class="eyebrow">CLV</div><div class="stat">Pending</div></div>
+        <div class="stat-card"><div class="eyebrow">Result</div><div class="stat">LOSS</div></div>
+        <div class="stat-card"><div class="eyebrow">Paper Result</div><div class="stat">-1.00u</div></div>
+        <div class="stat-card"><div class="eyebrow">Lifecycle Status</div><div class="stat">Result captured; waiting for close confirmation.</div></div>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-block">
+          <h3>Interpretation</h3>
+          <p class="muted-copy">The candidate is live and locked, but the evidence is not graded yet. The paper result lost.</p>
+        </div>
+        <div class="detail-block">
+          <h3>Operator Reference</h3>
+          <ul class="detail-list">
+            <li>Decision ID: dec_833f043bce634a14afdae258351cea92</li>
+            <li>Outcome updated: Aug 15, 2026 16:33 UTC</li>
+            <li>Created: Aug 15, 2026 12:48 UTC</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+    
+      
+    <section class="panel">
+      <div class="panel-head">
+        <div><h2>System Audit Trail</h2></div>
+      </div>
+      <ul class="trail">
+        
+        <li class="trail-step">
+          <div class="trail-bullet"></div>
+          <div>
+            <strong>Sports analysis complete</strong>
+            <p>Blind probabilities generated before market comparison. Home probability 45.2%.</p>
+          </div>
+        </li>
+        
+        <li class="trail-step">
+          <div class="trail-bullet"></div>
+          <div>
+            <strong>Prediction locked</strong>
+            <p>Prediction hash cf0612694c11.</p>
+          </div>
+        </li>
+        
+        <li class="trail-step">
+          <div class="trail-bullet"></div>
+          <div>
+            <strong>Market captured</strong>
+            <p>Bet365 snapshot 2.40 captured Aug 15, 2026 12:34 UTC.</p>
+          </div>
+        </li>
+        
+        <li class="trail-step">
+          <div class="trail-bullet"></div>
+          <div>
+            <strong>Market locked</strong>
+            <p>Market hash 32ac667b7b13.</p>
+          </div>
+        </li>
+        
+        <li class="trail-step">
+          <div class="trail-bullet"></div>
+          <div>
+            <strong>Final decision recorded</strong>
+            <p>Status PAPER SHADOW CANDIDATE because best edge +3.55% on home.</p>
+          </div>
+        </li>
+        
+      </ul>
+    </section>
+    
+    </section>
+
+    <section id="candidates" class="tab-panel">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Pass | Watch | Candidate</h2>
+            <p class="muted-copy">These are the matches that reached the analysis stage today. The system is allowed to return zero valid candidates if the gates are not met.</p>
+          </div>
+        </div>
+        
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>Status</th>
+          <th>Reason</th>
+          <th>Model H / D / A</th>
+          <th>Best Edge</th>
+          <th>Reason Code</th>
+          <th>Overround</th>
+          <th>Data Quality</th>
+          <th>Market Time</th>
+          <th>Remarks</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+            <tr>
+              <td>
+                <strong>Portsmouth vs QPR</strong>
+                <div class="row-sub">Championship</div>
+              </td>
+              <td><span class="badge badge-good">PAPER SHADOW CANDIDATE</span></td>
+              <td>best edge +3.55% on home</td>
+              <td>45.2% / 25.9% / 28.9%</td>
+              <td>Home +3.55% / robust N/A</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>79%</td>
+              <td>Aug 15, 2026 12:34 UTC</td>
+              <td>Model fit did not fully converge, so confidence is reduced.; Price came from a secondary bookmaker listing and should be checked against the book before real staking.</td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Bristol City vs Millwall</strong>
+                <div class="row-sub">Championship</div>
+              </td>
+              <td><span class="badge badge-muted">PASS</span></td>
+              <td>no selection cleared the current blind edge threshold</td>
+              <td>40.5% / 28.0% / 31.5%</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>79%</td>
+              <td>Aug 15, 2026 12:34 UTC</td>
+              <td>Model fit did not fully converge, so confidence is reduced.; Price came from a secondary bookmaker listing and should be checked against the book before real staking.</td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Chesterfield vs Fleetwood Town</strong>
+                <div class="row-sub">League Two</div>
+              </td>
+              <td><span class="badge badge-muted">PASS</span></td>
+              <td>no selection cleared the current blind edge threshold</td>
+              <td>46.6% / 25.5% / 28.0%</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>80%</td>
+              <td>Aug 15, 2026 12:34 UTC</td>
+              <td>Model fit did not fully converge, so confidence is reduced.; Price came from a secondary bookmaker listing and should be checked against the book before real staking.</td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Gillingham vs Walsall</strong>
+                <div class="row-sub">League Two</div>
+              </td>
+              <td><span class="badge badge-muted">PASS</span></td>
+              <td>no selection cleared the current blind edge threshold</td>
+              <td>37.0% / 28.5% / 34.4%</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>80%</td>
+              <td>Aug 15, 2026 12:34 UTC</td>
+              <td>Model fit did not fully converge, so confidence is reduced.; Price came from a secondary bookmaker listing and should be checked against the book before real staking.</td>
+            </tr>
+            
+            <tr>
+              <td>
+                <strong>Newport County vs Rochdale</strong>
+                <div class="row-sub">League Two</div>
+              </td>
+              <td><span class="badge badge-muted">PASS</span></td>
+              <td>market snapshot captured at/after kickoff; invalid for pre-match decision</td>
+              <td>41.7% / 26.1% / 32.2%</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>N/A</td>
+              <td>80%</td>
+              <td>Aug 15, 2026 12:34 UTC</td>
+              <td>Late market snapshot was blocked from pre-match use.; Model fit did not fully converge, so confidence is reduced.; Price came from a secondary bookmaker listing and should be checked against the book before real staking.</td>
+            </tr>
+            
+      </tbody>
+    </table>
+    
+      </section>
+    </section>
+
+    <section id="results" class="tab-panel">
+      <div class="results-grid">
+        <div class="stat-card"><div class="eyebrow">Paper/Shadow Candidates</div><div class="stat">1</div></div>
+<div class="stat-card"><div class="eyebrow">Settled Candidate Bets</div><div class="stat">28</div></div>
+<div class="stat-card"><div class="eyebrow">Average Model Edge</div><div class="stat">+1.68%</div></div>
+<div class="stat-card"><div class="eyebrow">Average CLV</div><div class="stat">N/A</div></div>
+<div class="stat-card"><div class="eyebrow">Win Rate</div><div class="stat">17.9%</div></div>
+<div class="stat-card"><div class="eyebrow">Current Live Model</div><div class="stat">poisson_1x2_v3</div></div>
+      </div>
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Performance &amp; Remarks</h2>
+            <p class="muted-copy">CLV matters more than short-term wins. ROI stays secondary until the live sample is large enough.</p>
+          </div>
+        </div>
+        <ul class="assessment-list">
+          <li>Funnel: 1 live candidates, 27 research signals, 0 watches, 0 passes.</li><li>Audit: 2 row(s) were invalidated by review and are excluded from candidate counts and performance.</li><li>Classification: historical close-only rows are tracked as research signals, separate from live paper/shadow candidates.</li><li>CLV: unavailable for the historical close-only rows in this lane, so judge these on outcome and calibration until entry-time prices exist.</li><li>Prediction quality: log loss 0.4422, Brier 0.1348.</li><li>Calibration: slope 1.08, which is close to well-calibrated.</li><li>Returns: -18.18 units total, -0.649 units per settled bet, win rate 17.9%.</li><li>Candidate quality: avg edge +1.68%, avg data quality 0.8, avg uncertainty 0.21.</li><li>Action: keep logging; the main goal right now is to gather enough graded observations.</li>
+        </ul>
+      </section>
+      
+    <section class="panel">
+      <div class="panel-head">
+        <div><h2>How to judge results</h2></div>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-block">
+          <h3>Good</h3>
+          <ul class="detail-list">
+            <li>Average CLV is positive across a growing real sample.</li>
+            <li>Calibration and Brier stay stable instead of collapsing by league or outcome type.</li>
+            <li>The system keeps rejecting bad or late data instead of forcing picks.</li>
+          </ul>
+        </div>
+        <div class="detail-block">
+          <h3>Too early or weak</h3>
+          <ul class="detail-list">
+            <li>Few or no settled observations means today is still evidence gathering.</li>
+            <li>Negative CLV over time is a stronger warning than a short win streak.</li>
+            <li>One live candidate proves the platform works operationally, not that the edge is proven.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted-copy">Current CLV read: No closing-line sample yet. Use today primarily to confirm process discipline and logging quality.</p>
+    </section>
+    
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Decision Ledger</h2>
+            <p class="muted-copy">Superseded or invalidated rows remain auditable, but they are excluded from valid-candidate performance counts.</p>
+          </div>
+        </div>
+        
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Created</th>
+          <th>Event</th>
+          <th>Decision</th>
+          <th>Selection</th>
+          <th>Entry</th>
+          <th>Close</th>
+          <th>Edge</th>
+          <th>Settlement</th>
+          <th>Remarks</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+            <tr>
+              <td>Aug 15, 2026 12:35 UTC</td>
+              <td>evt_football_20260815_portsmouth_qpr</td>
+              <td><span class="badge badge-good">PAPER SHADOW CANDIDATE</span></td>
+              <td>Home Portsmouth Qpr</td>
+              <td>2.40</td>
+              <td>N/A</td>
+              <td>+3.55%</td>
+              <td>CANCELLED</td>
+              <td>Invalidated</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 12:35 UTC</td>
+              <td>evt_football_20260815_newport_county_rochdale</td>
+              <td><span class="badge badge-good">PAPER SHADOW CANDIDATE</span></td>
+              <td>Home Newport County Rochdale</td>
+              <td>2.75</td>
+              <td>N/A</td>
+              <td>+5.29%</td>
+              <td>CANCELLED</td>
+              <td>Invalidated</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 12:48 UTC</td>
+              <td>evt_football_20260815_portsmouth_qpr</td>
+              <td><span class="badge badge-good">PAPER SHADOW CANDIDATE</span></td>
+              <td>Home Portsmouth Qpr</td>
+              <td>2.40</td>
+              <td>N/A</td>
+              <td>+3.55%</td>
+              <td>LOSS</td>
+              <td>FINAL_SCORE Portsmouth 1-3 QPR; paper selection home lost; closing_price_unavailable_at_settlement; postmortem_only_do_not_retrain_v3</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250920_wolves_leeds</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Wolves Leeds</td>
+              <td>3.10</td>
+              <td>N/A</td>
+              <td>+1.91%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250830_leeds_newcastle</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Leeds Newcastle</td>
+              <td>3.90</td>
+              <td>N/A</td>
+              <td>+5.11%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250914_osasuna_vallecano</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Osasuna Vallecano</td>
+              <td>2.80</td>
+              <td>N/A</td>
+              <td>+0.94%</td>
+              <td>WIN</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250914_barcelona_valencia</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Barcelona Valencia</td>
+              <td>1.36</td>
+              <td>N/A</td>
+              <td>+2.25%</td>
+              <td>WIN</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250830_wolves_everton</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Wolves Everton</td>
+              <td>3.40</td>
+              <td>N/A</td>
+              <td>+0.85%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250822_west_ham_chelsea</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away West Ham Chelsea</td>
+              <td>1.75</td>
+              <td>N/A</td>
+              <td>+1.19%</td>
+              <td>WIN</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250831_aston_villa_crystal_palace</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Aston Villa Crystal Palace</td>
+              <td>2.15</td>
+              <td>N/A</td>
+              <td>+1.68%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250816_mallorca_barcelona</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Mallorca Barcelona</td>
+              <td>9.50</td>
+              <td>N/A</td>
+              <td>+1.00%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250831_celta_villarreal</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Celta Villarreal</td>
+              <td>3.20</td>
+              <td>N/A</td>
+              <td>+1.71%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250815_girona_vallecano</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Girona Vallecano</td>
+              <td>2.45</td>
+              <td>N/A</td>
+              <td>+1.86%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250920_brighton_tottenham</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Brighton Tottenham</td>
+              <td>3.30</td>
+              <td>N/A</td>
+              <td>+1.02%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250831_espanol_osasuna</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Espanol Osasuna</td>
+              <td>2.55</td>
+              <td>N/A</td>
+              <td>+1.66%</td>
+              <td>WIN</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250921_vallecano_celta</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Vallecano Celta</td>
+              <td>3.90</td>
+              <td>N/A</td>
+              <td>+1.97%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250816_aston_villa_newcastle</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Aston Villa Newcastle</td>
+              <td>2.45</td>
+              <td>N/A</td>
+              <td>+1.14%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250817_nott_m_forest_brentford</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Nott&#x27;M Forest Brentford</td>
+              <td>4.20</td>
+              <td>N/A</td>
+              <td>+2.61%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250824_osasuna_valencia</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Osasuna Valencia</td>
+              <td>3.40</td>
+              <td>N/A</td>
+              <td>+0.72%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250925_osasuna_elche</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Osasuna Elche</td>
+              <td>5.00</td>
+              <td>N/A</td>
+              <td>+0.52%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250924_getafe_alaves</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Getafe Alaves</td>
+              <td>4.50</td>
+              <td>N/A</td>
+              <td>+2.43%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20251019_celta_sociedad</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Celta Sociedad</td>
+              <td>3.90</td>
+              <td>N/A</td>
+              <td>+1.80%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20251101_tottenham_chelsea</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Tottenham Chelsea</td>
+              <td>3.10</td>
+              <td>N/A</td>
+              <td>+2.16%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250928_barcelona_sociedad</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Barcelona Sociedad</td>
+              <td>1.36</td>
+              <td>N/A</td>
+              <td>+2.29%</td>
+              <td>WIN</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250927_tottenham_wolves</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Away Tottenham Wolves</td>
+              <td>6.50</td>
+              <td>N/A</td>
+              <td>+0.95%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20251004_arsenal_west_ham</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Draw Arsenal West Ham</td>
+              <td>8.00</td>
+              <td>N/A</td>
+              <td>+1.18%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20251026_bournemouth_nott_m_forest</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Draw Bournemouth Nott&#x27;M Forest</td>
+              <td>3.75</td>
+              <td>N/A</td>
+              <td>+0.66%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20251019_liverpool_man_united</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Liverpool Man United</td>
+              <td>1.70</td>
+              <td>N/A</td>
+              <td>+1.21%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20251020_west_ham_brentford</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home West Ham Brentford</td>
+              <td>2.80</td>
+              <td>N/A</td>
+              <td>+1.38%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+            <tr>
+              <td>Aug 15, 2026 13:51 UTC</td>
+              <td>evt_football_20250927_chelsea_brighton</td>
+              <td><span class="badge badge-muted">RESEARCH SIGNAL</span></td>
+              <td>Home Chelsea Brighton</td>
+              <td>2.00</td>
+              <td>N/A</td>
+              <td>+1.25%</td>
+              <td>LOSS</td>
+              <td>historical settlement from football_events.result_code</td>
+            </tr>
+            
+      </tbody>
+    </table>
+    
+      </section>
+    </section>
+
+    <section id="models" class="tab-panel">
+      
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Track B Model Progress</h2>
+          <p class="muted-copy">Research structure is now clean: v1 baseline, v2 rejected, v3 promoted, v4 still separate.</p>
+        </div>
+      </div>
+      <div class="model-grid">
+        
+            <article class="model-card">
+              <div class="panel-head">
+                <div>
+                  <div class="eyebrow">v1</div>
+                  <h3>Simple Poisson</h3>
+                </div>
+                <span class="badge badge-muted">Baseline</span>
+              </div>
+              <p class="muted-copy">Original benchmark used to judge all later football changes.</p>
+              <ul class="metric-list">
+                <li><span>Validation log loss</span><strong>1.04225</strong></li><li><span>Validation Brier</span><strong>0.62716</strong></li><li><span>Holdout log loss</span><strong>1.05684</strong></li><li><span>Holdout Brier</span><strong>0.63648</strong></li>
+              </ul>
+              <p class="row-sub"></p>
+            </article>
+            
+            <article class="model-card">
+              <div class="panel-head">
+                <div>
+                  <div class="eyebrow">v2</div>
+                  <h3>Recency Poisson</h3>
+                </div>
+                <span class="badge badge-muted">Rejected</span>
+              </div>
+              <p class="muted-copy">Recency weighting made the probability layer worse than the baseline.</p>
+              <ul class="metric-list">
+                <li><span>Validation log loss</span><strong>1.07688</strong></li><li><span>Validation Brier</span><strong>0.65161</strong></li><li><span>Holdout log loss</span><strong>1.07613</strong></li><li><span>Holdout Brier</span><strong>0.65141</strong></li>
+              </ul>
+              <p class="row-sub"></p>
+            </article>
+            
+            <article class="model-card">
+              <div class="panel-head">
+                <div>
+                  <div class="eyebrow">v3</div>
+                  <h3>Opponent-Adjusted Poisson</h3>
+                </div>
+                <span class="badge badge-good">Promoted</span>
+              </div>
+              <p class="muted-copy">First version to improve the forecasting layer on validation and holdout.</p>
+              <ul class="metric-list">
+                <li><span>Holdout log loss</span><strong>1.04542</strong></li><li><span>Holdout Brier</span><strong>0.62901</strong></li><li><span>Delta vs v1 log loss</span><strong>-0.01142</strong></li><li><span>Delta vs v1 Brier</span><strong>-0.00747</strong></li>
+              </ul>
+              <p class="row-sub">Status: PROMOTE. Holdout status: previously_observed_holdout_not_pristine.</p>
+            </article>
+            
+            <article class="model-card">
+              <div class="panel-head">
+                <div>
+                  <div class="eyebrow">v4</div>
+                  <h3>Dixon-Coles on v3 Strengths</h3>
+                </div>
+                <span class="badge badge-watch">Under Finalization</span>
+              </div>
+              <p class="muted-copy">Validation-only improvement exists, but promotion still needs controlled confirmation.</p>
+              <ul class="metric-list">
+                <li><span>Validation log loss</span><strong>1.04011</strong></li><li><span>Validation Brier</span><strong>0.62594</strong></li><li><span>Vs v3 log loss</span><strong>-0.00056</strong></li><li><span>Eligible for finalization</span><strong>Yes</strong></li>
+              </ul>
+              <p class="row-sub">Validation improved slightly; ROI remains secondary and is not used for promotion.</p>
+            </article>
+            
+      </div>
+    </section>
+    
+      <p class="footer-note">
+        Current interpretation: probability estimation is improving from v1 to v3, while the betting-policy layer is still not proven profitable.
+        That is why live paper/shadow runs and historical model validation are kept separate.
+      </p>
+    </section>
+
+    <section id="process" class="tab-panel">
+      
+    <section class="panel">
+      <div class="panel-head">
+        <div><h2>How the system thinks</h2></div>
+      </div>
+      <div class="flow-grid">
+        <article class="flow-card">
+          <div class="eyebrow">Sports analysis</div>
+          <h3>Independent fair price</h3>
+          <p>Team strength, match history, and score modelling produce a blind fair probability before bookmaker prices are considered.</p>
+          <div class="lock-chip">Prediction lock</div>
+        </article>
+        <article class="flow-card">
+          <div class="eyebrow">Bookmaker analysis</div>
+          <h3>Market snapshot</h3>
+          <p>Current 1X2 prices are captured, timestamped, and checked against kickoff timing so invalid late rows cannot leak in.</p>
+          <div class="lock-chip">Market lock</div>
+        </article>
+        <article class="flow-card">
+          <div class="eyebrow">Final decision</div>
+          <h3>Pass / Watch / Candidate</h3>
+          <p>The system compares fair price against market price, reviews edge and data quality, then records a final auditable status.</p>
+          <div class="lock-chip">Decision recorded</div>
+        </article>
+      </div>
+    </section>
+    
+      <section class="panel">
+        <div class="panel-head">
+          <div><h2>What the client should expect next</h2></div>
+        </div>
+        <div class="detail-grid">
+          <div class="detail-block">
+            <h3>Immediate live work</h3>
+            <ul class="detail-list">
+              <li>Capture closing prices and results for the active paper/shadow candidates.</li>
+              <li>Track CLV and settlement without changing already-locked decisions.</li>
+              <li>Keep using promoted v3 for live paper/shadow until v4 is formally finalized.</li>
+            </ul>
+          </div>
+          <div class="detail-block">
+            <h3>Next platform improvements</h3>
+            <ul class="detail-list">
+              <li>Finalize v4 separately and promote it only if the holdout confirmation survives.</li>
+              <li>Add richer market intelligence only after timestamped odds history is reliable.</li>
+              <li>Expand the client surface from a review dashboard into a fuller persistent platform view.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </section>
+  </div>
+  <script>
+    const buttons = document.querySelectorAll('.tab-button');
+    const panels = document.querySelectorAll('.tab-panel');
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const target = button.getAttribute('data-tab');
+        buttons.forEach((item) => item.classList.toggle('active', item === button));
+        panels.forEach((panel) => panel.classList.toggle('active', panel.id === target));
+      });
+    });
+  </script>
+</body>
+</html>

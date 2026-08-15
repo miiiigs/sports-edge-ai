@@ -1,0 +1,120 @@
+{
+  "name": "Client Progress Checklist Builder",
+  "nodes": [
+    {
+      "parameters": {
+        "color": 6,
+        "width": 520,
+        "height": 320,
+        "content": "## Setup\n\n1. Connect a Google Sheets credential in n8n.\n2. Open the **Read Progress Board** node.\n3. Replace `YOUR_SPREADSHEET_ID` with your sheet ID.\n4. Keep the tab name as `ProgressBoard`, or change it in the same node.\n5. Execute the workflow manually to generate:\n   - `progress_checklist_markdown`\n   - `client_explanation`\n   - `five_day_projection`\n\nThis workflow does not write back to your logs or docs. It only reads the sheet and returns a client-ready snapshot."
+      },
+      "id": "9f0f4f47-5732-4a4d-bfd7-d4d28ae98e7d",
+      "name": "Sticky Note - Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -920,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "color": 5,
+        "width": 620,
+        "height": 420,
+        "content": "## Required `ProgressBoard` columns\n\n- `row_type` -> `meta` or `task`\n- `key` -> used for meta rows\n- `value` -> used for meta rows\n- `task_id`\n- `title`\n- `status` -> `done`, `doing`, `next`, or `blocked`\n- `details`\n- `workstream`\n- `projected_day` -> `1` to `5`\n- `date_set` -> optional per row, usually leave blank on task rows\n- `due_date`\n- `owner`\n- `sort_order`\n\nRecommended meta rows:\n- `project_name`\n- `client_name`\n- `plan_set_date` in `YYYY-MM-DD`\n- `five_day_start_date` in `YYYY-MM-DD` if different from `plan_set_date`"
+      },
+      "id": "4b1f2d48-e8cd-4384-95f6-09423a4b1f0f",
+      "name": "Sticky Note - Sheet Schema",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -280,
+        -220
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "7fd28180-b6de-4ea6-b887-55aa517f8263",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "ProgressBoard"
+        },
+        "options": {}
+      },
+      "id": "af9791d9-b8e8-4d22-a0f8-69c83c66c388",
+      "name": "Read Progress Board",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -480,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const rows = $input.all().map((item) => item.json);\n\nconst toText = (value) => {\n  if (value === null || value === undefined) return '';\n  return String(value).trim();\n};\n\nconst toKey = (value) => toText(value).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');\n\nconst parseDate = (value) => {\n  const text = toText(value);\n  if (!text) return null;\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(text)) {\n    const parsed = new Date(`${text}T00:00:00Z`);\n    return Number.isNaN(parsed.getTime()) ? null : parsed;\n  }\n  const parsed = new Date(text);\n  return Number.isNaN(parsed.getTime()) ? null : parsed;\n};\n\nconst formatIso = (date) => {\n  if (!date) return '';\n  return date.toISOString().slice(0, 10);\n};\n\nconst formatLong = (date) => {\n  if (!date) return '';\n  return new Intl.DateTimeFormat('en-US', {\n    weekday: 'long',\n    year: 'numeric',\n    month: 'long',\n    day: 'numeric',\n    timeZone: 'UTC'\n  }).format(date);\n};\n\nconst addDays = (date, days) => {\n  const copy = new Date(date.getTime());\n  copy.setUTCDate(copy.getUTCDate() + days);\n  return copy;\n};\n\nconst normalizeStatus = (value) => {\n  const key = toKey(value);\n  if (['done', 'complete', 'completed', 'finished'].includes(key)) return 'done';\n  if (['doing', 'in_progress', 'inprogress', 'current', 'active', 'wip'].includes(key)) return 'doing';\n  if (['next', 'up_next', 'upnext', 'planned', 'todo', 'pending'].includes(key)) return 'next';\n  if (['blocked', 'blocker', 'on_hold', 'onhold'].includes(key)) return 'blocked';\n  return 'next';\n};\n\nconst meta = {};\nconst tasks = [];\n\nfor (const row of rows) {\n  const rowType = toKey(row.row_type || row.type || '');\n  const key = toKey(row.key || row.meta_key || '');\n  const value = toText(row.value || row.meta_value || '');\n  const title = toText(row.title || row.task || row.task_title || '');\n  const statusText = toText(row.status || '');\n\n  if (rowType === 'meta' || (!title && key && value)) {\n    if (key) meta[key] = value;\n    continue;\n  }\n\n  if (!title && !statusText) continue;\n\n  const projectedDayValue = parseInt(toText(row.projected_day || row.day || row.plan_day || ''), 10);\n  const sortOrderValue = parseInt(toText(row.sort_order || row.order || ''), 10);\n\n  tasks.push({\n    taskId: toText(row.task_id || row.id || ''),\n    title,\n    status: normalizeStatus(statusText),\n    rawStatus: statusText,\n    details: toText(row.details || row.description || row.notes || ''),\n    workstream: toText(row.workstream || row.track || ''),\n    projectedDay: Number.isInteger(projectedDayValue) ? projectedDayValue : null,\n    dateSet: toText(row.date_set || row.plan_set_date || ''),\n    dueDate: toText(row.due_date || ''),\n    owner: toText(row.owner || row.assignee || ''),\n    sortOrder: Number.isInteger(sortOrderValue) ? sortOrderValue : 9999\n  });\n}\n\nconst projectName = meta.project_name || 'Client Project';\nconst clientName = meta.client_name || 'Client';\nconst baseDate = parseDate(meta.five_day_start_date || meta.plan_set_date || meta.date_set || tasks.find((task) => task.dateSet)?.dateSet || '2026-08-13') || new Date('2026-08-13T00:00:00Z');\nconst reportDate = parseDate(meta.report_date) || baseDate;\n\nconst sortTasks = (list) => list.slice().sort((a, b) => {\n  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;\n  return a.title.localeCompare(b.title);\n});\n\nconst done = sortTasks(tasks.filter((task) => task.status === 'done'));\nconst doing = sortTasks(tasks.filter((task) => task.status === 'doing'));\nconst next = sortTasks(tasks.filter((task) => task.status === 'next'));\nconst blocked = sortTasks(tasks.filter((task) => task.status === 'blocked'));\n\nconst projection = Array.from({ length: 5 }, (_, index) => {\n  const dayNumber = index + 1;\n  const date = addDays(baseDate, index);\n  const items = sortTasks(tasks.filter((task) => task.projectedDay === dayNumber));\n  return {\n    day_number: dayNumber,\n    date: formatIso(date),\n    date_label: formatLong(date),\n    items\n  };\n});\n\nconst taskLine = (task) => {\n  const parts = [task.title];\n  if (task.details) parts.push(task.details);\n  if (task.workstream) parts.push(`workstream: ${task.workstream}`);\n  if (task.owner) parts.push(`owner: ${task.owner}`);\n  if (task.dueDate) parts.push(`due: ${task.dueDate}`);\n  return `- ${parts.join(' | ')}`;\n};\n\nconst renderSection = (title, list, emptyText) => {\n  if (!list.length) {\n    return `## ${title}\\n\\n- ${emptyText}`;\n  }\n  return `## ${title}\\n\\n${list.map(taskLine).join('\\n')}`;\n};\n\nconst projectionMarkdown = projection.map((day) => {\n  const header = `### Day ${day.day_number} - ${day.date_label}`;\n  const body = day.items.length ? day.items.map(taskLine).join('\\n') : '- No projected items assigned yet.';\n  return `${header}\\n\\n${body}`;\n}).join('\\n\\n');\n\nconst progressChecklistMarkdown = [\n  `# ${projectName} - Client Progress Update`,\n  '',\n  `Client: ${clientName}`,\n  `Report date: ${formatLong(reportDate)}`,\n  `Five-day plan set date: ${formatLong(baseDate)}`,\n  '',\n  renderSection('Done', done, 'No completed items recorded yet.'),\n  '',\n  renderSection('Doing Now', doing, 'No in-progress items recorded yet.'),\n  '',\n  renderSection('Next', next, 'No next items recorded yet.'),\n  '',\n  renderSection('Blocked', blocked, 'No blocked items recorded.'),\n  '',\n  '## Projected 5-Day Plan',\n  '',\n  projectionMarkdown\n].join('\\n');\n\nconst listPreview = (list, fallback) => {\n  if (!list.length) return fallback;\n  const titles = list.slice(0, 3).map((task) => task.title);\n  if (list.length <= 3) return titles.join(', ');\n  return `${titles.join(', ')}, and ${list.length - 3} more`;\n};\n\nconst statusSentence = `${projectName} currently has ${done.length} completed item(s), ${doing.length} in progress, ${next.length} queued next${blocked.length ? `, and ${blocked.length} blocked` : ''}.`;\nconst accomplishmentSentence = done.length\n  ? `Since ${formatLong(baseDate)}, the main completed work has been ${listPreview(done, 'the recorded completed tasks')}.`\n  : `No completed items have been recorded yet since ${formatLong(baseDate)}.`;\nconst currentSentence = doing.length\n  ? `Current work is focused on ${listPreview(doing, 'the active workstream list')}.`\n  : 'There are no tasks currently marked as in progress.';\nconst nextSentence = next.length\n  ? `Next up is ${listPreview(next, 'the next queued work')}.`\n  : 'There are no tasks currently marked as next.';\nconst projectionSentence = `The five-day projection is anchored to ${formatLong(baseDate)} and gives the client a dated day-by-day view of what should happen next.`;\nconst blockerSentence = blocked.length\n  ? `Blocked items to surface clearly for the client are ${listPreview(blocked, 'the blocked task list')}.`\n  : 'There are currently no blocked items listed in the progress board.';\n\nconst clientExplanation = [\n  statusSentence,\n  accomplishmentSentence,\n  currentSentence,\n  nextSentence,\n  projectionSentence,\n  blockerSentence\n].join(' ');\n\nreturn [\n  {\n    json: {\n      project_name: projectName,\n      client_name: clientName,\n      report_date: formatIso(reportDate),\n      report_date_label: formatLong(reportDate),\n      five_day_plan_set_date: formatIso(baseDate),\n      five_day_plan_set_date_label: formatLong(baseDate),\n      status_counts: {\n        done: done.length,\n        doing: doing.length,\n        next: next.length,\n        blocked: blocked.length\n      },\n      done_tasks: done,\n      doing_tasks: doing,\n      next_tasks: next,\n      blocked_tasks: blocked,\n      five_day_projection: projection,\n      client_explanation: clientExplanation,\n      progress_checklist_markdown: progressChecklistMarkdown\n    }\n  }\n];"
+      },
+      "id": "0a8045b4-5ad7-4dcf-bf0f-f964ba0c6050",
+      "name": "Build Client Progress Pack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Progress Board",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Progress Board": {
+      "main": [
+        [
+          {
+            "node": "Build Client Progress Pack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6a2e3428-9c2e-4584-bf0b-f89262b6d160",
+  "meta": {},
+  "id": "client-progress-checklist-builder",
+  "tags": []
+}

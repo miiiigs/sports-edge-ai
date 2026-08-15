@@ -1,0 +1,50 @@
+﻿[
+  {
+    "dixon_coles_rho": -0.2,
+    "predicted_count": 1832,
+    "model_log_loss": 1.0427587767150073,
+    "model_brier": 0.627891819675036,
+    "candidate_count": 1125,
+    "candidate_roi": -0.08611555555555556
+  },
+  {
+    "dixon_coles_rho": -0.15,
+    "predicted_count": 1832,
+    "model_log_loss": 1.0411920373574812,
+    "model_brier": 0.6268085873474932,
+    "candidate_count": 1018,
+    "candidate_roi": -0.11142436149312378
+  },
+  {
+    "dixon_coles_rho": -0.1,
+    "predicted_count": 1832,
+    "model_log_loss": 1.0403003743049397,
+    "model_brier": 0.6261577875137712,
+    "candidate_count": 1034,
+    "candidate_roi": -0.11138297872340426
+  },
+  {
+    "dixon_coles_rho": -0.05,
+    "predicted_count": 1832,
+    "model_log_loss": 1.0401146063638245,
+    "model_brier": 0.6259394201738679,
+    "candidate_count": 1097,
+    "candidate_roi": -0.1390975387420237
+  },
+  {
+    "dixon_coles_rho": 0.0,
+    "predicted_count": 1832,
+    "model_log_loss": 1.040671555438113,
+    "model_brier": 0.6261534853277855,
+    "candidate_count": 1171,
+    "candidate_roi": -0.14698548249359522
+  },
+  {
+    "dixon_coles_rho": 0.05,
+    "predicted_count": 1832,
+    "model_log_loss": 1.042015050325844,
+    "model_brier": 0.6267999829755215,
+    "candidate_count": 1264,
+    "candidate_roi": -0.15467563291139239
+  }
+]

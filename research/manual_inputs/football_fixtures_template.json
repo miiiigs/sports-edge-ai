@@ -1,0 +1,11 @@
+[
+  {
+    "division_code": "E1",
+    "match_date": "2026-08-15",
+    "kickoff_time": "15:00",
+    "home_team": "Example Home",
+    "away_team": "Example Away",
+    "competition_name": "Championship",
+    "source_ref": "manual_fixture_capture_2026-08-14"
+  }
+]

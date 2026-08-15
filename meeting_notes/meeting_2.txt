@@ -1,0 +1,131 @@
+[4:17 AM, 8/14/2026] Cherona Chadwick: Good news first: for the exact stats you listed — results, corners, cards, goals — across those exact leagues, the best source is free and doesn’t even need scraping.
+
+football-data.co.uk publishes downloadable CSVs covering EPL, Championship, League One, League Two, Scottish Premiership, Serie A, La Liga, Bundesliga, and Ligue 1 — with full-time/half-time scores, corners, cards (yellow/red), shots, and closing odds from multiple books. Twenty+ years of history. This is what most hobbyist betting models are built on. Download, load into Python with pandas, done. No scraping, no API fees, no terms-of-service risk.
+
+Where you’d pay — live/current-season API:
+
+Let me check current pricing since these change:
+[4:18 AM, 8/14/2026] Cherona Chadwick: For live/current data — API-Football is your fit. The free plan includes all endpoints with 100 requests per day,   which is enough to pull yesterday’s results for 9 leagues once daily if you cache properly. When you need more, $19/month gets you 7,500 requests per day   with live in-play data at 15-second update intervals — scores, events, lineups, and statistics.   Corners and cards are in their fixture statistics endpoint for the top leagues, though data quality is uneven — the European top-five leagues are comprehensive   while League Two-level detail can be thinner. Verify corner counts for the lower English leagues on the free tier before paying.
+
+Skip football-data.org for your use case — it’s free forever but covers 12 major leagues   and misses the …
+[4:18 AM, 8/14/2026] Cherona Chadwick: This make football data easy
+[4:18 AM, 8/14/2026] Miguel Leysa: Oh, yes currently I am looking into that pricing too
+[4:20 AM, 8/14/2026] Miguel Leysa: wait, you don't need the python one
+[4:21 AM, 8/14/2026] Miguel Leysa: I mean, I got you, I will do it, just looking into the api docs for proper structure
+[4:21 AM, 8/14/2026] Miguel Leysa: wait
+[4:21 AM, 8/14/2026] Cherona Chadwick: Right mindset shift — the book doesn’t gamble, it sells. Here’s the actual machinery:
+
+Who makes the odds
+Mostly nobody in-house anymore. The big brands license odds feeds from data companies — Sportradar and Genius Sports supply prices to hundreds of books. In-house trading teams then adjust for their own liability. The true origin point of most football prices is Pinnacle and the Asian markets — sharp books that take huge volume from professional bettors. Everyone else copies and shades their line.
+
+How the price is built
+
+	1.	A model produces “true” probabilities — same Poisson/xG-style math you’d build, but with better data and decades of tuning. Say City 60%, draw 22%, United 18%.
+	2.	Fair odds would be 1.67 / 4.55 / 5.55. They never publish fair odds.
+…
+[4:22 AM, 8/14/2026] Miguel Leysa: what model of claude are you using for that?
+[4:22 AM, 8/14/2026] Miguel Leysa: or you're using omniroute?
+[4:23 AM, 8/14/2026] Cherona Chadwick: Fable
+[4:23 AM, 8/14/2026] Miguel Leysa: Oh, well that explains
+[4:23 AM, 8/14/2026] Miguel Leysa: I'll take not of that, thank you
+[4:23 AM, 8/14/2026] Miguel Leysa: I'm quite low budget, but this parts are very understandable so I can assess it by eye and just reading api docs
+[4:24 AM, 8/14/2026] Miguel Leysa: but I'll push with the structure rn
+[4:24 AM, 8/14/2026] Cherona Chadwick: There’s a food chain, and almost every price you see is downstream of a few origin points.
+
+At the top: Pinnacle, the Asian books (SBOBET, IBC/Maxbet), and betting exchanges (Betfair). These are “sharp” markets — they welcome winning bettors, take enormous stakes, and run tiny margins (2–3%). Because they accept sharp money, their prices absorb the opinions of the best-informed bettors and syndicates on the planet. Price discovery happens here, the same way stock prices form on an exchange.
+
+Below them: data suppliers — Sportradar and Genius Sports being the two giants. They sell odds feeds, models, and risk services to hundreds of retail brands. A huge chunk of “different” bookmakers are running the same feed with a different skin.
+
+At the bottom: retail books (Bet365, DraftKings, FanDuel, William Hill, etc.). Their traders take the supplier feed or the sharp market price, add margin, shade it toward what their customers like to bet, and manage the book. Very few originate their own football prices from scratch — it’s not worth it when Pinnacle’s line exists.
+
+So when Bet365’s line moves at 2am with no news, what usually happened is: a syndicate hit the Asian market, Pinnacle moved, the feed updated, and every downstream book followed within seconds. That cascade is called steam.
+
+2. How the “true” probability gets modeled
+
+Before margin, someone needs a probability. For football:
+
+The base layer is goals modeling. The classic is Poisson: estimate each team’s expected goals for the match (attack strength × opponent defensive weakness × home advantage × league scoring rate), then the probability of every scoreline falls out of the Poisson distribution. Sum the scorelines and you get 1X2, over/under, BTTS, correct score, Asian handicaps — all from one expected-goals pair. This is why all those markets are internally consistent at a bookmaker: they’re one model, not twenty.
+
+Dixon-Coles is the standard refinement — it corrects Poisson’s known miss on low-scoring draws (0-0, 1-1 happen more than independent Poisson predicts) and adds time-decay so last season’s matches count less than last month’s.
+
+Modern layers on top: xG data instead of raw goals (shots are a bigger sample than goals, so the model converges on true strength faster), player availability (a starting striker out shifts expected goals measurably — this is why lineup news moves lines an hour before kickoff), referee effects for cards markets (referee identity is one of the strongest predictors of total cards — bigger than the teams in many cases), congestion/fatigue, weather for totals, and motivation spots (dead rubbers, cup distraction).
+
+Derivative markets like corners and cards are usually modeled as their own Poisson/negative-binomial processes, correlated with match state: trailing teams attack more, generating corners; high-stakes derbies generate cards. This matters for you: these models are maintained with far less love than the 1X2 model. A supplier prices ten thousand corner markets a weekend; nobody is hand-checking the League Two ones.
+
+Simulation: for anything complex (in-play, same-game parlays), books run Monte Carlo — simulate the remaining match ten thousand times from the current state and count outcomes.
+
+The honest secret: the models aren’t magic. A good public Dixon-Coles gets you 90% of the way to their pre-margin number. Their advantage is everything after the model.
+
+3. The margin, and how it’s applied unevenly
+
+Fair probabilities sum to 100%. Books scale prices so implied probabilities sum higher — 102.5% at Pinnacle, 105% at a typical retail book on a big match, 108%+ on lower leagues, 110%+ on derivative markets like corners.
+
+Two things people miss:
+
+Margin isn’t spread evenly. Books apply more shading to longshots because of the favourite-longshot bias — recreational bettors systematically overbet big prices, so books can shade a 12.0 shot down to 9.0 and the money still comes. The favourite’s price is closest to fair; the outsider’s price carries most of the margin. If your model ever says “value” on a longshot at a retail book, be extra suspicious — you’re betting into the most-shaded part of the market.
+
+Margin scales with uncertainty. Lower leagues, early lines, and obscure markets carry fat margins precisely because the book knows its own number is soft there. The margin is their insurance against being wrong. Which cuts both ways for you: more margin to overcome, but a softer underlying number to beat.
+
+4. The balanced book is mostly a myth
+
+The classic textbook story — “bookies balance both sides and lock the margin” — describes maybe 10% of reality.
+
+Real books run positions constantly. If the public hammers Liverpool and the book thinks the price is right, they don’t keep moving the line to attract Everton money — they hold the liability, because over thousands of matches, taking recreational money at a price better than fair is the edge. The margin math works in aggregate, not per match. A retail book is happy being unbalanced against casual money and terrified of being unbalanced against sharp money. Same exposure, opposite meaning.
+
+The two business models:
+
+	•	Pinnacle model: low margin, huge volume, take all comers including sharps, use sharp action as free information to sharpen your own line. Profit = small fee on massive turnover.
+	•	Retail model: high margin, market to losers, restrict winners, spend the profit on advertising and free bets. Profit = margin on a curated pool of losing customers.
+
+The retail model’s real edge isn’t math — it’s selection of who they let bet. Which brings us to:
+
+5. How they profile you
+
+Every account gets scored continuously. Signals they weight:
+
+Closing line value — the big one. They track whether the odds you took were better than where the line closed. Consistently beating the close means you’re informed, even if you’re currently losing. Books limit CLV-positive losing accounts, because the math says those accounts win eventually.
+
+What you bet — obscure leagues, derivative markets, early lines, prices that move right after you bet them (you were ahead of steam). Betting a price seconds before it drops, repeatedly, is a fingerprint.
+
+How you bet — round stakes at max limits, no parlays, no casino play, deposits and withdrawals like a business, betting at odd hours right when lines open. The dream customer bets accas on TV matches after depositing £50 on a Friday night; anything that doesn’t look like him gets reviewed.
+
+Consequences run from stake limits (“£2.50 maximum on this selection”) to price-boosting losers with bonuses to keep them playing. Sharp detection is arguably where more engineering effort goes than the odds themselves.
+
+6. Line movement, decoded
+
+	•	Steam: sharp origin market moves, everyone follows. Fast, synchronized across books.
+	•	Liability moves: one book shades its own line because of lopsided local action. Slow, isolated to that book. This creates brief windows where one book is off-market — arbers and top-down bettors live in these gaps.
+	•	News moves: lineups, injuries. The hour before kickoff when teams drop is the most violent repricing window of the day.
+	•	The close: by kickoff, the sharp market price has digested everything — models, syndicates, insider whispers, public flow. Academic studies consistently find the closing price at sharp books is the best available estimate of true probability. This is why “did I beat the close” is the professional’s KPI, not “did I win.” Winning is noisy; CLV converges fast.
+
+7. In-play machinery
+
+Live models re-simulate the match continuously from current state: score, time, red cards, live xG from the data feed. The bet delay (5–10 seconds) exists so the model can reprice before your bet is accepted — if a shot hits the post during your delay, your bet gets rejected or repriced.
+
+The latency war is real: books pay Sportradar/Genius for scouts in the stadium feeding data seconds ahead of the TV broadcast, and “courtsiders” historically exploited the same gap from the other side. If you’ve ever wondered why in-play prices flicker suspended before anything happens on your screen — the book’s feed is ahead of your stream.
+
+8. The product layer — where the real margin lives
+
+Singles on the 1X2 at 105% is the cheapest product a book sells. The money is in:
+
+	•	Parlays/accumulators: margins compound. Four legs at 105% each ≈ 21% total margin. Same-game parlays are worse — the book prices the correlations, you can’t check them, and effective margins of 20–35% are normal. This is why every ad pushes SGPs.
+	•	Cash-out: repriced with a fresh margin on exit. You pay the spread twice.
+	•	Boosts and free bets: priced to look generous, structured (stake-not-returned, min odds, playthrough) so expected cost is a fraction of face value, targeted at accounts predicted to lose.
+
+The company knows its blended margin per customer segment to the decimal. The 5% on the match odds is the loss leader.
+
+9. What this actually hands you
+
+Thinking like the casino gives you four operating rules:
+
+Your model output isn’t the product — the gap between your number and the market’s number is. The book’s process is model → margin → shade. Your process is model → compare to sharp price → bet only when the gap exceeds the margin. No gap, no bet, regardless of how confident the model feels.
+
+Judge everything on CLV, not results. You can be a losing bettor with positive CLV (keep going, variance) or a winning bettor with negative CLV (stop, you’re lucky). The books judge you this way; judge yourself the same way. Your football-data.co.uk CSVs include closing odds — your backtest scoreboard is “would my picks have beaten the Pinnacle close,” full stop.
+
+Hunt where their process is weak, not where their model is strong. Weakness lives in: derivative markets (corners/cards), lower leagues, early-week lines, and lag between the sharp origin price and slow retail copies. It does not live in Saturday 3pm EPL 1X2.
+
+Expect to be limited if you’re right. The retail books’ final defense isn’t a better model — it’s closing your account. A genuinely winning operation ends up on exchanges and Asian books, because they’re the only ones who’ll keep taking the bets. Plan for that from day one rather than discovering it at withdrawal time.
+
+And the flag for your business specifically: everything above is also the honest pitch for a tips product. “We look for gaps against the closing line in soft markets and publish our CLV” is a real, defensible offer. “We win 80% of picks” is the kind of claim the whole industry above is built on punishing — and your audience’s ability to verify your record against closing odds is exactly the test sharp customers will run on you.
+
+Want me to turn the model → CLV backtest into an actual build plan against those CSVs? That’s the next concrete step.

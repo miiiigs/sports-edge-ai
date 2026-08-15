@@ -1,0 +1,23 @@
+[6:35 AM, 8/14/2026] Cherona Chadwick: The unsexy truth: it’s the same stack as a quant hedge fund, and most of it is free.
+
+The core language — Python. Pandas/NumPy for data wrangling, scikit-learn and statsmodels for modeling, XGBoost/LightGBM for the machine-learning layer. This is the industry default now. Older shops (Smartodds era) built heavily in R — it was the statistician’s language when Dixon-Coles-style models were being written, and plenty of that code still runs in production.
+
+Where speed matters — C++ or Java. In-play pricing engines and anything latency-sensitive (repricing before the bet delay expires, live steam chasing) gets rewritten out of Python into compiled code. Some newer shops use Rust or Go for this layer.
+
+Databases:
+
+	•	PostgreSQL for the main store — fixtures, results, bets, graded CLV
+	•	Time-series databases for odds ticks — kdb+ is the finance-world classic (expensive), TimescaleDB or ClickHouse are the modern free equivalents. Odds snapshots every few seconds across thousands of markets is genuinely a time-series problem.
+	•	Redis for live state — current prices in memory for instant lookup
+[6:36 AM, 8/14/2026] Cherona Chadwick: 1.	Pull sharp reference prices + retail prices for those leagues and markets
+	2.	Flag retail prices that are off the sharp-implied fair number by more than the margin
+	3.	Sanity-check with your model
+	4.	Bet it, log it, grade it against the close
+
+That’s it. One angle, one type of bet, boring on purpose. Everything else we discussed — the agents, the detectors, the analyst pipeline — is just automation of those four steps.
+
+And the honest bit you need before spending a dollar: most people who build this find out in the paper-trading month that their CLV is flat, and the right move is to stop. That’s not failure — that’s the system doing its job of protecting your bankroll. The edge either shows up in the graded numbers or it doesn’t exist. No conviction, no vibes, no “this feels like a winner.”
+
+If it were me, this week: skip everything fancy, get the odds feed trial, manually track 50 lower-league corner/card prices against Pinnacle for two weeks in a spreadsheet, and see if off-market gaps actually appear often enough to matter. Two weeks, near-zero cost, and you’ll know if there’s a business before writing a line of code.
+
+Want me to set up that tracking spreadsheet so you can start tomorrow?

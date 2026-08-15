@@ -1,0 +1,10 @@
+competition_id,country,competition_name,priority,initial_market_interest,historical_source_candidate,live_source_candidate,status,notes
+ENG1,England,Premier League,HIGH,"BTTS;1X2;totals;corners research;cards research",football-data.co.uk,API-Football,HISTORICAL_VALIDATED,2025/2026 file loaded with results corners cards and closing-odds fields; 2026/2027 file also loaded on 2026-08-13.
+ESP1,Spain,La Liga,HIGH,"BTTS;1X2;totals;corners research;cards research",football-data.co.uk,API-Football,HISTORICAL_VALIDATED,2025/2026 file loaded with results corners cards and closing-odds fields; 2026/2027 file also loaded on 2026-08-14.
+ENG2,England,Championship,HIGH,"BTTS;1X2;totals;corners research;cards research",football-data.co.uk,API-Football,HISTORICAL_VALIDATED,2025/2026 file loaded with required research fields; 2026/2027 current file returned HTTP 300 on 2026-08-13 so live coverage still needs checking.
+ENG3,England,League One,MEDIUM,"BTTS;1X2;totals;corners research;cards research",football-data.co.uk,API-Football,HISTORICAL_VALIDATED,2025/2026 file loaded with required research fields; 2026/2027 file also loaded on 2026-08-13.
+ENG4,England,League Two,MEDIUM,"BTTS;1X2;totals;corners research;cards research",football-data.co.uk,API-Football,HISTORICAL_VALIDATED,2025/2026 file loaded with required research fields; treat lower-league depth carefully even though core columns are present.
+SCO1,Scotland,Scottish Premiership,MEDIUM,"BTTS;1X2;totals;corners research;cards research",football-data.co.uk,API-Football,HISTORICAL_VALIDATED,2025/2026 file loaded with required research fields; 2026/2027 file also loaded on 2026-08-13.
+SCO2,Scotland,Scottish Championship,LOW,"BTTS;1X2;totals",TO_VERIFY,API-Football,VERIFY_COVERAGE,Need exact historical field coverage verification before inclusion.
+SCO3,Scotland,Scottish League One,LOW,"BTTS;1X2;totals",TO_VERIFY,API-Football,VERIFY_COVERAGE,Need exact historical field coverage verification before inclusion.
+SCO4,Scotland,Scottish League Two,LOW,"BTTS;1X2;totals",TO_VERIFY,API-Football,VERIFY_COVERAGE,Need exact historical field coverage verification before inclusion.

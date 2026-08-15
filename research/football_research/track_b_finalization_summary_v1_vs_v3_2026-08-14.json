@@ -1,0 +1,44 @@
+{
+  "holdout_status": "previously_observed_holdout_not_pristine",
+  "classification": "PROMOTE",
+  "decision_basis": {
+    "better_log_loss": true,
+    "no_worse_brier": true,
+    "no_major_league_degradation": true,
+    "no_major_selection_degradation": true
+  },
+  "v1": {
+    "model_log_loss": 1.0568422681257392,
+    "model_brier": 0.6364803976540465,
+    "candidate_roi": -0.18602307692307693,
+    "candidate_count": 1300
+  },
+  "v3": {
+    "model_log_loss": 1.0454242304072074,
+    "model_brier": 0.6290143305529475,
+    "candidate_roi": -0.22097975708502027,
+    "candidate_count": 1235,
+    "strength_regularization": 0.03
+  },
+  "deltas_v3_minus_v1": {
+    "log_loss": -0.011418037718531782,
+    "brier": -0.007466067101098983,
+    "competition_log_loss": {
+      "ENG1": -0.005760282134248618,
+      "ENG2": -0.014164020459333182,
+      "ENG3": -0.02403412239927194,
+      "ENG4": -0.010018848038786832,
+      "ESP1": 0.0004088263658060809
+    },
+    "selection_binary_log_loss": {
+      "home": -0.007525763344427117,
+      "draw": -0.0017567234496140838,
+      "away": -0.00870934875948437
+    },
+    "selection_abs_calibration_gap": {
+      "home": 0.0007605970646963889,
+      "draw": 0.0002069979840959857,
+      "away": -0.003483056628482195
+    }
+  }
+}

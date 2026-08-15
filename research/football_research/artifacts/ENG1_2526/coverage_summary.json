@@ -1,0 +1,28 @@
+{
+  "event_count": 380,
+  "market_row_count": 1350,
+  "first_match_date": "15/08/2025",
+  "last_match_date": "24/05/2026",
+  "missing_profile_fields": [],
+  "key_blind_field_coverage": {
+    "Referee": 1.0,
+    "HS": 1.0,
+    "HST": 1.0,
+    "HC": 1.0,
+    "HY": 1.0
+  },
+  "available_closing_columns": [
+    "B365CH",
+    "B365CD",
+    "B365CA",
+    "PSCH",
+    "PSCD",
+    "PSCA",
+    "MaxCH",
+    "MaxCD",
+    "MaxCA",
+    "AvgCH",
+    "AvgCD",
+    "AvgCA"
+  ]
+}

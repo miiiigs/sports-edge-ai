@@ -1,0 +1,38 @@
+[
+  {
+    "division_code": "E1",
+    "match_date": "2026-08-15",
+    "home_team": "Example Home",
+    "away_team": "Example Away",
+    "selection": "home",
+    "decimal_odds": 2.1,
+    "captured_at": "2026-08-14T18:00:00+00:00",
+    "source_kind": "manual-market-import",
+    "source_ref": "manual_market_capture_2026-08-14",
+    "bookmaker": "Bet365"
+  },
+  {
+    "division_code": "E1",
+    "match_date": "2026-08-15",
+    "home_team": "Example Home",
+    "away_team": "Example Away",
+    "selection": "draw",
+    "decimal_odds": 3.4,
+    "captured_at": "2026-08-14T18:00:00+00:00",
+    "source_kind": "manual-market-import",
+    "source_ref": "manual_market_capture_2026-08-14",
+    "bookmaker": "Bet365"
+  },
+  {
+    "division_code": "E1",
+    "match_date": "2026-08-15",
+    "home_team": "Example Home",
+    "away_team": "Example Away",
+    "selection": "away",
+    "decimal_odds": 3.6,
+    "captured_at": "2026-08-14T18:00:00+00:00",
+    "source_kind": "manual-market-import",
+    "source_ref": "manual_market_capture_2026-08-14",
+    "bookmaker": "Bet365"
+  }
+]

@@ -1,0 +1,1 @@
+decision_id,created_at,run_id,event_id,sport,competition,market,selection,line,available_price,bookmaker,fair_probability,fair_odds,market_probability,edge,data_quality,uncertainty,decision,decision_reason,model_version,strategy_version,policy_version,result_status,closing_price,settlement,clv,notes
