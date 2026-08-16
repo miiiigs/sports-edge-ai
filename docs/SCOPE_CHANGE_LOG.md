@@ -63,3 +63,16 @@
 - `source`: `meeting_notes/meeting_2.txt`
 - `impact`: prioritize immutable decision history and closing-price evaluation over surface-level win-rate claims
 - `status`: active
+
+## SC-009
+
+- `date`: 2026-08-15
+- `change`: the latest client PDFs supersede older repo direction where they conflict, and they
+  explicitly re-order football and tennis priorities
+- `source`: `initial_data/01-tennis-build-spec.pdf`,
+  `initial_data/02-football-build-spec.pdf`,
+  `initial_data/03-thirty-day-plan.pdf`
+- `impact`: football and tennis are now target separate builds; football moves to a GAP-first
+  path; current single-repo `1X2` Poisson work is retained as baseline/research rather than the
+  default forward roadmap
+- `status`: active

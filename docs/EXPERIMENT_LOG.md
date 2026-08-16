@@ -213,6 +213,50 @@ Last updated: Saturday, August 15, 2026
 - `conclusion`: `v4` is the next promising Track B candidate and merits controlled finalization against frozen `v3`
 - `interpretation`: the score-distribution layer appears to add a small but real validation improvement on top of opponent-adjusted expected goals, but the gain is modest and still requires held-out confirmation
 
+## EXP-007 - Chronological Football Shots GAP Walk-Forward
+
+- `date`: 2026-08-15
+- `scope`: first deterministic chronological football GAP replay using `shots` only
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_gap_shots_walkforward.py`
+  - `code/src/sports_ai/agents/football/gap_ratings.py`
+- `input scope`:
+  - competitions `ENG1`, `ENG2`, `ENG3`, `ENG4`, `ESP1`
+  - seasons `2122`, `2223`, `2324`, `2425`, `2526`
+  - only readiness-approved league-seasons
+- `initialization policy`:
+  - per competition, derive home/away shots baselines from the earliest approved season only
+  - process that season as warm-up
+  - exclude warm-up rows from evaluation diagnostics
+- `season policy`:
+  - carry state forward across seasons inside the same competition
+  - do not mix competitions
+  - teams newly appearing in a competition start from the competition baseline with zero current-competition matches
+- `learning rate`: `0.05` labeled `REFERENCE / UNOPTIMIZED`
+- `mechanics verified`:
+  - prediction recorded before update
+  - deterministic replay on fresh engines matches exactly
+  - duplicate event ids are rejected
+  - market data is not joined into the experiment
+- `counts`:
+  - matches processed: `12,080`
+  - predictions produced: `12,080`
+  - evaluation predictions: `9,664`
+  - skipped events: `0`
+- `overall evaluation diagnostics`:
+  - home MAE about `3.74111`
+  - away MAE about `3.44959`
+  - combined MAE about `3.59535`
+  - home mean error about `+0.31581` as observed-minus-expected
+  - away mean error about `-0.20575` as observed-minus-expected
+- `artifacts`:
+  - `research/football_research/football_gap_shots_walkforward_reference_2026-08-15_manifest.json`
+  - `research/football_research/football_gap_shots_walkforward_reference_2026-08-15_predictions.jsonl`
+  - `research/football_research/football_gap_shots_walkforward_reference_2026-08-15_final_state.json`
+  - `research/football_research/football_gap_shots_walkforward_reference_2026-08-15.md`
+- `conclusion`: the first historical shots GAP path is now mechanically reproducible and temporally valid enough to support the next statistic-specific runner
+- `interpretation`: these diagnostics validate chronology and state behavior only; they do not constitute model selection, betting validation, or evidence of edge
+
 ## Experiment Template
 
 Use this structure for every future experiment:

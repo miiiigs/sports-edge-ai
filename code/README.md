@@ -35,24 +35,38 @@ tests/                            firewall, devig, simulation, metrics tests
 
 ## Quickstart
 
+Canonical repo-root setup and test verification:
+
 ```bash
-cd code
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e ".[dev]"
-pytest
-# all tests should pass
+python -m pip install -e ".\code[dev]"
+pytest -q
+```
+
+Equivalent package-local workflow:
+
+```bash
+cd code
+python -m pip install -e ".[dev]"
+cd ..
+pytest -q
+```
+
+Additional example commands:
+
+```bash
 python -m sports_ai.pipeline.daily --demo
 # runs the pipeline on a synthetic event
 python -m sports_ai.data_sources.football_data_co_uk --season 2526 --division E0
 # profiles one football-data.co.uk CSV for intake validation
 python -m sports_ai.data_sources.football_history --season 2526 --division E0 --preview-limit 1
 # builds a historical football intake preview with separate sports and market rows
-python -m sports_ai.storage.football_research_store --season 2526 --division E0 --db-path ..\research\football_research\store\football_research.sqlite
+python -m sports_ai.storage.football_research_store --season 2526 --division E0 --db-path .\research\football_research\store\football_research.sqlite
 # stores a historical football bundle in the local research DB
-python -m sports_ai.pipeline.daily --demo --ledger-db ..\research\paper_shadow_demo.sqlite --closing-price 1.66 --settlement WIN --dashboard-html ..\research\paper_shadow_dashboard.html
+python -m sports_ai.pipeline.daily --demo --ledger-db .\research\paper_shadow_demo.sqlite --closing-price 1.66 --settlement WIN --dashboard-html .\research\paper_shadow_dashboard.html
 # runs the synthetic pipeline, records the decision, grades it, and writes a review dashboard
-python -m sports_ai.review_app --db ..\research\paper_shadow_demo.sqlite --research-db ..\research\football_research\store\football_research.sqlite --export-html ..\research\paper_shadow_dashboard.html
+python -m sports_ai.review_app --db .\research\paper_shadow_demo.sqlite --research-db .\research\football_research\store\football_research.sqlite --export-html .\research\paper_shadow_dashboard.html
 # starts the persistent local review app for running tests, grading decisions, and rebuilding the client dashboard
 ```
 

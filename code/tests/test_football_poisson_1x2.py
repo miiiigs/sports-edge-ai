@@ -146,6 +146,23 @@ def test_fit_poisson_1x2_v3_from_history_returns_prediction():
     assert "strength_regularization" in prediction["details"]
 
 
+def test_estimate_expected_goals_opponent_adjusted_can_capture_trace():
+    estimate = estimate_expected_goals_opponent_adjusted(
+        _sample_history(),
+        home_team="Alpha",
+        away_team="Beta",
+        min_team_matches=2,
+        trajectory_checkpoints=(1, 5, 10),
+    )
+
+    assert estimate is not None
+    trace = estimate.get("optimization_trace")
+    assert trace is not None
+    assert [item["iteration"] for item in trace] == [1, 5, 10]
+    assert all("objective" in item for item in trace)
+    assert all("prob_home" in item for item in trace)
+
+
 def test_estimate_expected_goals_opponent_adjusted_requires_positive_regularization():
     try:
         estimate_expected_goals_opponent_adjusted(

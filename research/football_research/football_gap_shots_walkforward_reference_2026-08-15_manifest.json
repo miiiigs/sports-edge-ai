@@ -1,0 +1,345 @@
+{
+  "generated_at": "2026-08-15T22:57:36+00:00",
+  "experiment_id": "EXP-007",
+  "experiment_version": "football_gap_shots_walkforward_v1",
+  "source_research_db_path": "C:\\dev\\sports-edge-ai\\research\\football_research\\store\\football_research.sqlite",
+  "statistic": "shots",
+  "competitions_processed": [
+    "ENG1",
+    "ENG2",
+    "ENG3",
+    "ENG4",
+    "ESP1"
+  ],
+  "seasons_processed": [
+    "2122",
+    "2223",
+    "2324",
+    "2425",
+    "2526"
+  ],
+  "approved_scope_pairs": [
+    {
+      "competition_id": "ENG1",
+      "season_code": "2122",
+      "division_code": "E0"
+    },
+    {
+      "competition_id": "ENG1",
+      "season_code": "2223",
+      "division_code": "E0"
+    },
+    {
+      "competition_id": "ENG1",
+      "season_code": "2324",
+      "division_code": "E0"
+    },
+    {
+      "competition_id": "ENG1",
+      "season_code": "2425",
+      "division_code": "E0"
+    },
+    {
+      "competition_id": "ENG1",
+      "season_code": "2526",
+      "division_code": "E0"
+    },
+    {
+      "competition_id": "ENG2",
+      "season_code": "2122",
+      "division_code": "E1"
+    },
+    {
+      "competition_id": "ENG2",
+      "season_code": "2223",
+      "division_code": "E1"
+    },
+    {
+      "competition_id": "ENG2",
+      "season_code": "2324",
+      "division_code": "E1"
+    },
+    {
+      "competition_id": "ENG2",
+      "season_code": "2425",
+      "division_code": "E1"
+    },
+    {
+      "competition_id": "ENG2",
+      "season_code": "2526",
+      "division_code": "E1"
+    },
+    {
+      "competition_id": "ENG3",
+      "season_code": "2122",
+      "division_code": "E2"
+    },
+    {
+      "competition_id": "ENG3",
+      "season_code": "2223",
+      "division_code": "E2"
+    },
+    {
+      "competition_id": "ENG3",
+      "season_code": "2324",
+      "division_code": "E2"
+    },
+    {
+      "competition_id": "ENG3",
+      "season_code": "2425",
+      "division_code": "E2"
+    },
+    {
+      "competition_id": "ENG3",
+      "season_code": "2526",
+      "division_code": "E2"
+    },
+    {
+      "competition_id": "ENG4",
+      "season_code": "2122",
+      "division_code": "E3"
+    },
+    {
+      "competition_id": "ENG4",
+      "season_code": "2223",
+      "division_code": "E3"
+    },
+    {
+      "competition_id": "ENG4",
+      "season_code": "2324",
+      "division_code": "E3"
+    },
+    {
+      "competition_id": "ENG4",
+      "season_code": "2425",
+      "division_code": "E3"
+    },
+    {
+      "competition_id": "ENG4",
+      "season_code": "2526",
+      "division_code": "E3"
+    },
+    {
+      "competition_id": "ESP1",
+      "season_code": "2122",
+      "division_code": "SP1"
+    },
+    {
+      "competition_id": "ESP1",
+      "season_code": "2223",
+      "division_code": "SP1"
+    },
+    {
+      "competition_id": "ESP1",
+      "season_code": "2324",
+      "division_code": "SP1"
+    },
+    {
+      "competition_id": "ESP1",
+      "season_code": "2425",
+      "division_code": "SP1"
+    },
+    {
+      "competition_id": "ESP1",
+      "season_code": "2526",
+      "division_code": "SP1"
+    }
+  ],
+  "baseline_policy_id": "warmup_first_ready_season_league_venue_average_v1",
+  "baseline_policy_description": "For each competition/statistic, estimate home and away baselines from the earliest readiness-approved season only. Process that season chronologically as warm-up, then start evaluation on later seasons with no future-season leakage.",
+  "baseline_details": [
+    {
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "warmup_season_code": "2122",
+      "baseline_match_count": 380,
+      "initial_home_baseline": 13.847368421052632,
+      "initial_away_baseline": 11.736842105263158,
+      "baseline_policy_id": "warmup_first_ready_season_league_venue_average_v1",
+      "config_identity": "eng1_shots_warmup_2122_lambda_0.05_reference_v1"
+    },
+    {
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "warmup_season_code": "2122",
+      "baseline_match_count": 552,
+      "initial_home_baseline": 12.40036231884058,
+      "initial_away_baseline": 10.68840579710145,
+      "baseline_policy_id": "warmup_first_ready_season_league_venue_average_v1",
+      "config_identity": "eng2_shots_warmup_2122_lambda_0.05_reference_v1"
+    },
+    {
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "warmup_season_code": "2122",
+      "baseline_match_count": 552,
+      "initial_home_baseline": 13.28623188405797,
+      "initial_away_baseline": 11.21195652173913,
+      "baseline_policy_id": "warmup_first_ready_season_league_venue_average_v1",
+      "config_identity": "eng3_shots_warmup_2122_lambda_0.05_reference_v1"
+    },
+    {
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "warmup_season_code": "2122",
+      "baseline_match_count": 552,
+      "initial_home_baseline": 12.603260869565217,
+      "initial_away_baseline": 11.192028985507246,
+      "baseline_policy_id": "warmup_first_ready_season_league_venue_average_v1",
+      "config_identity": "eng4_shots_warmup_2122_lambda_0.05_reference_v1"
+    },
+    {
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "warmup_season_code": "2122",
+      "baseline_match_count": 380,
+      "initial_home_baseline": 13.028947368421052,
+      "initial_away_baseline": 10.521052631578947,
+      "baseline_policy_id": "warmup_first_ready_season_league_venue_average_v1",
+      "config_identity": "esp1_shots_warmup_2122_lambda_0.05_reference_v1"
+    }
+  ],
+  "learning_rate": 0.05,
+  "learning_rate_label": "REFERENCE / UNOPTIMIZED",
+  "model_version": "football_gap_reference_v1",
+  "matches_processed": 12080,
+  "prediction_count": 12080,
+  "evaluation_prediction_count": 9664,
+  "skipped_event_count": 0,
+  "skip_reason_counts": {},
+  "skipped_events": [],
+  "first_match_warmup_policy": "The earliest readiness-approved season per competition is treated as a warm-up season. Predictions are exported for reproducibility, but evaluation diagnostics exclude warm-up rows.",
+  "season_transition_policy": "Carry GAP state forward across seasons within the same competition. Do not reset at season boundaries. Teams newly appearing in a competition start from the competition baseline with zero current-competition matches observed.",
+  "duplicate_event_policy": "Reject duplicate observations inside GapRatingsEngine by (competition_id, statistic, event_id) so the same event cannot move ratings twice.",
+  "deterministic_order_policy": "Order by competition_id, match_date, kickoff_time, event_id. The current research store has populated kickoff_time values for all loaded rows.",
+  "code_identity": {
+    "experiment_module": "sports_ai.experiments.football_gap_shots_walkforward",
+    "engine_module": "sports_ai.agents.football.gap_ratings"
+  },
+  "diagnostics": {
+    "overall_evaluation": {
+      "prediction_count": 9664,
+      "mae_home": 3.7411064879007223,
+      "mae_away": 3.449585204272508,
+      "combined_mae": 3.595345846086615,
+      "mean_error_home": 0.31581177631233304,
+      "mean_error_away": -0.20575195548852981,
+      "predicted_home_average": 13.073157594548594,
+      "observed_home_average": 13.388969370860927,
+      "predicted_away_average": 11.158980432309722,
+      "observed_away_average": 10.953228476821192
+    },
+    "by_competition": {
+      "ENG1": {
+        "prediction_count": 1520,
+        "mae_home": 3.91589152797957,
+        "mae_away": 3.6364856659662173,
+        "combined_mae": 3.776188596972894,
+        "mean_error_home": 0.2530843946707389,
+        "mean_error_away": -0.1792137646796374,
+        "predicted_home_average": 13.98375771059242,
+        "observed_home_average": 14.236842105263158,
+        "predicted_away_average": 11.88316113310069,
+        "observed_away_average": 11.703947368421053
+      },
+      "ENG2": {
+        "prediction_count": 2208,
+        "mae_home": 3.746077365841157,
+        "mae_away": 3.3897847906472607,
+        "combined_mae": 3.5679310782442086,
+        "mean_error_home": 0.5477558740472604,
+        "mean_error_away": -0.10155878968786246,
+        "predicted_home_average": 12.995722386822305,
+        "observed_home_average": 13.543478260869565,
+        "predicted_away_average": 10.84929429693424,
+        "observed_away_average": 10.747735507246377
+      },
+      "ENG3": {
+        "prediction_count": 2208,
+        "mae_home": 3.666699169087346,
+        "mae_away": 3.4570063615584536,
+        "combined_mae": 3.5618527653228997,
+        "mean_error_home": 0.13268368203310213,
+        "mean_error_away": -0.36972165971929977,
+        "predicted_home_average": 12.749109796227767,
+        "observed_home_average": 12.88179347826087,
+        "predicted_away_average": 11.187656442327995,
+        "observed_away_average": 10.817934782608695
+      },
+      "ENG4": {
+        "prediction_count": 2208,
+        "mae_home": 3.6865542030428435,
+        "mae_away": 3.4057117991313626,
+        "combined_mae": 3.546133001087103,
+        "mean_error_home": 0.22138842827949776,
+        "mean_error_away": -0.2562033916422175,
+        "predicted_home_average": 12.7179231659234,
+        "observed_home_average": 12.939311594202898,
+        "predicted_away_average": 11.185098319178449,
+        "observed_away_average": 10.928894927536232
+      },
+      "ESP1": {
+        "prediction_count": 1520,
+        "mae_home": 3.74643138625191,
+        "mae_away": 3.402504398203027,
+        "combined_mae": 3.574467892227468,
+        "mean_error_home": 0.444789826918613,
+        "mean_error_away": -0.0721695095336005,
+        "predicted_home_average": 13.261789120449809,
+        "observed_home_average": 13.70657894736842,
+        "predicted_away_average": 10.805064246375705,
+        "observed_away_average": 10.732894736842105
+      }
+    },
+    "by_season": {
+      "2223": {
+        "prediction_count": 2416,
+        "mae_home": 3.6057498244783197,
+        "mae_away": 3.436564930068095,
+        "combined_mae": 3.521157377273208,
+        "mean_error_home": 0.37649902023719856,
+        "mean_error_away": -0.5251940391062729,
+        "predicted_home_average": 12.720769191683331,
+        "observed_home_average": 13.09726821192053,
+        "predicted_away_average": 11.184548343742035,
+        "observed_away_average": 10.659354304635762
+      },
+      "2324": {
+        "prediction_count": 2416,
+        "mae_home": 3.9023869977380827,
+        "mae_away": 3.5124862901681015,
+        "combined_mae": 3.707436643953092,
+        "mean_error_home": 0.7325113350834523,
+        "mean_error_away": 0.14951334543712294,
+        "predicted_home_average": 13.162356214585422,
+        "observed_home_average": 13.894867549668874,
+        "predicted_away_average": 11.331860826748308,
+        "observed_away_average": 11.481374172185431
+      },
+      "2425": {
+        "prediction_count": 2416,
+        "mae_home": 3.7809435775663123,
+        "mae_away": 3.445218206722872,
+        "combined_mae": 3.6130808921445925,
+        "mean_error_home": -0.12046547070417622,
+        "mean_error_away": -0.44090734198726983,
+        "predicted_home_average": 13.143230371366428,
+        "observed_home_average": 13.022764900662251,
+        "predicted_away_average": 11.081221911523693,
+        "observed_away_average": 10.640314569536423
+      },
+      "2526": {
+        "prediction_count": 2416,
+        "mae_home": 3.675345551820175,
+        "mae_away": 3.4040713901309636,
+        "combined_mae": 3.5397084709755693,
+        "mean_error_home": 0.27470222063285743,
+        "mean_error_away": -0.0064197862976994036,
+        "predicted_home_average": 13.266274600559196,
+        "observed_home_average": 13.540976821192054,
+        "predicted_away_average": 11.038290647224851,
+        "observed_away_average": 11.031870860927153
+      }
+    }
+  }
+}

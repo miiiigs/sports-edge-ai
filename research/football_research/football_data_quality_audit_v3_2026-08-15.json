@@ -1,0 +1,2296 @@
+{
+  "evaluation_mode": "historical_data_quality_audit",
+  "model_name": "poisson_1x2_v3",
+  "season_code": "2526",
+  "history_season_codes": [
+    "2122",
+    "2223",
+    "2324",
+    "2425"
+  ],
+  "competition_ids": [
+    "ENG1",
+    "ENG2",
+    "ENG3",
+    "ENG4",
+    "ESP1"
+  ],
+  "coverage": {
+    "predicted_events": 1986,
+    "market_matched_events": 1986,
+    "old_policy_candidate_count": 636,
+    "dq_threshold": 0.82
+  },
+  "current_v3_proxy": {
+    "all_predicted": {
+      "n": 1986,
+      "min": 0.7920352197453312,
+      "p10": 0.7920352197453312,
+      "p25": 0.7943037117954436,
+      "median": 0.8006705623133922,
+      "p75": 0.8011437382221552,
+      "p90": 0.8015505491654528,
+      "max": 0.8015505491654528,
+      "mean": 0.7978514974674522
+    },
+    "old_policy_candidates": {
+      "n": 636,
+      "min": 0.7920352197453312,
+      "p10": 0.7920352197453312,
+      "p25": 0.7943037117954436,
+      "median": 0.8006705623133922,
+      "p75": 0.8011437382221552,
+      "p90": 0.8015505491654528,
+      "max": 0.8015505491654528,
+      "mean": 0.7979217433949749
+    },
+    "by_competition_all_predicted": {
+      "ENG1": {
+        "n": 342,
+        "min": 0.7943037117954436,
+        "p10": 0.7943037117954437,
+        "p25": 0.7943037117954436,
+        "median": 0.7943037117954436,
+        "p75": 0.7943037117954436,
+        "p90": 0.7943037117954436,
+        "max": 0.7943037117954436,
+        "mean": 0.7943037117954436
+      },
+      "ENG2": {
+        "n": 462,
+        "min": 0.7920352197453312,
+        "p10": 0.7920352197453312,
+        "p25": 0.7920352197453312,
+        "median": 0.7920352197453312,
+        "p75": 0.7920352197453312,
+        "p90": 0.7920352197453312,
+        "max": 0.7920352197453312,
+        "mean": 0.7920352197453312
+      },
+      "ENG3": {
+        "n": 420,
+        "min": 0.8015505491654528,
+        "p10": 0.8015505491654528,
+        "p25": 0.8015505491654528,
+        "median": 0.8015505491654528,
+        "p75": 0.8015505491654528,
+        "p90": 0.8015505491654528,
+        "max": 0.8015505491654528,
+        "mean": 0.8015505491654528
+      },
+      "ENG4": {
+        "n": 420,
+        "min": 0.8011437382221552,
+        "p10": 0.8011437382221552,
+        "p25": 0.8011437382221552,
+        "median": 0.8011437382221552,
+        "p75": 0.8011437382221552,
+        "p90": 0.8011437382221552,
+        "max": 0.8011437382221552,
+        "mean": 0.8011437382221552
+      },
+      "ESP1": {
+        "n": 342,
+        "min": 0.8006705623133922,
+        "p10": 0.8006705623133922,
+        "p25": 0.8006705623133922,
+        "median": 0.8006705623133922,
+        "p75": 0.8006705623133922,
+        "p90": 0.8006705623133922,
+        "max": 0.8006705623133922,
+        "mean": 0.8006705623133922
+      }
+    },
+    "by_competition_old_candidates": {
+      "ENG1": {
+        "n": 106,
+        "min": 0.7943037117954436,
+        "p10": 0.7943037117954436,
+        "p25": 0.7943037117954436,
+        "median": 0.7943037117954436,
+        "p75": 0.7943037117954436,
+        "p90": 0.7943037117954436,
+        "max": 0.7943037117954436,
+        "mean": 0.7943037117954436
+      },
+      "ENG2": {
+        "n": 148,
+        "min": 0.7920352197453312,
+        "p10": 0.7920352197453312,
+        "p25": 0.7920352197453312,
+        "median": 0.7920352197453312,
+        "p75": 0.7920352197453312,
+        "p90": 0.7920352197453311,
+        "max": 0.7920352197453312,
+        "mean": 0.7920352197453312
+      },
+      "ENG3": {
+        "n": 153,
+        "min": 0.8015505491654528,
+        "p10": 0.8015505491654529,
+        "p25": 0.8015505491654528,
+        "median": 0.8015505491654528,
+        "p75": 0.8015505491654528,
+        "p90": 0.8015505491654528,
+        "max": 0.8015505491654528,
+        "mean": 0.8015505491654528
+      },
+      "ENG4": {
+        "n": 148,
+        "min": 0.8011437382221552,
+        "p10": 0.8011437382221552,
+        "p25": 0.8011437382221552,
+        "median": 0.8011437382221552,
+        "p75": 0.8011437382221552,
+        "p90": 0.8011437382221552,
+        "max": 0.8011437382221552,
+        "mean": 0.8011437382221552
+      },
+      "ESP1": {
+        "n": 81,
+        "min": 0.8006705623133922,
+        "p10": 0.8006705623133922,
+        "p25": 0.8006705623133922,
+        "median": 0.8006705623133922,
+        "p75": 0.8006705623133922,
+        "p90": 0.8006705623133922,
+        "max": 0.8006705623133922,
+        "mean": 0.8006705623133922
+      }
+    },
+    "by_convergence_all_predicted": {
+      "non_converged": {
+        "n": 1986,
+        "min": 0.7920352197453312,
+        "p10": 0.7920352197453312,
+        "p25": 0.7943037117954436,
+        "median": 0.8006705623133922,
+        "p75": 0.8011437382221552,
+        "p90": 0.8015505491654528,
+        "max": 0.8015505491654528,
+        "mean": 0.7978514974674522
+      }
+    },
+    "by_convergence_old_candidates": {
+      "non_converged": {
+        "n": 636,
+        "min": 0.7920352197453312,
+        "p10": 0.7920352197453312,
+        "p25": 0.7943037117954436,
+        "median": 0.8006705623133922,
+        "p75": 0.8011437382221552,
+        "p90": 0.8015505491654528,
+        "max": 0.8015505491654528,
+        "mean": 0.7979217433949749
+      }
+    },
+    "reason_counts_all_predicted": {
+      "BELOW_DQ_THRESHOLD": 1986,
+      "MODEL_NOT_CONVERGED": 1986,
+      "NONCONVERGENCE_UPDATE_PENALTY": 1986
+    },
+    "reason_counts_old_candidates": {
+      "BELOW_DQ_THRESHOLD": 636,
+      "MODEL_NOT_CONVERGED": 636,
+      "NONCONVERGENCE_UPDATE_PENALTY": 636
+    }
+  },
+  "historical_point_in_time_contract_v1": {
+    "all_predicted": {
+      "n": 1986,
+      "min": 0.9222475466561973,
+      "p10": 0.9422475466561974,
+      "p25": 0.9550932413733613,
+      "median": 0.965310010923849,
+      "p75": 0.9739052591230797,
+      "p90": 0.9750932413733613,
+      "max": 0.9750932413733613,
+      "mean": 0.9631911630714938
+    },
+    "old_policy_candidates": {
+      "n": 636,
+      "min": 0.9222475466561973,
+      "p10": 0.9422475466561974,
+      "p25": 0.9545440465999098,
+      "median": 0.965310010923849,
+      "p75": 0.9739052591230797,
+      "p90": 0.9750932413733613,
+      "max": 0.9750932413733613,
+      "mean": 0.962238378740449
+    },
+    "by_competition_all_predicted": {
+      "ENG1": {
+        "n": 342,
+        "min": 0.965310010923849,
+        "p10": 0.965310010923849,
+        "p25": 0.965310010923849,
+        "median": 0.965310010923849,
+        "p75": 0.965310010923849,
+        "p90": 0.965310010923849,
+        "max": 0.965310010923849,
+        "mean": 0.965310010923849
+      },
+      "ENG2": {
+        "n": 462,
+        "min": 0.9222475466561973,
+        "p10": 0.9422475466561973,
+        "p25": 0.9422475466561974,
+        "median": 0.9622475466561973,
+        "p75": 0.9622475466561973,
+        "p90": 0.9622475466561973,
+        "max": 0.9622475466561973,
+        "mean": 0.9531566375652882
+      },
+      "ENG3": {
+        "n": 420,
+        "min": 0.9350932413733614,
+        "p10": 0.9550932413733613,
+        "p25": 0.9550932413733614,
+        "median": 0.9750932413733613,
+        "p75": 0.9750932413733613,
+        "p90": 0.9750932413733613,
+        "max": 0.9750932413733613,
+        "mean": 0.9655694318495518
+      },
+      "ENG4": {
+        "n": 420,
+        "min": 0.9345440465999098,
+        "p10": 0.9545440465999098,
+        "p25": 0.9545440465999098,
+        "median": 0.9645440465999098,
+        "p75": 0.9745440465999098,
+        "p90": 0.9745440465999098,
+        "max": 0.9745440465999098,
+        "mean": 0.9631154751713383
+      },
+      "ESP1": {
+        "n": 342,
+        "min": 0.9539052591230797,
+        "p10": 0.9539052591230797,
+        "p25": 0.9739052591230797,
+        "median": 0.9739052591230797,
+        "p75": 0.9739052591230797,
+        "p90": 0.9739052591230797,
+        "max": 0.9739052591230797,
+        "mean": 0.971799995965185
+      }
+    },
+    "by_competition_old_candidates": {
+      "ENG1": {
+        "n": 106,
+        "min": 0.965310010923849,
+        "p10": 0.965310010923849,
+        "p25": 0.965310010923849,
+        "median": 0.965310010923849,
+        "p75": 0.965310010923849,
+        "p90": 0.965310010923849,
+        "max": 0.965310010923849,
+        "mean": 0.965310010923849
+      },
+      "ENG2": {
+        "n": 148,
+        "min": 0.9222475466561973,
+        "p10": 0.9422475466561973,
+        "p25": 0.9422475466561974,
+        "median": 0.9622475466561973,
+        "p75": 0.9622475466561973,
+        "p90": 0.9622475466561973,
+        "max": 0.9622475466561973,
+        "mean": 0.9514367358453865
+      },
+      "ENG3": {
+        "n": 153,
+        "min": 0.9350932413733614,
+        "p10": 0.9550932413733613,
+        "p25": 0.9550932413733614,
+        "median": 0.9750932413733613,
+        "p75": 0.9750932413733613,
+        "p90": 0.9750932413733613,
+        "max": 0.9750932413733613,
+        "mean": 0.9648971629419888
+      },
+      "ENG4": {
+        "n": 148,
+        "min": 0.9345440465999098,
+        "p10": 0.9545440465999098,
+        "p25": 0.9545440465999098,
+        "median": 0.9745440465999098,
+        "p75": 0.9745440465999098,
+        "p90": 0.9745440465999098,
+        "max": 0.9745440465999098,
+        "mean": 0.9631926952485584
+      },
+      "ESP1": {
+        "n": 81,
+        "min": 0.9539052591230797,
+        "p10": 0.9539052591230797,
+        "p25": 0.9739052591230797,
+        "median": 0.9739052591230797,
+        "p75": 0.9739052591230797,
+        "p90": 0.9739052591230797,
+        "max": 0.9739052591230797,
+        "mean": 0.9711892097403636
+      }
+    },
+    "by_convergence_all_predicted": {
+      "non_converged": {
+        "n": 1986,
+        "min": 0.9222475466561973,
+        "p10": 0.9422475466561974,
+        "p25": 0.9550932413733613,
+        "median": 0.965310010923849,
+        "p75": 0.9739052591230797,
+        "p90": 0.9750932413733613,
+        "max": 0.9750932413733613,
+        "mean": 0.9631911630714938
+      }
+    },
+    "by_convergence_old_candidates": {
+      "non_converged": {
+        "n": 636,
+        "min": 0.9222475466561973,
+        "p10": 0.9422475466561974,
+        "p25": 0.9545440465999098,
+        "median": 0.965310010923849,
+        "p75": 0.9739052591230797,
+        "p90": 0.9750932413733613,
+        "max": 0.9750932413733613,
+        "mean": 0.962238378740449
+      }
+    },
+    "reason_counts_all_predicted": {},
+    "component_means_all_predicted": {
+      "history_coverage": {
+        "n": 1986,
+        "min": 1.0,
+        "p10": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 1.0
+      },
+      "model_convergence": {
+        "n": 1986,
+        "min": 0.8601760987266565,
+        "p10": 0.8601760987266565,
+        "p25": 0.8715185589772181,
+        "median": 0.9033528115669611,
+        "p75": 0.9057186911107764,
+        "p90": 0.907752745827264,
+        "max": 0.907752745827264,
+        "mean": 0.8892574873372616
+      },
+      "fixture_context_completeness": {
+        "n": 1986,
+        "min": 1.0,
+        "p10": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 1.0
+      },
+      "team_entity_continuity": {
+        "n": 1986,
+        "min": 0.7999999999999999,
+        "p10": 0.8999999999999999,
+        "p25": 0.9,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 0.9654582074521652
+      }
+    }
+  },
+  "historical_point_in_time_contract_v2": {
+    "sports_data_quality_all_predicted": {
+      "n": 1986,
+      "min": 0.5873333333333334,
+      "p10": 0.6736666666666666,
+      "p25": 0.7003333333333334,
+      "median": 0.76,
+      "p75": 0.76,
+      "p90": 0.9733333333333333,
+      "max": 1.0,
+      "mean": 0.7646596173212488
+    },
+    "sports_data_quality_old_candidates": {
+      "n": 636,
+      "min": 0.5873333333333334,
+      "p10": 0.6533333333333333,
+      "p25": 0.68,
+      "median": 0.7333333333333334,
+      "p75": 0.76,
+      "p90": 0.97,
+      "max": 1.0,
+      "mean": 0.7534685534591195
+    },
+    "model_fit_quality_all_predicted": {
+      "n": 1986,
+      "min": 0.7052415563977077,
+      "p10": 0.7208025080807884,
+      "p25": 0.7398514748835621,
+      "median": 0.7521428928428036,
+      "p75": 0.7722424393140627,
+      "p90": 0.8149941216898391,
+      "max": 0.9323469680968728,
+      "mean": 0.7634243500229473
+    },
+    "market_data_quality_all_predicted": {
+      "n": 1986,
+      "min": 0.7374999999999999,
+      "p10": 0.7374999999999999,
+      "p25": 0.7374999999999999,
+      "median": 0.7374999999999999,
+      "p75": 0.7374999999999999,
+      "p90": 0.7374999999999999,
+      "max": 0.7374999999999999,
+      "mean": 0.7374999999999999
+    },
+    "decision_data_quality_all_predicted": {
+      "n": 1986,
+      "min": 0.6574316978569286,
+      "p10": 0.7075537958200768,
+      "p25": 0.7240454166749236,
+      "median": 0.7459727777580678,
+      "p75": 0.7706855640518824,
+      "p90": 0.8585813741752996,
+      "max": 0.9272040904290617,
+      "mean": 0.7588571136675085
+    },
+    "decision_data_quality_old_candidates": {
+      "n": 636,
+      "min": 0.6642817050787804,
+      "p10": 0.6996249077109432,
+      "p25": 0.716414019153825,
+      "median": 0.7400518288320099,
+      "p75": 0.7582810200125658,
+      "p90": 0.8482670533924066,
+      "max": 0.9205188973852158,
+      "mean": 0.750915660684999
+    },
+    "by_competition_decision_quality_all_predicted": {
+      "ENG1": {
+        "n": 342,
+        "min": 0.6870602872170047,
+        "p10": 0.7289907499230129,
+        "p25": 0.7457151658669289,
+        "median": 0.7572250752211783,
+        "p75": 0.7946533486526216,
+        "p90": 0.866439880553744,
+        "max": 0.9205188973852158,
+        "mean": 0.7761823663436346
+      },
+      "ENG2": {
+        "n": 462,
+        "min": 0.6574316978569286,
+        "p10": 0.698708146634302,
+        "p25": 0.7141828898411725,
+        "median": 0.7364616880714592,
+        "p75": 0.7494444492191352,
+        "p90": 0.8374689641665769,
+        "max": 0.8815234644427927,
+        "mean": 0.7433311445313585
+      },
+      "ENG3": {
+        "n": 420,
+        "min": 0.665649125995387,
+        "p10": 0.7014247515895464,
+        "p25": 0.7149445722156742,
+        "median": 0.7352473021035822,
+        "p75": 0.754647859663817,
+        "p90": 0.8462451914290676,
+        "max": 0.9010159225685905,
+        "mean": 0.7480627338344916
+      },
+      "ENG4": {
+        "n": 420,
+        "min": 0.6647176029167072,
+        "p10": 0.7070992820237605,
+        "p25": 0.7222196147521014,
+        "median": 0.7387346470308048,
+        "p75": 0.7563819109573432,
+        "p90": 0.8491384666630195,
+        "max": 0.8876282125224875,
+        "mean": 0.7523635972337465
+      },
+      "ESP1": {
+        "n": 342,
+        "min": 0.6803726676287882,
+        "p10": 0.722209989423133,
+        "p25": 0.750316464139959,
+        "median": 0.7596663013329557,
+        "p75": 0.8072040904290618,
+        "p90": 0.8769879332548333,
+        "max": 0.9272040904290617,
+        "mean": 0.7837362883976644
+      }
+    },
+    "by_competition_decision_quality_old_candidates": {
+      "ENG1": {
+        "n": 106,
+        "min": 0.6895826357963227,
+        "p10": 0.7180419413005534,
+        "p25": 0.7445556375470455,
+        "median": 0.7520771960641179,
+        "p75": 0.7883234857787119,
+        "p90": 0.8657638180961207,
+        "max": 0.9205188973852158,
+        "mean": 0.7712519563007132
+      },
+      "ENG2": {
+        "n": 148,
+        "min": 0.6642817050787804,
+        "p10": 0.6977285612270478,
+        "p25": 0.7038536284797432,
+        "median": 0.7269810691657774,
+        "p75": 0.7429217709101669,
+        "p90": 0.8229783096743053,
+        "max": 0.8785727960522739,
+        "mean": 0.7356503100715589
+      },
+      "ENG3": {
+        "n": 153,
+        "min": 0.6714507033575416,
+        "p10": 0.6957297156654453,
+        "p25": 0.711138416514306,
+        "median": 0.7287488955959971,
+        "p75": 0.7529948915820814,
+        "p90": 0.8372995836085527,
+        "max": 0.8769777271506813,
+        "mean": 0.7424841393750766
+      },
+      "ENG4": {
+        "n": 148,
+        "min": 0.6647176029167072,
+        "p10": 0.7063340706299461,
+        "p25": 0.7182194989049023,
+        "median": 0.7365030088010169,
+        "p75": 0.7529546231481115,
+        "p90": 0.8454963019513422,
+        "max": 0.8775899268236558,
+        "mean": 0.7489789160279563
+      },
+      "ESP1": {
+        "n": 81,
+        "min": 0.6882424080086376,
+        "p10": 0.719591539370876,
+        "p25": 0.7502250378551637,
+        "median": 0.7551036951780501,
+        "p75": 0.7788734201266914,
+        "p90": 0.8720091828434032,
+        "max": 0.89904430235467,
+        "mean": 0.7716599264280102
+      }
+    },
+    "by_season_phase_decision_quality_all_predicted": {
+      "early_season": {
+        "n": 372,
+        "min": 0.6649542480924814,
+        "p10": 0.7080695851270556,
+        "p25": 0.7399149086946298,
+        "median": 0.8579525370032429,
+        "p75": 0.8713178187402659,
+        "p90": 0.8822245326618059,
+        "max": 0.9272040904290617,
+        "mean": 0.8232543739187942
+      },
+      "late_season": {
+        "n": 769,
+        "min": 0.6587845378939501,
+        "p10": 0.7080828588402652,
+        "p25": 0.7224465140668165,
+        "median": 0.7415396876520441,
+        "p75": 0.7532411211916475,
+        "p90": 0.7674160489606323,
+        "max": 0.8072040904290618,
+        "mean": 0.7387961534159492
+      },
+      "mid_season": {
+        "n": 845,
+        "min": 0.6574316978569286,
+        "p10": 0.7068509804601903,
+        "p25": 0.7232054460078358,
+        "median": 0.7444650637401902,
+        "p75": 0.7590977929935026,
+        "p90": 0.8047868760676385,
+        "max": 0.9158908203835077,
+        "mean": 0.748763738069841
+      }
+    },
+    "by_season_phase_decision_quality_old_candidates": {
+      "early_season": {
+        "n": 123,
+        "min": 0.6832188364918999,
+        "p10": 0.7073076818646371,
+        "p25": 0.727371595270011,
+        "median": 0.8474248662517798,
+        "p75": 0.8668430527507328,
+        "p90": 0.8732657917986433,
+        "max": 0.9205188973852158,
+        "mean": 0.8099070788178488
+      },
+      "late_season": {
+        "n": 255,
+        "min": 0.6647176029167072,
+        "p10": 0.7025240144920901,
+        "p25": 0.7194766810509478,
+        "median": 0.7390288958356193,
+        "p75": 0.7517930577267459,
+        "p90": 0.7630160960762624,
+        "max": 0.7998754835650241,
+        "mean": 0.73573383158591
+      },
+      "mid_season": {
+        "n": 258,
+        "min": 0.6642817050787804,
+        "p10": 0.6981529947217915,
+        "p25": 0.7131332689252438,
+        "median": 0.7325549175690534,
+        "p75": 0.7522669663441839,
+        "p90": 0.7847181812470307,
+        "max": 0.8882764191710674,
+        "mean": 0.7377971412661121
+      }
+    },
+    "by_newly_observed_team_decision_quality_all_predicted": {
+      "True": {
+        "n": 616,
+        "min": 0.6574316978569286,
+        "p10": 0.6926072222938546,
+        "p25": 0.7035060458831737,
+        "median": 0.7141730115654524,
+        "p75": 0.727133703853816,
+        "p90": 0.7957304979326127,
+        "max": 0.8695305603595751,
+        "mean": 0.7249912712804446
+      },
+      "UNKNOWN": {
+        "n": 1370,
+        "min": 0.6870602872170047,
+        "p10": 0.7274484121839646,
+        "p25": 0.7422205935290374,
+        "median": 0.7529410662694718,
+        "p75": 0.7924334361384928,
+        "p90": 0.8678818950402923,
+        "max": 0.9272040904290617,
+        "mean": 0.7740843829451957
+      }
+    },
+    "by_continuity_flag_decision_quality_all_predicted": {
+      "continuous_previous_season": {
+        "n": 1428,
+        "min": 0.6930805200092877,
+        "p10": 0.7263004852247881,
+        "p25": 0.741630827128142,
+        "median": 0.7534490874812921,
+        "p75": 0.8072040904290618,
+        "p90": 0.8673730553320969,
+        "max": 0.9272040904290617,
+        "mean": 0.775974065470055
+      },
+      "previous_season_gap": {
+        "n": 558,
+        "min": 0.6574316978569286,
+        "p10": 0.6896169696879406,
+        "p25": 0.7016353031432342,
+        "median": 0.7133083249537429,
+        "p75": 0.7256147063251536,
+        "p90": 0.740097449349743,
+        "max": 0.7773707570957284,
+        "mean": 0.7150524413126047
+      }
+    },
+    "by_weakest_history_bucket_decision_quality_all_predicted": {
+      "24+": {
+        "n": 1986,
+        "min": 0.6574316978569286,
+        "p10": 0.7075537958200768,
+        "p25": 0.7240454166749236,
+        "median": 0.7459727777580678,
+        "p75": 0.7706855640518824,
+        "p90": 0.8585813741752996,
+        "max": 0.9272040904290617,
+        "mean": 0.7588571136675085
+      }
+    },
+    "by_convergence_decision_quality_all_predicted": {
+      "non_converged": {
+        "n": 1986,
+        "min": 0.6574316978569286,
+        "p10": 0.7075537958200768,
+        "p25": 0.7240454166749236,
+        "median": 0.7459727777580678,
+        "p75": 0.7706855640518824,
+        "p90": 0.8585813741752996,
+        "max": 0.9272040904290617,
+        "mean": 0.7588571136675085
+      }
+    },
+    "reason_counts_all_predicted": {
+      "HIGH_PREDICTIVE_UNCERTAINTY": 1706,
+      "LOW_PRIOR_SEASON_CONTINUITY": 682,
+      "LOW_RECENT_MATCH_COVERAGE": 1658,
+      "MODEL_NOT_CONVERGED": 1986,
+      "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY": 558
+    },
+    "component_distributions_all_predicted": {
+      "sample_depth_score": {
+        "n": 1986,
+        "min": 1.0,
+        "p10": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 1.0
+      },
+      "recent_coverage_score": {
+        "n": 1986,
+        "min": 0.0,
+        "p10": 0.0,
+        "p25": 0.0,
+        "median": 0.0,
+        "p75": 0.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 0.17252014098690835
+      },
+      "role_depth_score": {
+        "n": 1986,
+        "min": 1.0,
+        "p10": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 1.0
+      },
+      "continuity_score": {
+        "n": 1986,
+        "min": 0.3333333333333333,
+        "p10": 0.5,
+        "p25": 0.6666666666666666,
+        "median": 0.8333333333333333,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 0.8318227593152064
+      },
+      "previous_season_score": {
+        "n": 1986,
+        "min": 0.45,
+        "p10": 0.725,
+        "p25": 0.725,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 0.9180261832829809
+      },
+      "convergence_score": {
+        "n": 1986,
+        "min": 0.9067840658177709,
+        "p10": 0.9067840658177709,
+        "p25": 0.914345705984812,
+        "median": 0.9355685410446407,
+        "p75": 0.937145794073851,
+        "p90": 0.9385018305515094,
+        "max": 0.9385018305515094,
+        "mean": 0.926171658224841
+      },
+      "stability_score": {
+        "n": 1986,
+        "min": 0.813568131635542,
+        "p10": 0.813568131635542,
+        "p25": 0.828691411969624,
+        "median": 0.8711370820892814,
+        "p75": 0.8742915881477019,
+        "p90": 0.8770036611030186,
+        "max": 0.8770036611030186,
+        "mean": 0.8523433164496821
+      },
+      "uncertainty_score": {
+        "n": 1986,
+        "min": 0.20376134400559343,
+        "p10": 0.2406537041945398,
+        "p25": 0.2579109002382478,
+        "median": 0.3000066365115701,
+        "p75": 0.3981255082974181,
+        "p90": 0.5691287051815865,
+        "max": 1.0,
+        "mean": 0.3637764355474566
+      },
+      "bookmaker_available_score": {
+        "n": 1986,
+        "min": 1.0,
+        "p10": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 1.0
+      },
+      "all_selections_present_score": {
+        "n": 1986,
+        "min": 1.0,
+        "p10": 1.0,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p90": 1.0,
+        "max": 1.0,
+        "mean": 1.0
+      },
+      "timestamp_quality_score": {
+        "n": 1986,
+        "min": 0.25,
+        "p10": 0.25,
+        "p25": 0.25,
+        "median": 0.25,
+        "p75": 0.25,
+        "p90": 0.25,
+        "max": 0.25,
+        "mean": 0.25
+      },
+      "entry_close_availability_score": {
+        "n": 1986,
+        "min": 0.0,
+        "p10": 0.0,
+        "p25": 0.0,
+        "median": 0.0,
+        "p75": 0.0,
+        "p90": 0.0,
+        "max": 0.0,
+        "mean": 0.0
+      }
+    },
+    "below_threshold_diagnostics": {
+      "all_predicted_count": 1662,
+      "old_policy_candidate_count": 548,
+      "reason_counts_all_predicted": {
+        "HIGH_PREDICTIVE_UNCERTAINTY": 1431,
+        "LOW_PRIOR_SEASON_CONTINUITY": 622,
+        "LOW_RECENT_MATCH_COVERAGE": 1648,
+        "MODEL_NOT_CONVERGED": 1662,
+        "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY": 558
+      },
+      "reason_counts_old_policy_candidates": {
+        "HIGH_PREDICTIVE_UNCERTAINTY": 489,
+        "LOW_PRIOR_SEASON_CONTINUITY": 242,
+        "LOW_RECENT_MATCH_COVERAGE": 542,
+        "MODEL_NOT_CONVERGED": 548,
+        "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY": 221
+      },
+      "by_league": {
+        "ENG1": {
+          "n": 279,
+          "min": 0.6870602872170047,
+          "p10": 0.7233629839105661,
+          "p25": 0.7448512966767208,
+          "median": 0.7523365363178955,
+          "p75": 0.7700515948098577,
+          "p90": 0.789478571595305,
+          "max": 0.8195584168891918,
+          "mean": 0.7554874407330733
+        },
+        "ENG2": {
+          "n": 406,
+          "min": 0.6574316978569286,
+          "p10": 0.6985142815400147,
+          "p25": 0.7108563668655733,
+          "median": 0.72908507816077,
+          "p75": 0.7441218179630621,
+          "p90": 0.7536311346959368,
+          "max": 0.8191642143235047,
+          "mean": 0.7280777865950783
+        },
+        "ENG3": {
+          "n": 357,
+          "min": 0.665649125995387,
+          "p10": 0.696951942361973,
+          "p25": 0.7116875610175171,
+          "median": 0.7271825015382636,
+          "p75": 0.7431895412562959,
+          "p90": 0.7562487178229589,
+          "max": 0.8167395673647969,
+          "mean": 0.7291826901365777
+        },
+        "ENG4": {
+          "n": 356,
+          "min": 0.6647176029167072,
+          "p10": 0.704384596282081,
+          "p25": 0.7144574361391036,
+          "median": 0.7323651108147272,
+          "p75": 0.7512355638511374,
+          "p90": 0.7580782855493814,
+          "max": 0.8189028295931559,
+          "mean": 0.7335170356291086
+        },
+        "ESP1": {
+          "n": 264,
+          "min": 0.6803726676287882,
+          "p10": 0.7196854071633054,
+          "p25": 0.7487600228566118,
+          "median": 0.7542443279191755,
+          "p75": 0.7690304402894124,
+          "p90": 0.7958435004212722,
+          "max": 0.8187058306263245,
+          "mean": 0.7563671067504999
+        }
+      },
+      "by_season_phase": {
+        "early_season": {
+          "n": 109,
+          "min": 0.6649542480924814,
+          "p10": 0.6878168793349033,
+          "p25": 0.6997826103269937,
+          "median": 0.714160633231493,
+          "p75": 0.7317649306358056,
+          "p90": 0.7451303067983226,
+          "max": 0.8191642143235047,
+          "mean": 0.719607521991856
+        },
+        "late_season": {
+          "n": 769,
+          "min": 0.6587845378939501,
+          "p10": 0.7080828588402652,
+          "p25": 0.7224465140668165,
+          "median": 0.7415396876520441,
+          "p75": 0.7532411211916475,
+          "p90": 0.7674160489606323,
+          "max": 0.8072040904290618,
+          "mean": 0.7387961534159492
+        },
+        "mid_season": {
+          "n": 784,
+          "min": 0.6574316978569286,
+          "p10": 0.7062120343938671,
+          "p25": 0.720470873816174,
+          "median": 0.7427422113791645,
+          "p75": 0.7548316038828955,
+          "p90": 0.779903065739873,
+          "max": 0.8195584168891918,
+          "mean": 0.740995301904343
+        }
+      },
+      "by_continuity_flag": {
+        "continuous_previous_season": {
+          "n": 1104,
+          "min": 0.6930805200092877,
+          "p10": 0.7244453291580294,
+          "p25": 0.738309049941777,
+          "median": 0.7490255607629264,
+          "p75": 0.7579403676490785,
+          "p90": 0.7838273449612033,
+          "max": 0.8195584168891918,
+          "mean": 0.7504642357921636
+        },
+        "previous_season_gap": {
+          "n": 558,
+          "min": 0.6574316978569286,
+          "p10": 0.6896169696879406,
+          "p25": 0.7016353031432342,
+          "median": 0.7133083249537429,
+          "p75": 0.7256147063251536,
+          "p90": 0.740097449349743,
+          "max": 0.7773707570957284,
+          "mean": 0.7150524413126047
+        }
+      },
+      "by_newly_observed_team": {
+        "True": {
+          "n": 564,
+          "min": 0.6574316978569286,
+          "p10": 0.6911395256468573,
+          "p25": 0.7015104941341608,
+          "median": 0.7129579651547003,
+          "p75": 0.7246317271155289,
+          "p90": 0.7322808001143688,
+          "max": 0.8191642143235047,
+          "mean": 0.7143321925132754
+        },
+        "UNKNOWN": {
+          "n": 1098,
+          "min": 0.6870602872170047,
+          "p10": 0.7255911703701582,
+          "p25": 0.7395641317671492,
+          "median": 0.7493959574770913,
+          "p75": 0.7579970050450496,
+          "p90": 0.7783172183324434,
+          "max": 0.8195584168891918,
+          "mean": 0.7510277067299588
+        }
+      }
+    }
+  },
+  "diagnosis": {
+    "old_candidates_below_current_threshold": 636,
+    "old_candidates_below_historical_contract_threshold": 0,
+    "old_candidates_below_historical_v2_decision_threshold": 548,
+    "current_interpretation": "The current v3 data_quality is a convergence/sample proxy, not a complete historical decision-quality contract.",
+    "market_data_quality_note": "historical market_data_quality is structurally capped because timestamp_quality_score is a fixed partial credit when a quote exists and entry_close_availability_score is currently 0.0 without trusted historical timing data.",
+    "next_step": "Audit the refined historical contract first, then decide whether the policy validator should switch from the live proxy to the approved historical decision-quality contract."
+  },
+  "sample_rows": {
+    "all_predicted": [
+      {
+        "event_id": "evt_football_20250815_liverpool_bournemouth",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-15",
+        "home_team": "Liverpool",
+        "away_team": "Bournemouth",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.9100629912840527,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.9205188973852158,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250816_aston_villa_newcastle",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Aston Villa",
+        "away_team": "Newcastle",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7288678464920825,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8661603539476247,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250816_brighton_fulham",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Brighton",
+        "away_team": "Fulham",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7440039936797048,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8707011981039114,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250816_tottenham_burnley",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Tottenham",
+        "away_team": "Burnley",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.8510653869897729,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.7529862827635985,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250816_wolves_man_city",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-16",
+        "home_team": "Wolves",
+        "away_team": "Man City",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.8830725174834598,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.9124217552450379,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250817_chelsea_crystal_palace",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-17",
+        "home_team": "Chelsea",
+        "away_team": "Crystal Palace",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7689234605688694,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8781770381706608,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250817_man_united_arsenal",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-17",
+        "home_team": "Man United",
+        "away_team": "Arsenal",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7556032797502842,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8741809839250851,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250817_nott_m_forest_brentford",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-17",
+        "home_team": "Nott'm Forest",
+        "away_team": "Brentford",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7249308772911249,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8649792631873374,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250818_leeds_everton",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-18",
+        "home_team": "Leeds",
+        "away_team": "Everton",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.7216700297225804,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.7141676755834407,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250822_west_ham_chelsea",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-22",
+        "home_team": "West Ham",
+        "away_team": "Chelsea",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7343242723663623,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8677972817099087,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250823_arsenal_leeds",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-23",
+        "home_team": "Arsenal",
+        "away_team": "Leeds",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.9100629912840527,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.7706855640518824,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250823_bournemouth_wolves",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-23",
+        "home_team": "Bournemouth",
+        "away_team": "Wolves",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7377015544022341,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8688104663206702,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250823_brentford_aston_villa",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-23",
+        "home_team": "Brentford",
+        "away_team": "Aston Villa",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7294462390273265,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8663338717081979,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 11,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250823_man_city_tottenham",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-23",
+        "home_team": "Man City",
+        "away_team": "Tottenham",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.9100629912840527,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.9205188973852158,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250824_crystal_palace_nott_m_forest",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-24",
+        "home_team": "Crystal Palace",
+        "away_team": "Nott'm Forest",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7437978441762851,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8706393532528856,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250824_everton_brighton",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-24",
+        "home_team": "Everton",
+        "away_team": "Brighton",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7222178929712867,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.864165367891386,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250824_fulham_man_united",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-24",
+        "home_team": "Fulham",
+        "away_team": "Man United",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7290089982266128,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8662026994679838,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250825_newcastle_liverpool",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-25",
+        "home_team": "Newcastle",
+        "away_team": "Liverpool",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7475334464166548,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8717600339249963,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 11,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250830_chelsea_fulham",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-30",
+        "home_team": "Chelsea",
+        "away_team": "Fulham",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7758193233916951,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8802457970175085,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 11,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250830_leeds_newcastle",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-30",
+        "home_team": "Leeds",
+        "away_team": "Newcastle",
+        "selection": null,
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.7797102718761773,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.7315797482295199,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      }
+    ],
+    "old_policy_candidates": [
+      {
+        "event_id": "evt_football_20250817_nott_m_forest_brentford",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-17",
+        "home_team": "Nott'm Forest",
+        "away_team": "Brentford",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7249308772911249,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8649792631873374,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 13,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250818_leeds_everton",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-18",
+        "home_team": "Leeds",
+        "away_team": "Everton",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.7216700297225804,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.7141676755834407,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250823_brentford_aston_villa",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-23",
+        "home_team": "Brentford",
+        "away_team": "Aston Villa",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7294462390273265,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8663338717081979,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 11,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250824_crystal_palace_nott_m_forest",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-24",
+        "home_team": "Crystal Palace",
+        "away_team": "Nott'm Forest",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7437978441762851,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8706393532528856,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250824_fulham_man_united",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-24",
+        "home_team": "Fulham",
+        "away_team": "Man United",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7290089982266128,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8662026994679838,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 12,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250830_wolves_everton",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-30",
+        "home_team": "Wolves",
+        "away_team": "Everton",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7223390787619506,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8642017236285852,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 11,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250831_brighton_man_city",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-31",
+        "home_team": "Brighton",
+        "away_team": "Man City",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.8029769599349167,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8883930879804749,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 11,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250831_liverpool_arsenal",
+        "competition_id": "ENG1",
+        "match_date": "2025-08-31",
+        "home_team": "Liverpool",
+        "away_team": "Arsenal",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7494295533346912,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8723288660004074,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 10,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250913_bournemouth_brighton",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-13",
+        "home_team": "Bournemouth",
+        "away_team": "Brighton",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.726170378273897,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8653511134821691,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250913_brentford_chelsea",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-13",
+        "home_team": "Brentford",
+        "away_team": "Chelsea",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7261070348908142,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8653321104672442,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250913_everton_aston_villa",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-13",
+        "home_team": "Everton",
+        "away_team": "Aston Villa",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7235200947261841,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8645560284178552,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250913_fulham_leeds",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-13",
+        "home_team": "Fulham",
+        "away_team": "Leeds",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.8079647926987771,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.7400561044762998,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250914_man_city_man_united",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-14",
+        "home_team": "Man City",
+        "away_team": "Man United",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.9100629912840527,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.9205188973852158,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250920_brighton_tottenham",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-20",
+        "home_team": "Brighton",
+        "away_team": "Tottenham",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7342151354093385,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8677645406228015,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250920_burnley_nott_m_forest",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-20",
+        "home_team": "Burnley",
+        "away_team": "Nott'm Forest",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.721646555216088,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.714160633231493,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250920_west_ham_crystal_palace",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-20",
+        "home_team": "West Ham",
+        "away_team": "Crystal Palace",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7232405395404011,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8644721618621203,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250920_wolves_leeds",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-20",
+        "home_team": "Wolves",
+        "away_team": "Leeds",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 0.7003333333333334,
+        "model_fit_quality_v2": 0.7517735395284892,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.7231987285252134,
+        "converged": false,
+        "weakest_history_n": 76,
+        "weakest_recent_n": 0,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "previous_season_gap",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "LOW_RECENT_MATCH_COVERAGE",
+          "PROMOTED_OR_NEW_LEAGUE_UNCERTAINTY",
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250921_arsenal_man_city",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-21",
+        "home_team": "Arsenal",
+        "away_team": "Man City",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7289217423669081,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8661765227100724,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250921_bournemouth_newcastle",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-21",
+        "home_team": "Bournemouth",
+        "away_team": "Newcastle",
+        "selection": "away",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7368141220640743,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8685442366192222,
+        "converged": false,
+        "weakest_history_n": 114,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      },
+      {
+        "event_id": "evt_football_20250927_brentford_man_united",
+        "competition_id": "ENG1",
+        "match_date": "2025-09-27",
+        "home_team": "Brentford",
+        "away_team": "Man United",
+        "selection": "home",
+        "current_v3_data_quality": 0.7943037117954436,
+        "historical_data_quality": 0.965310010923849,
+        "sports_data_quality_v2": 1.0,
+        "model_fit_quality_v2": 0.7328407793108925,
+        "market_data_quality_v2": 0.7374999999999999,
+        "decision_data_quality_v2": 0.8673522337932678,
+        "converged": false,
+        "weakest_history_n": 152,
+        "weakest_recent_n": 9,
+        "season_phase": "early_season",
+        "newly_observed_team": false,
+        "continuity_flag": "continuous_previous_season",
+        "last_max_update": 0.00025696288204556393,
+        "reasons": [
+          "MODEL_NOT_CONVERGED",
+          "NONCONVERGENCE_UPDATE_PENALTY",
+          "BELOW_DQ_THRESHOLD"
+        ],
+        "historical_reasons": [],
+        "historical_v2_reasons": [
+          "MODEL_NOT_CONVERGED",
+          "HIGH_PREDICTIVE_UNCERTAINTY"
+        ]
+      }
+    ]
+  }
+}

@@ -4,36 +4,39 @@ Last updated: Saturday, August 15, 2026
 
 ## Technical
 
-- live PostgreSQL schema, roles, grants, and trigger-enforced immutability are still missing
-- opening-week football risk gating is still basic and needs stricter context penalties
-- API-Football is documented as a future option but not implemented in code
-- the first Track B recency-weighted model experiment did not beat the frozen baseline and remains rejected
-- the promoted `v3` historical model still needs future repeated validation across additional folds or later untouched periods before it should be treated as strongly proven
-- the new `v4` Dixon-Coles layer has only cleared validation so far and still needs controlled finalization before any promotion decision
+- `00-developer-brief.md` is referenced by the governing PDFs, but is not present in the repo, so
+  `R1-R10` and shared arithmetic/staking references cannot be fully verified
+- the supplied PDFs and companion Markdown files are not identical, so requirements must continue
+  to be resolved through the PDF-first authority order rather than merged casually
+- the final football/tennis split architecture is still unresolved at the dependency-map level, so
+  the current repo remains a temporary migration workspace
+- the live production PostgreSQL design is still unresolved and should not be assumed from the
+  current SQLite research implementation
 
 ## Data
 
-- current bookmaker-price coverage for Saturday, August 15, 2026 fixtures is still incomplete
-- sharp-reference live prices are not yet consistently captured beside retail prices
-- lineup, injury, manager-change, and transfer context are not yet integrated into the football gate
-- MLB reverse-engineering still lacks exact-date confirmation for many of the 22 sample picks
+- the football historical scope required by the PDFs is not fully loaded yet:
+  missing competitions in the current research store are `EFLC`, `FAC`, `FRA1`, `GER1`, `ITA1`,
+  `SCO1`, `UCL`, and `UEL`
+- canonical multi-provider football team identity / alias mapping is not implemented yet
+- `SP1` referee coverage is incomplete in the current loaded scope; this does not block GAP field
+  readiness, but it does limit later referee/cards/veto functionality for that league
 
 ## Provider / operations
 
-- no approved paid football provider is connected yet
-- no production odds-snapshot schedule is running yet outside manual / command-triggered capture
-- current fixture discovery can still depend on source availability and league coverage
-- the persistent review app can now run the promoted `v3` live watchlist, but it still depends on either a dependable provider or manual fixture / market imports
-- the latest Saturday, August 15, 2026 watchlist run returned `fixtures_discovered = 0`, so live operation still needs a dependable fixture source before any candidate can exist
-- the `2526` season has already been viewed repeatedly, so it is no longer a perfectly clean future test set for iterative model-family research
+- no resolved sharp-reference live feed is connected yet for the football migration target
+- lineup, injury, manager-change, and other veto-layer context feeds are still unresolved
+- no approved production odds-snapshot schedule or final football live-runtime design is in place
 
 ## Client confirmation
 
-- which bookmaker(s) matter most for the first football trial comparisons
-- whether API-Football credentials will be provided later
-- whether MLB remains research-only for now or becomes a future production sport
-- which football markets should be prioritized immediately after the first `1X2` paper/shadow loop
+- whether `00-developer-brief.md` can be provided or its omitted rules should be restated elsewhere
+- whether quarter-Kelly or half-Kelly is authoritative once the upstream brief question is resolved
+- which sharp-reference provider should be treated as authoritative for football live scanning
+- when the football/tennis repository and database split should be executed after dependency mapping
 
 ## Practical meaning
 
-These blockers do not prevent the project from running a controlled football paper/shadow trial or from continuing Track B model research. They do prevent the project from honestly calling the system production-ready, model-validated, or live-pick ready.
+These blockers do not prevent continued football GAP migration work inside the current repository.
+They do prevent the project from honestly claiming that the full football-spec archive, staking
+rules, provider stack, or final deployment architecture are already settled.

@@ -89,3 +89,33 @@
 - `alternatives`: keep labeling all football outputs as generic `BET_CANDIDATE`, or continue broad architectural planning without tightening the live trial loop
 - `consequences`: the repo now emphasizes prediction lock, market lock, market snapshots, conservative trial gating, and up-to-two paper/shadow outputs rather than forced picks
 - `status`: active
+
+## DEC-010
+
+- `date`: 2026-08-15
+- `context`: the client supplied three newer PDFs plus matching Markdown files, and the PDF text is not identical to the Markdown versions
+- `decision`: treat the August 15, 2026 PDFs as the primary specification authority after direct user instructions, use the companion Markdown files only where they do not conflict, and record any conflict explicitly
+- `reason`: silently blending the PDF and Markdown materials would preserve superseded assumptions and create hidden specification drift
+- `alternatives`: treat PDFs and Markdown as interchangeable, or continue using the older handoff stack as the main authority
+- `consequences`: current football `1X2` work becomes a benchmark/research lane unless it is re-authorized by the new PDFs; missing `00-developer-brief.md` becomes an explicit blocker
+- `status`: active
+
+## DEC-011
+
+- `date`: 2026-08-15
+- `context`: the first football GAP migration slice needs usable team identity and state persistence boundaries before multi-provider expansion or repo splitting
+- `decision`: allow the first GAP research engine to use deterministic single-source football-data team identifiers inside league-specific state, while explicitly treating that identifier as temporary and preserving a backend-agnostic state contract
+- `reason`: this unlocks a correct first GAP engine for the currently loaded archive without pretending that provider display names are the final canonical identity layer
+- `alternatives`: block all GAP work until a full cross-provider alias layer exists, or silently bake provider display names into long-term architecture
+- `consequences`: first-pass GAP state is keyed by league, statistic, team identifier, and venue with explicit as-of/config metadata; canonical multi-provider team identity remains a later required migration step
+- `status`: active
+
+## DEC-012
+
+- `date`: 2026-08-15
+- `context`: the first chronological shots GAP experiment needed a temporally valid initialization rule, explicit season-transition behavior, and duplicate-event protection before any downstream modeling
+- `decision`: initialize each competition/statistic from the earliest readiness-approved season only, process that same season as warm-up, carry state across later seasons within the same competition without cross-league mixing, and reject duplicate observations inside `GapRatingsEngine`
+- `reason`: this keeps initialization leakage out of evaluated seasons, preserves the current-division-history semantics needed later for promoted/relegated-team rules, and prevents accidental state corruption during replay or resume
+- `alternatives`: initialize from full evaluation-season averages, reset automatically at every season boundary, or rely on the runner alone to prevent duplicate processing
+- `consequences`: evaluated predictions start only after warm-up state exists; new entrants to a competition begin from the competition baseline with zero current-competition observations; idempotency is enforced in the in-memory research engine as well as the experiment layer
+- `status`: active

@@ -4,11 +4,70 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
 from .poisson_1x2 import poisson_1x2_probabilities
+
+
+def _regularized_poisson_objective(
+    *,
+    mu_home: float,
+    mu_away: float,
+    attack: np.ndarray,
+    defense: np.ndarray,
+    home_idx: np.ndarray,
+    away_idx: np.ndarray,
+    home_goals: np.ndarray,
+    away_goals: np.ndarray,
+    sample_scale: float,
+    strength_regularization: float,
+) -> float:
+    eta_home = np.clip(mu_home + attack[home_idx] - defense[away_idx], -3.5, 3.5)
+    eta_away = np.clip(mu_away + attack[away_idx] - defense[home_idx], -3.5, 3.5)
+    lambda_home = np.exp(eta_home)
+    lambda_away = np.exp(eta_away)
+    neg_log_likelihood = float(
+        (lambda_home - (home_goals * eta_home)).sum() + (lambda_away - (away_goals * eta_away)).sum()
+    ) / sample_scale
+    regularization = 0.5 * strength_regularization * float(np.sum(attack**2) + np.sum(defense**2))
+    return neg_log_likelihood + regularization
+
+
+def _checkpoint_payload(
+    *,
+    iteration: int,
+    objective: float,
+    max_update: float,
+    mu_home: float,
+    mu_away: float,
+    attack: np.ndarray,
+    defense: np.ndarray,
+    home_team_idx: int,
+    away_team_idx: int,
+) -> dict[str, float | int]:
+    expected_home_goals = float(max(0.2, min(4.0, math.exp(mu_home + attack[home_team_idx] - defense[away_team_idx]))))
+    expected_away_goals = float(max(0.2, min(4.0, math.exp(mu_away + attack[away_team_idx] - defense[home_team_idx]))))
+    probabilities = poisson_1x2_probabilities(expected_home_goals, expected_away_goals)
+    return {
+        "iteration": iteration,
+        "objective": objective,
+        "max_update": max_update,
+        "mu_home": mu_home,
+        "mu_away": mu_away,
+        "attack_min": float(np.min(attack)),
+        "attack_max": float(np.max(attack)),
+        "defense_min": float(np.min(defense)),
+        "defense_max": float(np.max(defense)),
+        "attack_l2": float(np.linalg.norm(attack)),
+        "defense_l2": float(np.linalg.norm(defense)),
+        "expected_home_goals": expected_home_goals,
+        "expected_away_goals": expected_away_goals,
+        "prob_home": probabilities["home"],
+        "prob_draw": probabilities["draw"],
+        "prob_away": probabilities["away"],
+    }
 
 
 def estimate_expected_goals_opponent_adjusted(
@@ -21,6 +80,7 @@ def estimate_expected_goals_opponent_adjusted(
     learning_rate: float = 0.6,
     max_iterations: int = 250,
     tolerance: float = 1e-5,
+    trajectory_checkpoints: Sequence[int] | None = None,
 ) -> dict[str, Any] | None:
     """Estimate expected goals using regularized opponent-adjusted team strengths."""
 
@@ -68,6 +128,10 @@ def estimate_expected_goals_opponent_adjusted(
     sample_scale = max(1.0, float(len(clean_rows)))
     converged = False
     last_max_update = None
+    checkpoint_set = {int(value) for value in (trajectory_checkpoints or ()) if int(value) > 0}
+    optimization_trace: list[dict[str, float | int]] = []
+    home_team_idx = team_to_idx[home_team]
+    away_team_idx = team_to_idx[away_team]
 
     for iteration in range(max_iterations):
         eta_home = np.clip(mu_home + attack[home_idx] - defense[away_idx], -3.5, 3.5)
@@ -107,6 +171,33 @@ def estimate_expected_goals_opponent_adjusted(
             float(np.max(np.abs(step * grad_defense))),
         )
         last_max_update = max_update
+        iteration_number = iteration + 1
+        if iteration_number in checkpoint_set:
+            objective = _regularized_poisson_objective(
+                mu_home=mu_home,
+                mu_away=mu_away,
+                attack=attack,
+                defense=defense,
+                home_idx=home_idx,
+                away_idx=away_idx,
+                home_goals=home_goals,
+                away_goals=away_goals,
+                sample_scale=sample_scale,
+                strength_regularization=strength_regularization,
+            )
+            optimization_trace.append(
+                _checkpoint_payload(
+                    iteration=iteration_number,
+                    objective=objective,
+                    max_update=max_update,
+                    mu_home=mu_home,
+                    mu_away=mu_away,
+                    attack=attack,
+                    defense=defense,
+                    home_team_idx=home_team_idx,
+                    away_team_idx=away_team_idx,
+                )
+            )
         if max_update < tolerance:
             converged = True
             break
@@ -118,7 +209,7 @@ def estimate_expected_goals_opponent_adjusted(
         max(0.2, min(4.0, math.exp(mu_away + attack[team_to_idx[away_team]] - defense[team_to_idx[home_team]])))
     )
 
-    return {
+    result = {
         "expected_home_goals": expected_home_goals,
         "expected_away_goals": expected_away_goals,
         "league_home_avg": league_home_avg,
@@ -134,7 +225,11 @@ def estimate_expected_goals_opponent_adjusted(
         "max_iterations": max_iterations,
         "converged": converged,
         "last_max_update": last_max_update,
+        "tolerance": tolerance,
     }
+    if optimization_trace:
+        result["optimization_trace"] = optimization_trace
+    return result
 
 
 def fit_poisson_1x2_v3_from_history(
