@@ -1,0 +1,972 @@
+[
+  {
+    "competition_id": "ENG1",
+    "competition_name": "Premier League",
+    "season_code": "2223",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "selection_used_for_predictions": "poisson",
+    "selection_reason": "first evaluation season for this competition, so select Poisson as the simpler default before any prior out-of-sample comparison exists",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.235186989643715,
+      "mean_observed_total_corners": 10.107894736842105,
+      "mean_predicted_variance": 10.235186989643715,
+      "observed_total_corner_variance": 10.59625346260388,
+      "variance_gap": 0.3610664729601645,
+      "total_log_likelihood": -987.6397948216304,
+      "average_log_likelihood": -2.5990520916358695,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.235186989643715,
+      "mean_observed_total_corners": 10.107894736842105,
+      "mean_predicted_variance": 11.294962799331064,
+      "observed_total_corner_variance": 10.59625346260388,
+      "variance_gap": 0.6987093367271839,
+      "total_log_likelihood": -987.1003599102118,
+      "average_log_likelihood": -2.597632526079505,
+      "dispersion": 98.99678991011916
+    },
+    "dispersion_fitted_from_training": 98.99678991011916,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG1",
+    "competition_name": "Premier League",
+    "season_code": "2324",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -987.100360 exceeded Poisson -987.639795",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.473765574713056,
+      "mean_observed_total_corners": 10.836842105263157,
+      "mean_predicted_variance": 10.473765574713056,
+      "observed_total_corner_variance": 12.362853185595567,
+      "variance_gap": 1.8890876108825108,
+      "total_log_likelihood": -1011.7388208395649,
+      "average_log_likelihood": -2.6624705811567497,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.473765574713056,
+      "mean_observed_total_corners": 10.836842105263157,
+      "mean_predicted_variance": 11.462861002072577,
+      "observed_total_corner_variance": 12.362853185595567,
+      "variance_gap": 0.8999921835229898,
+      "total_log_likelihood": -1010.5494915468649,
+      "average_log_likelihood": -2.659340767228592,
+      "dispersion": 111.2715310748012
+    },
+    "dispersion_fitted_from_training": 111.2715310748012,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG1",
+    "competition_name": "Premier League",
+    "season_code": "2425",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -1997.649851 exceeded Poisson -1999.378616",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.553073125737907,
+      "mean_observed_total_corners": 10.297368421052632,
+      "mean_predicted_variance": 10.553073125737907,
+      "observed_total_corner_variance": 12.014203601108033,
+      "variance_gap": 1.4611304753701262,
+      "total_log_likelihood": -1019.5416300698159,
+      "average_log_likelihood": -2.6830042896574104,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.553073125737907,
+      "mean_observed_total_corners": 10.297368421052632,
+      "mean_predicted_variance": 11.654604316360608,
+      "observed_total_corner_variance": 12.014203601108033,
+      "variance_gap": 0.359599284747425,
+      "total_log_likelihood": -1016.8912303985134,
+      "average_log_likelihood": -2.6760295536802983,
+      "dispersion": 101.53121269679232
+    },
+    "dispersion_fitted_from_training": 101.53121269679232,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG1",
+    "competition_name": "Premier League",
+    "season_code": "2526",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -3014.541082 exceeded Poisson -3018.920246",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.201019257301631,
+      "mean_observed_total_corners": 9.99736842105263,
+      "mean_predicted_variance": 10.201019257301631,
+      "observed_total_corner_variance": 10.63946675900277,
+      "variance_gap": 0.43844750170113933,
+      "total_log_likelihood": -989.2535230741178,
+      "average_log_likelihood": -2.6032987449318887,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 10.201019257301631,
+      "mean_observed_total_corners": 9.99736842105263,
+      "mean_predicted_variance": 11.456106722026762,
+      "observed_total_corner_variance": 10.63946675900277,
+      "variance_gap": 0.8166399630239916,
+      "total_log_likelihood": -988.8985943023538,
+      "average_log_likelihood": -2.6023647218482995,
+      "dispersion": 83.27283116117421
+    },
+    "dispersion_fitted_from_training": 83.27283116117421,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG2",
+    "competition_name": "Championship",
+    "season_code": "2223",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "selection_used_for_predictions": "poisson",
+    "selection_reason": "first evaluation season for this competition, so select Poisson as the simpler default before any prior out-of-sample comparison exists",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.866760488237553,
+      "mean_observed_total_corners": 10.009057971014492,
+      "mean_predicted_variance": 9.866760488237553,
+      "observed_total_corner_variance": 11.34955563432052,
+      "variance_gap": 1.4827951460829674,
+      "total_log_likelihood": -1452.964945628018,
+      "average_log_likelihood": -2.6321828725145253,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.866760488237553,
+      "mean_observed_total_corners": 10.009057971014492,
+      "mean_predicted_variance": 11.108149372185096,
+      "observed_total_corner_variance": 11.34955563432052,
+      "variance_gap": 0.24140626213542404,
+      "total_log_likelihood": -1450.4179226360443,
+      "average_log_likelihood": -2.6275687004276165,
+      "dispersion": 78.60360315324883
+    },
+    "dispersion_fitted_from_training": 78.60360315324883,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG2",
+    "competition_name": "Championship",
+    "season_code": "2324",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -1450.417923 exceeded Poisson -1452.964946",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.25724318159841,
+      "mean_observed_total_corners": 10.65036231884058,
+      "mean_predicted_variance": 10.25724318159841,
+      "observed_total_corner_variance": 12.582463636841,
+      "variance_gap": 2.32522045524259,
+      "total_log_likelihood": -1485.1733728464114,
+      "average_log_likelihood": -2.6905314725478466,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.25724318159841,
+      "mean_observed_total_corners": 10.65036231884058,
+      "mean_predicted_variance": 11.704254259244928,
+      "observed_total_corner_variance": 12.582463636841,
+      "variance_gap": 0.8782093775960718,
+      "total_log_likelihood": -1480.6232799753232,
+      "average_log_likelihood": -2.6822885506799334,
+      "dispersion": 72.91621946351127
+    },
+    "dispersion_fitted_from_training": 72.91621946351127,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG2",
+    "competition_name": "Championship",
+    "season_code": "2425",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -2931.041203 exceeded Poisson -2938.138318",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.333642636202702,
+      "mean_observed_total_corners": 10.18659420289855,
+      "mean_predicted_variance": 10.333642636202702,
+      "observed_total_corner_variance": 10.912646371560598,
+      "variance_gap": 0.5790037353578956,
+      "total_log_likelihood": -1441.6032387789373,
+      "average_log_likelihood": -2.611600070251698,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.333642636202702,
+      "mean_observed_total_corners": 10.18659420289855,
+      "mean_predicted_variance": 12.048844026011414,
+      "observed_total_corner_variance": 10.912646371560598,
+      "variance_gap": 1.1361976544508163,
+      "total_log_likelihood": -1441.235807737496,
+      "average_log_likelihood": -2.610934434307058,
+      "dispersion": 62.488212221664696
+    },
+    "dispersion_fitted_from_training": 62.488212221664696,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG2",
+    "competition_name": "Championship",
+    "season_code": "2526",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -4372.277010 exceeded Poisson -4379.741557",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.213828735595051,
+      "mean_observed_total_corners": 10.353260869565217,
+      "mean_predicted_variance": 10.213828735595051,
+      "observed_total_corner_variance": 11.790061830497795,
+      "variance_gap": 1.5762330949027437,
+      "total_log_likelihood": -1460.7998359211172,
+      "average_log_likelihood": -2.64637651434985,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.213828735595051,
+      "mean_observed_total_corners": 10.353260869565217,
+      "mean_predicted_variance": 11.673815094131163,
+      "observed_total_corner_variance": 11.790061830497795,
+      "variance_gap": 0.11624673636663196,
+      "total_log_likelihood": -1457.7205462536385,
+      "average_log_likelihood": -2.6407980910392004,
+      "dispersion": 71.68269050417732
+    },
+    "dispersion_fitted_from_training": 71.68269050417732,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG3",
+    "competition_name": "League One",
+    "season_code": "2223",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "selection_used_for_predictions": "poisson",
+    "selection_reason": "first evaluation season for this competition, so select Poisson as the simpler default before any prior out-of-sample comparison exists",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.249747202796165,
+      "mean_observed_total_corners": 10.18840579710145,
+      "mean_predicted_variance": 10.249747202796165,
+      "observed_total_corner_variance": 10.609430791850453,
+      "variance_gap": 0.35968358905428843,
+      "total_log_likelihood": -1434.3333657347061,
+      "average_log_likelihood": -2.5984300103889604,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.249747202796165,
+      "mean_observed_total_corners": 10.18840579710145,
+      "mean_predicted_variance": 11.737448879775197,
+      "observed_total_corner_variance": 10.609430791850453,
+      "variance_gap": 1.128018087924744,
+      "total_log_likelihood": -1435.4846272041193,
+      "average_log_likelihood": -2.60051562899297,
+      "dispersion": 70.81160730173683
+    },
+    "dispersion_fitted_from_training": 70.81160730173683,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG3",
+    "competition_name": "League One",
+    "season_code": "2324",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "selection_used_for_predictions": "poisson",
+    "selection_reason": "selected Poisson because it matched or beat prior out-of-sample negative-binomial log likelihood (-1434.333366 vs -1435.484627)",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.27335250767067,
+      "mean_observed_total_corners": 10.31159420289855,
+      "mean_predicted_variance": 10.27335250767067,
+      "observed_total_corner_variance": 12.64928586431422,
+      "variance_gap": 2.3759333566435483,
+      "total_log_likelihood": -1483.9649317581177,
+      "average_log_likelihood": -2.6883422676777493,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.27335250767067,
+      "mean_observed_total_corners": 10.31159420289855,
+      "mean_predicted_variance": 11.188172504905152,
+      "observed_total_corner_variance": 12.64928586431422,
+      "variance_gap": 1.461113359409067,
+      "total_log_likelihood": -1479.7049456581392,
+      "average_log_likelihood": -2.6806249015546,
+      "dispersion": 115.77230231771375
+    },
+    "dispersion_fitted_from_training": 115.77230231771375,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG3",
+    "competition_name": "League One",
+    "season_code": "2425",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -2915.189573 exceeded Poisson -2918.298297",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.052272644266768,
+      "mean_observed_total_corners": 9.71195652173913,
+      "mean_predicted_variance": 10.052272644266768,
+      "observed_total_corner_variance": 11.96594399810964,
+      "variance_gap": 1.9136713538428722,
+      "total_log_likelihood": -1467.7575454486782,
+      "average_log_likelihood": -2.6589810605954316,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.052272644266768,
+      "mean_observed_total_corners": 9.71195652173913,
+      "mean_predicted_variance": 11.403822772012335,
+      "observed_total_corner_variance": 11.96594399810964,
+      "variance_gap": 0.5621212260973056,
+      "total_log_likelihood": -1462.0804970391703,
+      "average_log_likelihood": -2.6486965526071926,
+      "dispersion": 75.09934065643218
+    },
+    "dispersion_fitted_from_training": 75.09934065643218,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG3",
+    "competition_name": "League One",
+    "season_code": "2526",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -4377.270070 exceeded Poisson -4386.055843",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.914259188133322,
+      "mean_observed_total_corners": 10.059782608695652,
+      "mean_predicted_variance": 9.914259188133322,
+      "observed_total_corner_variance": 12.632295604914935,
+      "variance_gap": 2.7180364167816133,
+      "total_log_likelihood": -1481.503377904156,
+      "average_log_likelihood": -2.68388293098579,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.914259188133322,
+      "mean_observed_total_corners": 10.059782608695652,
+      "mean_predicted_variance": 11.465934202575195,
+      "observed_total_corner_variance": 12.632295604914935,
+      "variance_gap": 1.1663614023397404,
+      "total_log_likelihood": -1474.21670968702,
+      "average_log_likelihood": -2.6706824450851814,
+      "dispersion": 63.567583674818565
+    },
+    "dispersion_fitted_from_training": 63.567583674818565,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG4",
+    "competition_name": "League Two",
+    "season_code": "2223",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "selection_used_for_predictions": "poisson",
+    "selection_reason": "first evaluation season for this competition, so select Poisson as the simpler default before any prior out-of-sample comparison exists",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.623346362402497,
+      "mean_observed_total_corners": 9.40036231884058,
+      "mean_predicted_variance": 9.623346362402497,
+      "observed_total_corner_variance": 10.44659407162361,
+      "variance_gap": 0.8232477092211123,
+      "total_log_likelihood": -1427.34285681085,
+      "average_log_likelihood": -2.585766044947192,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.623346362402497,
+      "mean_observed_total_corners": 9.40036231884058,
+      "mean_predicted_variance": 10.313102806452351,
+      "observed_total_corner_variance": 10.44659407162361,
+      "variance_gap": 0.13349126517125853,
+      "total_log_likelihood": -1425.9518038635072,
+      "average_log_likelihood": -2.5832460214918607,
+      "dispersion": 134.6291616281405
+    },
+    "dispersion_fitted_from_training": 134.6291616281405,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG4",
+    "competition_name": "League Two",
+    "season_code": "2324",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -1425.951804 exceeded Poisson -1427.342857",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.012957132581521,
+      "mean_observed_total_corners": 10.402173913043478,
+      "mean_predicted_variance": 10.012957132581521,
+      "observed_total_corner_variance": 11.718690926275993,
+      "variance_gap": 1.7057337936944723,
+      "total_log_likelihood": -1462.29666638202,
+      "average_log_likelihood": -2.6490881637355437,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 10.012957132581521,
+      "mean_observed_total_corners": 10.402173913043478,
+      "mean_predicted_variance": 10.948464497033408,
+      "observed_total_corner_variance": 11.718690926275993,
+      "variance_gap": 0.7702264292425856,
+      "total_log_likelihood": -1459.798006293792,
+      "average_log_likelihood": -2.6445616056046957,
+      "dispersion": 107.54051864430569
+    },
+    "dispersion_fitted_from_training": 107.54051864430569,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG4",
+    "competition_name": "League Two",
+    "season_code": "2425",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -2885.749810 exceeded Poisson -2889.639523",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.874598953705771,
+      "mean_observed_total_corners": 9.668478260869565,
+      "mean_predicted_variance": 9.874598953705771,
+      "observed_total_corner_variance": 11.246977394454946,
+      "variance_gap": 1.3723784407491753,
+      "total_log_likelihood": -1451.242563428238,
+      "average_log_likelihood": -2.6290626149062284,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.874598953705771,
+      "mean_observed_total_corners": 9.668478260869565,
+      "mean_predicted_variance": 10.998167706084836,
+      "observed_total_corner_variance": 11.246977394454946,
+      "variance_gap": 0.24880968837011075,
+      "total_log_likelihood": -1447.9638854766843,
+      "average_log_likelihood": -2.623122980936022,
+      "dispersion": 87.0947852135886
+    },
+    "dispersion_fitted_from_training": 87.0947852135886,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ENG4",
+    "competition_name": "League Two",
+    "season_code": "2526",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -4333.713696 exceeded Poisson -4340.882087",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.813902580693734,
+      "mean_observed_total_corners": 9.853260869565217,
+      "mean_predicted_variance": 9.813902580693734,
+      "observed_total_corner_variance": 10.320858931947068,
+      "variance_gap": 0.5069563512533346,
+      "total_log_likelihood": -1417.2653482864475,
+      "average_log_likelihood": -2.5675096889247238,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 552,
+      "mean_predicted_total_corners": 9.813902580693734,
+      "mean_observed_total_corners": 9.853260869565217,
+      "mean_predicted_variance": 11.0607012042288,
+      "observed_total_corner_variance": 10.320858931947068,
+      "variance_gap": 0.7398422722817326,
+      "total_log_likelihood": -1418.3785165154668,
+      "average_log_likelihood": -2.569526298035266,
+      "dispersion": 77.61660508311947
+    },
+    "dispersion_fitted_from_training": 77.61660508311947,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ESP1",
+    "competition_name": "La Liga",
+    "season_code": "2223",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "selection_used_for_predictions": "poisson",
+    "selection_reason": "first evaluation season for this competition, so select Poisson as the simpler default before any prior out-of-sample comparison exists",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.423050378010126,
+      "mean_observed_total_corners": 9.534210526315789,
+      "mean_predicted_variance": 9.423050378010126,
+      "observed_total_corner_variance": 11.296198060941828,
+      "variance_gap": 1.8731476829317018,
+      "total_log_likelihood": -992.2616502607151,
+      "average_log_likelihood": -2.611214869107145,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.423050378010126,
+      "mean_observed_total_corners": 9.534210526315789,
+      "mean_predicted_variance": 10.173712195435078,
+      "observed_total_corner_variance": 11.296198060941828,
+      "variance_gap": 1.12248586550675,
+      "total_log_likelihood": -990.5039952152838,
+      "average_log_likelihood": -2.606589461092852,
+      "dispersion": 118.64385228458126
+    },
+    "dispersion_fitted_from_training": 118.64385228458126,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ESP1",
+    "competition_name": "La Liga",
+    "season_code": "2324",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -990.503995 exceeded Poisson -992.261650",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.43281094637965,
+      "mean_observed_total_corners": 9.365789473684211,
+      "mean_predicted_variance": 9.43281094637965,
+      "observed_total_corner_variance": 9.989882271468144,
+      "variance_gap": 0.5570713250884936,
+      "total_log_likelihood": -975.8148869052043,
+      "average_log_likelihood": -2.5679339129084324,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.43281094637965,
+      "mean_observed_total_corners": 9.365789473684211,
+      "mean_predicted_variance": 10.595760560264342,
+      "observed_total_corner_variance": 9.989882271468144,
+      "variance_gap": 0.6058782887961982,
+      "total_log_likelihood": -975.545466904036,
+      "average_log_likelihood": -2.567224912905358,
+      "dispersion": 76.79939928592016
+    },
+    "dispersion_fitted_from_training": 76.79939928592016,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ESP1",
+    "competition_name": "La Liga",
+    "season_code": "2425",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -1966.049462 exceeded Poisson -1968.076537",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.39154621126099,
+      "mean_observed_total_corners": 9.51842105263158,
+      "mean_predicted_variance": 9.39154621126099,
+      "observed_total_corner_variance": 10.775976454293627,
+      "variance_gap": 1.3844302430326358,
+      "total_log_likelihood": -976.9691618607173,
+      "average_log_likelihood": -2.570971478580835,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.39154621126099,
+      "mean_observed_total_corners": 9.51842105263158,
+      "mean_predicted_variance": 10.377837028048745,
+      "observed_total_corner_variance": 10.775976454293627,
+      "variance_gap": 0.39813942624488163,
+      "total_log_likelihood": -975.9033930073185,
+      "average_log_likelihood": -2.5681668237034696,
+      "dispersion": 89.87954746676525
+    },
+    "dispersion_fitted_from_training": 89.87954746676525,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  },
+  {
+    "competition_id": "ESP1",
+    "competition_name": "La Liga",
+    "season_code": "2526",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "selection_used_for_predictions": "negative_binomial",
+    "selection_reason": "selected negative binomial because prior out-of-sample cumulative log likelihood -2941.952855 exceeded Poisson -2945.045699",
+    "poisson_metrics": {
+      "distribution": "poisson",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.611702557773983,
+      "mean_observed_total_corners": 9.66578947368421,
+      "mean_predicted_variance": 9.611702557773983,
+      "observed_total_corner_variance": 11.785671745152355,
+      "variance_gap": 2.173969187378372,
+      "total_log_likelihood": -1001.2334883912335,
+      "average_log_likelihood": -2.6348249694506145,
+      "dispersion": null
+    },
+    "negative_binomial_metrics": {
+      "distribution": "negative_binomial",
+      "sample_size": 380,
+      "mean_predicted_total_corners": 9.611702557773983,
+      "mean_observed_total_corners": 9.66578947368421,
+      "mean_predicted_variance": 10.67244225140672,
+      "observed_total_corner_variance": 11.785671745152355,
+      "variance_gap": 1.113229493745635,
+      "total_log_likelihood": -998.3711598753565,
+      "average_log_likelihood": -2.62729252598778,
+      "dispersion": 87.587470640896
+    },
+    "dispersion_fitted_from_training": 87.587470640896,
+    "comparison_version": "football_day8_corner_distribution_comparison_v1"
+  }
+]

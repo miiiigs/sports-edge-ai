@@ -1,0 +1,5584 @@
+{
+  "generated_at": "2026-08-17T00:00:00+00:00",
+  "experiment_id": "EXP-010",
+  "experiment_version": "football_gap_lambda_fitting_v1",
+  "source_research_db_path": "C:\\dev\\sports-edge-ai\\research\\football_research\\store\\football_research.sqlite",
+  "lambda_grid": [
+    0.02,
+    0.05,
+    0.1
+  ],
+  "reference_lambda": 0.05,
+  "material_improvement_threshold": 0.01,
+  "selection_policy_id": "lowest_validation_mae_with_reference_retention_threshold_v1",
+  "selection_policy_description": "For each competition/statistic, test the fixed lambda grid chronologically on pre-holdout validation folds. Rank candidates by aggregate validation combined MAE, then by lower absolute home/away bias sum, then by lower lambda. Retain the 0.05 reference lambda unless the best non-reference candidate improves combined MAE by at least the fixed material threshold.",
+  "final_holdout_policy_id": "latest_ready_season_reserved_until_post_selection_check_v1",
+  "final_holdout_policy_description": "Reserve the latest readiness-approved season per competition as a final holdout while selecting lambda. Only the finally selected lambda is evaluated on that holdout after selection completes.",
+  "model_version": "football_gap_lambda_fitting_v1",
+  "scope_statistics": [
+    "shots",
+    "shots_on_target",
+    "corners"
+  ],
+  "variant_count": 45,
+  "variants": [
+    {
+      "variant_id": "eng1_shots_lambda_0.10",
+      "statistic": "shots",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 4.025267066584974,
+      "away_mae": 3.6647947806809085,
+      "combined_mae": 3.8450309236329416,
+      "home_bias": 0.14656102854273137,
+      "away_bias": -0.0020925107025020727,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.8905817966707734,
+          "away_mae": 3.5715262221984276,
+          "combined_mae": 3.731054009434601,
+          "home_bias": 0.36318955740044345,
+          "away_bias": -0.35568146517210786,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 4.103500672196473,
+          "away_mae": 3.6724088904100474,
+          "combined_mae": 3.887954781303261,
+          "home_bias": 0.8076036322597591,
+          "away_bias": 0.40779888846851065,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 4.081718730887678,
+          "away_mae": 3.750449229434251,
+          "combined_mae": 3.9160839801609644,
+          "home_bias": -0.7311101040320085,
+          "away_bias": -0.058394955403908995,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_shots_lambda_0.05",
+      "statistic": "shots",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 4.10580047906117,
+      "away_mae": 3.72894509124108,
+      "combined_mae": 3.917372785151125,
+      "home_bias": 0.38459738938350874,
+      "away_bias": -0.07136826184749849,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.9775269741643555,
+          "away_mae": 3.686233140156481,
+          "combined_mae": 3.831880057160418,
+          "home_bias": 0.5310934596400714,
+          "away_bias": -0.6299485426080418,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 4.226999012005735,
+          "away_mae": 3.7127747952076278,
+          "combined_mae": 3.9698869036066813,
+          "home_bias": 1.2490809344663625,
+          "away_bias": 0.36646082288721626,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 4.112875451013418,
+          "away_mae": 3.7878273383591305,
+          "combined_mae": 3.950351394686274,
+          "home_bias": -0.6263822259559078,
+          "away_bias": 0.04938293417833011,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_shots_lambda_0.02",
+      "statistic": "shots",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 4.2745543833371515,
+      "away_mae": 3.9272494761167276,
+      "combined_mae": 4.100901929726939,
+      "home_bias": 0.8374590360939935,
+      "away_bias": -0.33274465836858347,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 4.167970350188656,
+          "away_mae": 3.9233019350876295,
+          "combined_mae": 4.045636142638143,
+          "home_bias": 0.800475521748651,
+          "away_bias": -1.0154873098242712,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 4.54960841340276,
+          "away_mae": 3.9580707795904404,
+          "combined_mae": 4.253839596496601,
+          "home_bias": 1.8311073884128566,
+          "away_bias": 0.04402439649702921,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 4.106084386420038,
+          "away_mae": 3.9003757136721124,
+          "combined_mae": 4.003230050046075,
+          "home_bias": -0.11920580187952681,
+          "away_bias": -0.026771061778508458,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_shots_lambda_0.10",
+      "statistic": "shots",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.6820653760257924,
+      "away_mae": 3.3774374655234287,
+      "combined_mae": 3.529751420774611,
+      "home_bias": 0.298502407519907,
+      "away_bias": -0.11993755893397436,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.5580405161270243,
+          "away_mae": 3.2938382988392663,
+          "combined_mae": 3.4259394074831455,
+          "home_bias": 0.2596761248126465,
+          "away_bias": -0.21864113445852473,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.833981800615227,
+          "away_mae": 3.5347709477688163,
+          "combined_mae": 3.684376374192022,
+          "home_bias": 0.556254137531456,
+          "away_bias": 0.09292786001498118,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.6541738113351263,
+          "away_mae": 3.303703149962203,
+          "combined_mae": 3.4789384806486647,
+          "home_bias": 0.07957696021561846,
+          "away_bias": -0.2340994023583795,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_shots_lambda_0.05",
+      "statistic": "shots",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.6980941315669895,
+      "away_mae": 3.3943883248767395,
+      "combined_mae": 3.5462412282218647,
+      "home_bias": 0.5509648880686876,
+      "away_bias": -0.2287484661038093,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.5477468465446784,
+          "away_mae": 3.3274893779361014,
+          "combined_mae": 3.4376181122403895,
+          "home_bias": 0.5022577713968975,
+          "away_bias": -0.4335181426082328,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.869310817003577,
+          "away_mae": 3.5100135739072487,
+          "combined_mae": 3.6896621954554125,
+          "home_bias": 0.8996408238681013,
+          "away_bias": 0.15904469832794035,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.677224731152714,
+          "away_mae": 3.3456620227868688,
+          "combined_mae": 3.5114433769697913,
+          "home_bias": 0.2509960689410641,
+          "away_bias": -0.4117719540311354,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_shots_lambda_0.02",
+      "statistic": "shots",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.7877367222033054,
+      "away_mae": 3.4696693238694873,
+      "combined_mae": 3.6287030230363966,
+      "home_bias": 1.0225314644065364,
+      "away_bias": -0.46544427698458,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.5911081361391917,
+          "away_mae": 3.4310022778806446,
+          "combined_mae": 3.5110552070099184,
+          "home_bias": 0.856635578204107,
+          "away_bias": -0.767617372698189,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.9819625243763688,
+          "away_mae": 3.54110081362222,
+          "combined_mae": 3.761531668999294,
+          "home_bias": 1.4360656327158863,
+          "away_bias": 0.08317881939236978,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.790139506094356,
+          "away_mae": 3.436904880105598,
+          "combined_mae": 3.613522193099977,
+          "home_bias": 0.7748931822996161,
+          "away_bias": -0.7118942776479209,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_shots_lambda_0.10",
+      "statistic": "shots",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.6660830132607733,
+      "away_mae": 3.381276190968245,
+      "combined_mae": 3.5236796021145094,
+      "home_bias": 0.007209923077686173,
+      "away_bias": -0.2654645459736626,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.5783622565636133,
+          "away_mae": 3.553149074413627,
+          "combined_mae": 3.56575566548862,
+          "home_bias": -0.01542227793007995,
+          "away_bias": -0.2486864797749859,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.755291780855571,
+          "away_mae": 3.3775960337724085,
+          "combined_mae": 3.56644390731399,
+          "home_bias": 0.10216203191669933,
+          "away_bias": -0.050410124413589434,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.664595002363136,
+          "away_mae": 3.2130834647186988,
+          "combined_mae": 3.4388392335409175,
+          "home_bias": -0.06510998475356086,
+          "away_bias": -0.49729703373241246,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_shots_lambda_0.05",
+      "statistic": "shots",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.6973827238579635,
+      "away_mae": 3.4515597249410908,
+      "combined_mae": 3.574471224399527,
+      "home_bias": 0.05363241934813565,
+      "away_bias": -0.47792332776101454,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.6368330577171384,
+          "away_mae": 3.6500508085603176,
+          "combined_mae": 3.643441933138728,
+          "home_bias": 0.11378782321514015,
+          "away_bias": -0.4664209469278073,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.7342432588644074,
+          "away_mae": 3.385822552396491,
+          "combined_mae": 3.560032905630449,
+          "home_bias": 0.1923420174256042,
+          "away_bias": -0.17337479208214776,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.7210718549923447,
+          "away_mae": 3.318805813866463,
+          "combined_mae": 3.5199388344294036,
+          "home_bias": -0.1452325825963374,
+          "away_bias": -0.7939742442730886,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_shots_lambda_0.02",
+      "statistic": "shots",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.7773551742155016,
+      "away_mae": 3.592408106270022,
+      "combined_mae": 3.6848816402427618,
+      "home_bias": 0.2096704658991128,
+      "away_bias": -0.8260370581585695,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.7885969535274864,
+          "away_mae": 3.839528661270676,
+          "combined_mae": 3.8140628073990817,
+          "home_bias": 0.39494233947581964,
+          "away_bias": -0.785816032311605,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.743851245222095,
+          "away_mae": 3.455722250093994,
+          "combined_mae": 3.5997867476580443,
+          "home_bias": 0.40271319503924863,
+          "away_bias": -0.4687110656493576,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.7996173238969235,
+          "away_mae": 3.481973407445395,
+          "combined_mae": 3.6407953656711594,
+          "home_bias": -0.1686441368177298,
+          "away_bias": -1.223584076514746,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_shots_lambda_0.10",
+      "statistic": "shots",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.6630005519075484,
+      "away_mae": 3.392880301602843,
+      "combined_mae": 3.5279404267551957,
+      "home_bias": 0.1262782402299645,
+      "away_bias": -0.19942851470593959,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.349601441046176,
+          "away_mae": 3.1303737035363395,
+          "combined_mae": 3.2399875722912577,
+          "home_bias": -0.09648095411339226,
+          "away_bias": -0.5137881239999776,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 4.001546504647018,
+          "away_mae": 3.614554097915457,
+          "combined_mae": 3.8080503012812374,
+          "home_bias": 0.5852296675401584,
+          "away_bias": 0.4337931334250858,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.6378537100294523,
+          "away_mae": 3.433713103356733,
+          "combined_mae": 3.5357834066930924,
+          "home_bias": -0.10991399273687259,
+          "away_bias": -0.5182905535429269,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_shots_lambda_0.05",
+      "statistic": "shots",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.68116232843258,
+      "away_mae": 3.4477303520344114,
+      "combined_mae": 3.564446340233496,
+      "home_bias": 0.2725709210226808,
+      "away_bias": -0.32741097103997335,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.358038934452891,
+          "away_mae": 3.2183871444445584,
+          "combined_mae": 3.2882130394487246,
+          "home_bias": -0.04591561735056078,
+          "away_bias": -0.8299691730701809,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 4.018926254636396,
+          "away_mae": 3.6063777419863445,
+          "combined_mae": 3.81265199831137,
+          "home_bias": 0.9234401717344088,
+          "away_bias": 0.5865573568653664,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.666521796208453,
+          "away_mae": 3.5184261696723307,
+          "combined_mae": 3.592473982940392,
+          "home_bias": -0.05981179131580559,
+          "away_bias": -0.7388210969151054,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_shots_lambda_0.02",
+      "statistic": "shots",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 3.7224861215652942,
+      "away_mae": 3.5606298313945888,
+      "combined_mae": 3.6415579764799415,
+      "home_bias": 0.5460324548652086,
+      "away_bias": -0.5648686039000771,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.3814498196177736,
+          "away_mae": 3.3647956093682105,
+          "combined_mae": 3.3731227144929923,
+          "home_bias": 0.09417245890517623,
+          "away_bias": -1.25362246893355,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 4.094038929417046,
+          "away_mae": 3.6457307491955535,
+          "combined_mae": 3.8698848393062995,
+          "home_bias": 1.3378371474190276,
+          "away_bias": 0.529395317866667,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 3.691969615661063,
+          "away_mae": 3.6713631356200027,
+          "combined_mae": 3.681666375640533,
+          "home_bias": 0.20608775827142184,
+          "away_bias": -0.9703786606333482,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_shots_lambda_0.10",
+      "statistic": "shots",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 3.6783212645608727,
+      "away_mae": 3.328957699562557,
+      "combined_mae": 3.5036394820617147,
+      "home_bias": 0.1841206602713425,
+      "away_bias": -0.00653231646496043,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.4764607333512587,
+          "away_mae": 3.289685775842811,
+          "combined_mae": 3.3830732545970346,
+          "home_bias": 0.6032945570674645,
+          "away_bias": 0.04047708309414291,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.7228955862102526,
+          "away_mae": 3.3939228072699095,
+          "combined_mae": 3.558409196740081,
+          "home_bias": 0.20663727833379958,
+          "away_bias": -0.1555835378397087,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.835607474121107,
+          "away_mae": 3.3032645155749516,
+          "combined_mae": 3.569435994848029,
+          "home_bias": -0.25756985458723664,
+          "away_bias": 0.09550950535068452,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_shots_lambda_0.05",
+      "statistic": "shots",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 3.72885193971687,
+      "away_mae": 3.346689559693831,
+      "combined_mae": 3.5377707497053503,
+      "home_bias": 0.4362217816143721,
+      "away_bias": -0.15708404996264722,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.6329098073332817,
+          "away_mae": 3.352158923962198,
+          "combined_mae": 3.4925343656477397,
+          "home_bias": 1.034458870477656,
+          "away_bias": -0.19626050350280383,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.700784788248976,
+          "away_mae": 3.3633957883450227,
+          "combined_mae": 3.532090288297,
+          "home_bias": 0.4804819138760108,
+          "away_bias": -0.24710610357477064,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.8528612235683517,
+          "away_mae": 3.324513966774272,
+          "combined_mae": 3.588687595171312,
+          "home_bias": -0.20627543951055066,
+          "away_bias": -0.027885542810367182,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_shots_lambda_0.02",
+      "statistic": "shots",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 3.870387541323802,
+      "away_mae": 3.450800304093978,
+      "combined_mae": 3.66059392270889,
+      "home_bias": 0.9628459825079192,
+      "away_bias": -0.5046796348367549,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because it ranked behind the selected candidate on aggregate validation quality",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.8618583637169936,
+          "away_mae": 3.516489070552904,
+          "combined_mae": 3.689173717134949,
+          "home_bias": 1.5730169958049376,
+          "away_bias": -0.5919409718887432,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.8045088303044605,
+          "away_mae": 3.3826659346225547,
+          "combined_mae": 3.5935873824635074,
+          "home_bias": 1.0972125399848387,
+          "away_bias": -0.5513717742192633,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 3.9447954299499517,
+          "away_mae": 3.453245907106475,
+          "combined_mae": 3.6990206685282137,
+          "home_bias": 0.21830841173398116,
+          "away_bias": -0.3707261584022583,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_shots_on_target_lambda_0.10",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 1.9226583299380529,
+      "away_mae": 1.7204634104391268,
+      "combined_mae": 1.8215608701885901,
+      "home_bias": 0.05620876450545998,
+      "away_bias": 0.01745437037177058,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.8808559978104298,
+          "away_mae": 1.7141491324216744,
+          "combined_mae": 1.797502565116052,
+          "home_bias": 0.1527193330519988,
+          "away_bias": -0.17165260239940291,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.9962655687022266,
+          "away_mae": 1.7628061958661652,
+          "combined_mae": 1.879535882284196,
+          "home_bias": 0.3458385960287105,
+          "away_bias": 0.2469732239247233,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.8908534233015022,
+          "away_mae": 1.684434903029541,
+          "combined_mae": 1.7876441631655215,
+          "home_bias": -0.3299316355643293,
+          "away_bias": -0.02295751041000863,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_shots_on_target_lambda_0.05",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 1.9298573101176433,
+      "away_mae": 1.7263887060417609,
+      "combined_mae": 1.828123008079702,
+      "home_bias": 0.1633387585659211,
+      "away_bias": 0.006286575856027497,
+      "selected_status": "selected",
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.006562, below the fixed material threshold 0.01",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.8830855590050997,
+          "away_mae": 1.7384715107502229,
+          "combined_mae": 1.8107785348776613,
+          "home_bias": 0.23859781949486072,
+          "away_bias": -0.2641969818316952,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.037632098322219,
+          "away_mae": 1.7672343392602297,
+          "combined_mae": 1.9024332187912245,
+          "home_bias": 0.5226166671878847,
+          "away_bias": 0.2705522523208717,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.8688542730256108,
+          "away_mae": 1.6734602681148298,
+          "combined_mae": 1.7711572705702205,
+          "home_bias": -0.27119821098498215,
+          "away_bias": 0.012504457078906012,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_shots_on_target_lambda_0.02",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 1.972901588994578,
+      "away_mae": 1.7752703737803417,
+      "combined_mae": 1.8740859813874602,
+      "home_bias": 0.3555274933249341,
+      "away_bias": -0.05881374922462529,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.9298110473333365,
+          "away_mae": 1.7928961184030696,
+          "combined_mae": 1.8613535828682033,
+          "home_bias": 0.35709846991481525,
+          "away_bias": -0.3808435091744335,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.1428633681574127,
+          "away_mae": 1.8307735919330503,
+          "combined_mae": 1.9868184800452313,
+          "home_bias": 0.7442476551930155,
+          "away_bias": 0.19795351109036335,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.846030351492985,
+          "away_mae": 1.7021414110049056,
+          "combined_mae": 1.7740858812489453,
+          "home_bias": -0.03476364513302849,
+          "away_bias": 0.006448750410194295,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_shots_on_target_lambda_0.10",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.76367910076227,
+      "away_mae": 1.6098195411850709,
+      "combined_mae": 1.6867493209736704,
+      "home_bias": 0.05603285187047575,
+      "away_bias": -0.06332153305114548,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.6931323981627249,
+          "away_mae": 1.5941677830460692,
+          "combined_mae": 1.6436500906043972,
+          "home_bias": -0.03478603357275388,
+          "away_bias": -0.09576708867957634,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7964364591273605,
+          "away_mae": 1.6573188580430225,
+          "combined_mae": 1.7268776585851913,
+          "home_bias": 0.19666966787996676,
+          "away_bias": 0.05745566102239186,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.8014684449967249,
+          "away_mae": 1.5779719824661214,
+          "combined_mae": 1.6897202137314231,
+          "home_bias": 0.006214921304214361,
+          "away_bias": -0.15165317149625196,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_shots_on_target_lambda_0.05",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.7644429647968165,
+      "away_mae": 1.6107397783813546,
+      "combined_mae": 1.6875913715890856,
+      "home_bias": 0.11330913505792414,
+      "away_bias": -0.10573467322422057,
+      "selected_status": "selected",
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.000842, below the fixed material threshold 0.01",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.6892114597533967,
+          "away_mae": 1.5928814093926935,
+          "combined_mae": 1.641046434573045,
+          "home_bias": -0.0050320868306484865,
+          "away_bias": -0.1803711393384038,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.808233416372276,
+          "away_mae": 1.6556416305227744,
+          "combined_mae": 1.7319375234475252,
+          "home_bias": 0.3038885374889381,
+          "away_bias": 0.08354686362707307,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7958840182647768,
+          "away_mae": 1.5836962952285962,
+          "combined_mae": 1.6897901567466866,
+          "home_bias": 0.04107095451548282,
+          "away_bias": -0.22037974396133103,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_shots_on_target_lambda_0.02",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.7814603074208029,
+      "away_mae": 1.6346136237649675,
+      "combined_mae": 1.7080369655928853,
+      "home_bias": 0.22220319792598311,
+      "away_bias": -0.2007538920260161,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7001282291533006,
+          "away_mae": 1.618979303385504,
+          "combined_mae": 1.6595537662694022,
+          "home_bias": 0.0635455974149729,
+          "away_bias": -0.31733671200821345,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.8347381620502343,
+          "away_mae": 1.6792608740122077,
+          "combined_mae": 1.756999518031221,
+          "home_bias": 0.44512272062541863,
+          "away_bias": 0.05003462083832427,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.809514531058874,
+          "away_mae": 1.605600693897191,
+          "combined_mae": 1.7075576124780325,
+          "home_bias": 0.15794127573755784,
+          "away_bias": -0.3349595849081591,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_shots_on_target_lambda_0.10",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.7877510209871132,
+      "away_mae": 1.6714817881864648,
+      "combined_mae": 1.729616404586789,
+      "home_bias": 0.008585237194086876,
+      "away_bias": -0.08100033905052774,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7904729672695587,
+          "away_mae": 1.669211054937059,
+          "combined_mae": 1.7298420111033088,
+          "home_bias": -0.04981100440605603,
+          "away_bias": -0.11462706524728324,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.8070638279754558,
+          "away_mae": 1.6370031696899427,
+          "combined_mae": 1.7220334988326995,
+          "home_bias": 0.09512099704579771,
+          "away_bias": -0.043832827193707714,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.765716267716325,
+          "away_mae": 1.7082311399323924,
+          "combined_mae": 1.7369737038243587,
+          "home_bias": -0.019554281057481054,
+          "away_bias": -0.08454112471059226,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_shots_on_target_lambda_0.05",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.791093062168707,
+      "away_mae": 1.6874996368692992,
+      "combined_mae": 1.739296349519003,
+      "home_bias": 0.030500874278331987,
+      "away_bias": -0.1576256433854581,
+      "selected_status": "selected",
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.009680, below the fixed material threshold 0.01",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7995229191163975,
+          "away_mae": 1.6902330915114556,
+          "combined_mae": 1.7448780053139266,
+          "home_bias": -0.015575454139481543,
+          "away_bias": -0.21323522193196173,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.8034068064269664,
+          "away_mae": 1.6491885125169774,
+          "combined_mae": 1.7262976594719717,
+          "home_bias": 0.12723310826418052,
+          "away_bias": -0.09609367396383868,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7703494609627572,
+          "away_mae": 1.723077306579464,
+          "combined_mae": 1.7467133837711106,
+          "home_bias": -0.02015503128970303,
+          "away_bias": -0.16354803426057382,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_shots_on_target_lambda_0.02",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.8084234097871938,
+      "away_mae": 1.7243798069612766,
+      "combined_mae": 1.7664016083742353,
+      "home_bias": 0.0808169083860964,
+      "away_bias": -0.2920272493787225,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.824104661503222,
+          "away_mae": 1.7300818929348645,
+          "combined_mae": 1.7770932772190433,
+          "home_bias": 0.06759807036036852,
+          "away_bias": -0.3463354790203011,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.808914251515643,
+          "away_mae": 1.6841592431782078,
+          "combined_mae": 1.7465367473469253,
+          "home_bias": 0.17114462630264698,
+          "away_bias": -0.22208980794256683,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.792251316342717,
+          "away_mae": 1.7588982847707573,
+          "combined_mae": 1.775574800556737,
+          "home_bias": 0.0037080284952736766,
+          "away_bias": -0.30765646117329953,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_shots_on_target_lambda_0.10",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.8223018493883896,
+      "away_mae": 1.6668393187912545,
+      "combined_mae": 1.744570584089822,
+      "home_bias": 0.05434763419080289,
+      "away_bias": -0.07253645923511183,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7811590519820057,
+          "away_mae": 1.6079112174707904,
+          "combined_mae": 1.694535134726398,
+          "home_bias": 0.034379852743000976,
+          "away_bias": -0.24072261906692116,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.9274347763634088,
+          "away_mae": 1.767313203939301,
+          "combined_mae": 1.847373990151355,
+          "home_bias": 0.269992705986068,
+          "away_bias": 0.2092429720954359,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.758311719819754,
+          "away_mae": 1.6252935349636723,
+          "combined_mae": 1.6918026273917133,
+          "home_bias": -0.1413296561566603,
+          "away_bias": -0.18612973073385022,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_shots_on_target_lambda_0.05",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.8226993522480424,
+      "away_mae": 1.6777635432928744,
+      "combined_mae": 1.7502314477704584,
+      "home_bias": 0.11417702382932358,
+      "away_bias": -0.12791318096496757,
+      "selected_status": "selected",
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.005661, below the fixed material threshold 0.01",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7889202945524407,
+          "away_mae": 1.6388742711491127,
+          "combined_mae": 1.7138972828507766,
+          "home_bias": 0.06318220778943348,
+          "away_bias": -0.37099577753761015,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.925724821569001,
+          "away_mae": 1.7600677722754583,
+          "combined_mae": 1.8428962969222298,
+          "home_bias": 0.41812158477640093,
+          "away_bias": 0.24758503952513944,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.753452940622685,
+          "away_mae": 1.6343485864540523,
+          "combined_mae": 1.6939007635383687,
+          "home_bias": -0.13877272107786362,
+          "away_bias": -0.26032880488243204,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_shots_on_target_lambda_0.02",
+      "statistic": "shots_on_target",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 1.8272885279285649,
+      "away_mae": 1.7025033997695476,
+      "combined_mae": 1.7648959638490562,
+      "home_bias": 0.22227505739006806,
+      "away_bias": -0.2235896655132559,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7952720271034894,
+          "away_mae": 1.688305262061823,
+          "combined_mae": 1.7417886445826563,
+          "home_bias": 0.1128666719369726,
+          "away_bias": -0.5248785541632666,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.950711945331188,
+          "away_mae": 1.7624361831218578,
+          "combined_mae": 1.8565740642265227,
+          "home_bias": 0.5945905372297073,
+          "away_bias": 0.20650369929063792,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 1.7358816113510174,
+          "away_mae": 1.6567687541249618,
+          "combined_mae": 1.6963251827379895,
+          "home_bias": -0.040632036996475836,
+          "away_bias": -0.352394141667139,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_shots_on_target_lambda_0.05",
+      "statistic": "shots_on_target",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 1.8407733543424345,
+      "away_mae": 1.6317374694255684,
+      "combined_mae": 1.7362554118840012,
+      "home_bias": 0.23131298407548395,
+      "away_bias": -0.038926140925682404,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.8589196099273513,
+          "away_mae": 1.595641458122137,
+          "combined_mae": 1.727280534024744,
+          "home_bias": 0.4498162920374477,
+          "away_bias": -0.09416420280620204,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.9073474082346098,
+          "away_mae": 1.6811366408376929,
+          "combined_mae": 1.7942420245361512,
+          "home_bias": 0.31935633758215537,
+          "away_bias": -0.0020113145956663094,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.7560530448653426,
+          "away_mae": 1.6184343093168752,
+          "combined_mae": 1.687243677091109,
+          "home_bias": -0.07523367739315127,
+          "away_bias": -0.020602905375178858,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_shots_on_target_lambda_0.10",
+      "statistic": "shots_on_target",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 1.8505467404718698,
+      "away_mae": 1.625059355943032,
+      "combined_mae": 1.737803048207451,
+      "home_bias": 0.11363738617359952,
+      "away_bias": 0.00748899950733908,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.8513170509767738,
+          "away_mae": 1.5673197221172683,
+          "combined_mae": 1.7093183865470212,
+          "home_bias": 0.28583111454152144,
+          "away_bias": -0.0007319395853909236,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.9400053087190439,
+          "away_mae": 1.6906851651817303,
+          "combined_mae": 1.8153452369503869,
+          "home_bias": 0.1860272489002529,
+          "away_bias": -0.0036487113086738055,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.7603178617197917,
+          "away_mae": 1.6171731805300975,
+          "combined_mae": 1.6887455211249445,
+          "home_bias": -0.13094620492097578,
+          "away_bias": 0.02684764941608197,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_shots_on_target_lambda_0.02",
+      "statistic": "shots_on_target",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 1.8717551654207474,
+      "away_mae": 1.6764319282390172,
+      "combined_mae": 1.7740935468298824,
+      "home_bias": 0.44942563996835977,
+      "away_bias": -0.15216736768158415,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.8882075374814309,
+          "away_mae": 1.6547528694757325,
+          "combined_mae": 1.771480203478582,
+          "home_bias": 0.642542169635341,
+          "away_bias": -0.23579301195974953,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.9403899504006732,
+          "away_mae": 1.7036356458177313,
+          "combined_mae": 1.822012798109202,
+          "home_bias": 0.5694809647440008,
+          "away_bias": -0.08195110865291559,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 1.7866680083801383,
+          "away_mae": 1.670907269423588,
+          "combined_mae": 1.728787638901863,
+          "home_bias": 0.1362537855257374,
+          "away_bias": -0.13875798243208737,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_corners_lambda_0.10",
+      "statistic": "corners",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 2.366684257704866,
+      "away_mae": 2.156056136358598,
+      "combined_mae": 2.261370197031732,
+      "home_bias": 0.008728738553834926,
+      "away_bias": -0.030121769693449405,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.285265231556654,
+          "away_mae": 2.087509806137903,
+          "combined_mae": 2.1863875188472783,
+          "home_bias": 0.1288947157237209,
+          "away_bias": -0.15845853486738878,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.4609792809661117,
+          "away_mae": 2.0856128898953434,
+          "combined_mae": 2.2732960854307276,
+          "home_bias": 0.1914966059753374,
+          "away_bias": 0.054869602628910934,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.353808260591833,
+          "away_mae": 2.2950457130425477,
+          "combined_mae": 2.32442698681719,
+          "home_bias": -0.29420510603755357,
+          "away_bias": 0.013223623158129628,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_corners_lambda_0.05",
+      "statistic": "corners",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 2.37007264235215,
+      "away_mae": 2.1701824220379122,
+      "combined_mae": 2.2701275321950316,
+      "home_bias": 0.0841584080740095,
+      "away_bias": -0.09079855038627091,
+      "selected_status": "selected",
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.008757, below the fixed material threshold 0.01",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.3078344348287687,
+          "away_mae": 2.121842675391575,
+          "combined_mae": 2.214838555110172,
+          "home_bias": 0.19161939669119585,
+          "away_bias": -0.3189116494928054,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.44658146384337,
+          "away_mae": 2.1045736090619407,
+          "combined_mae": 2.2755775364526554,
+          "home_bias": 0.36667554931592533,
+          "away_bias": -0.0035990187658240073,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.3558020283843115,
+          "away_mae": 2.2841309816602213,
+          "combined_mae": 2.3199665050222666,
+          "home_bias": -0.3058197217850927,
+          "away_bias": 0.05011501709981671,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng1_corners_lambda_0.02",
+      "statistic": "corners",
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 2.425171829471599,
+      "away_mae": 2.234785145720318,
+      "combined_mae": 2.329978487595959,
+      "home_bias": 0.24450992292017998,
+      "away_bias": -0.24137456671019272,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.3648504642158845,
+          "away_mae": 2.2090898305155355,
+          "combined_mae": 2.2869701473657096,
+          "home_bias": 0.292484903662176,
+          "away_bias": -0.5196153360367235,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.5069237937214215,
+          "away_mae": 2.186353214631813,
+          "combined_mae": 2.3466385041766173,
+          "home_bias": 0.6009562140546214,
+          "away_bias": -0.18267933703558872,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.403741230477492,
+          "away_mae": 2.308912392013606,
+          "combined_mae": 2.356326811245549,
+          "home_bias": -0.15991134895625744,
+          "away_bias": -0.02182902705826592,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_corners_lambda_0.05",
+      "statistic": "corners",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.3266919199986114,
+      "away_mae": 1.9741982681756283,
+      "combined_mae": 2.15044509408712,
+      "home_bias": 0.2349638762779867,
+      "away_bias": -0.10550781403966694,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.257632883723389,
+          "away_mae": 1.9392871494195523,
+          "combined_mae": 2.0984600165714706,
+          "home_bias": 0.23360207331219804,
+          "away_bias": -0.09130459053525819,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.374218386678698,
+          "away_mae": 2.1004702666436965,
+          "combined_mae": 2.237344326661197,
+          "home_bias": 0.3871531776891723,
+          "away_bias": 0.005965959552997924,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.348224489593747,
+          "away_mae": 1.8828373884636362,
+          "combined_mae": 2.115530939028692,
+          "home_bias": 0.0841363778325898,
+          "away_bias": -0.23118481113674055,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_corners_lambda_0.10",
+      "statistic": "corners",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.337766496009213,
+      "away_mae": 1.9713069553858749,
+      "combined_mae": 2.154536725697544,
+      "home_bias": 0.10454196308385956,
+      "away_bias": -0.06357784285152189,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2772918639999693,
+          "away_mae": 1.933313936062901,
+          "combined_mae": 2.105302900031435,
+          "home_bias": 0.10716821639639554,
+          "away_bias": -0.025092856859597272,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.38051164026016,
+          "away_mae": 2.094375514415689,
+          "combined_mae": 2.237443577337925,
+          "home_bias": 0.22948495198012228,
+          "away_bias": -0.011343586998367669,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.3554959837675096,
+          "away_mae": 1.8862314156790345,
+          "combined_mae": 2.120863699723272,
+          "home_bias": -0.023027279124939137,
+          "away_bias": -0.15429708469660075,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng2_corners_lambda_0.02",
+      "statistic": "corners",
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.336090438778713,
+      "away_mae": 2.007552851178997,
+      "combined_mae": 2.171821644978855,
+      "home_bias": 0.4763499158709193,
+      "away_bias": -0.18680338272255523,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2545095739027556,
+          "away_mae": 1.9653370143513065,
+          "combined_mae": 2.109923294127031,
+          "home_bias": 0.41087961041849086,
+          "away_bias": -0.20638296462531258,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.3901113765662654,
+          "away_mae": 2.1429035935226195,
+          "combined_mae": 2.2665074850444427,
+          "home_bias": 0.6478829438279496,
+          "away_bias": -0.022961327228249787,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.3636503658671177,
+          "away_mae": 1.9144179456630646,
+          "combined_mae": 2.139034155765091,
+          "home_bias": 0.3702871933663174,
+          "away_bias": -0.3310658563141033,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_corners_lambda_0.05",
+      "statistic": "corners",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.2417565196505516,
+      "away_mae": 2.087747601700295,
+      "combined_mae": 2.1647520606754234,
+      "home_bias": 0.029743333866280565,
+      "away_bias": -0.15088194486443865,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.218079831171674,
+          "away_mae": 2.0710470877048204,
+          "combined_mae": 2.144563459438247,
+          "home_bias": 0.15420466025669016,
+          "away_bias": -0.2155460659514066,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.302924716082091,
+          "away_mae": 2.161222781163033,
+          "combined_mae": 2.232073748622562,
+          "home_bias": 0.06572516498914856,
+          "away_bias": -0.027483469761268066,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2042650116978897,
+          "away_mae": 2.030972936233032,
+          "combined_mae": 2.117618973965461,
+          "home_bias": -0.13069982364699703,
+          "away_bias": -0.20961629888064126,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_corners_lambda_0.10",
+      "statistic": "corners",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.2500632667499083,
+      "away_mae": 2.090134460851958,
+      "combined_mae": 2.1700988638009333,
+      "home_bias": -0.007851690647852424,
+      "away_bias": -0.08871371612212184,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2361472345293687,
+          "away_mae": 2.047967512077864,
+          "combined_mae": 2.1420573733036163,
+          "home_bias": 0.0839128351782007,
+          "away_bias": -0.14577781927047034,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.3000032101986037,
+          "away_mae": 2.1928548170969093,
+          "combined_mae": 2.2464290136477563,
+          "home_bias": -0.004316318131871571,
+          "away_bias": 0.02125655239191471,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.214039355521753,
+          "away_mae": 2.0295810533810994,
+          "combined_mae": 2.1218102044514264,
+          "home_bias": -0.10315158898988638,
+          "away_bias": -0.14161988148780988,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng3_corners_lambda_0.02",
+      "statistic": "corners",
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.246260385763809,
+      "away_mae": 2.114480695129654,
+      "combined_mae": 2.1803705404467317,
+      "home_bias": 0.13618564733160307,
+      "away_bias": -0.2658168606396866,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2182720676257075,
+          "away_mae": 2.136882897151747,
+          "combined_mae": 2.177577482388727,
+          "home_bias": 0.2847249552581391,
+          "away_bias": -0.3212634549152994,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.3201751653941374,
+          "away_mae": 2.155858526065862,
+          "combined_mae": 2.23801684573,
+          "home_bias": 0.22314629262366792,
+          "away_bias": -0.1494332630933346,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.200333924271582,
+          "away_mae": 2.050700662171354,
+          "combined_mae": 2.125517293221468,
+          "home_bias": -0.09931430588699784,
+          "away_bias": -0.326753863910426,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_corners_lambda_0.05",
+      "statistic": "corners",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.1897334602080587,
+      "away_mae": 2.002912554993253,
+      "combined_mae": 2.096323007600656,
+      "home_bias": 0.1240506521377798,
+      "away_bias": -0.13734663744983538,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.079046196639453,
+          "away_mae": 2.0033452346863387,
+          "combined_mae": 2.0411957156628957,
+          "home_bias": 0.12427471019834499,
+          "away_bias": -0.3472587537602629,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2753429985156335,
+          "away_mae": 2.045099204066442,
+          "combined_mae": 2.1602211012910377,
+          "home_bias": 0.2235956568683574,
+          "away_bias": 0.16562112359359996,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2148111854690895,
+          "away_mae": 1.960293226226978,
+          "combined_mae": 2.0875522058480342,
+          "home_bias": 0.02428158934663703,
+          "away_bias": -0.23040228218284323,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_corners_lambda_0.10",
+      "statistic": "corners",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.2011825027665397,
+      "away_mae": 1.9976343724817702,
+      "combined_mae": 2.099408437624155,
+      "home_bias": 0.06266499245649348,
+      "away_bias": -0.08721478595506953,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.0822747142254276,
+          "away_mae": 1.9887298320502254,
+          "combined_mae": 2.0355022731378267,
+          "home_bias": 0.0707059666798062,
+          "away_bias": -0.2203723091514525,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.3063458688231906,
+          "away_mae": 2.0683006969174347,
+          "combined_mae": 2.1873232828703126,
+          "home_bias": 0.1037311990783174,
+          "away_bias": 0.1403087936085821,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.2149269252510018,
+          "away_mae": 1.9358725884776506,
+          "combined_mae": 2.075399756864326,
+          "home_bias": 0.013557811611356859,
+          "away_bias": -0.18158084232233815,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "eng4_corners_lambda_0.02",
+      "statistic": "corners",
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1656,
+      "home_mae": 2.1831387081588454,
+      "away_mae": 2.027205571414916,
+      "combined_mae": 2.105172139786881,
+      "home_bias": 0.23891561838872097,
+      "away_bias": -0.22929575976931246,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.081645016736132,
+          "away_mae": 2.044590441835162,
+          "combined_mae": 2.063117729285647,
+          "home_bias": 0.20005219489200338,
+          "away_bias": -0.5040408400700551,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.267938402509868,
+          "away_mae": 2.039305910368608,
+          "combined_mae": 2.153622156439238,
+          "home_bias": 0.39631834767274304,
+          "away_bias": 0.12155370336595445,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 552,
+          "home_mae": 2.1998327052305355,
+          "away_mae": 1.9977203620409787,
+          "combined_mae": 2.098776533635757,
+          "home_bias": 0.12037631260141647,
+          "away_bias": -0.3054001426038367,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_corners_lambda_0.05",
+      "statistic": "corners",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.05,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 2.2641921801770803,
+      "away_mae": 1.854292964120575,
+      "combined_mae": 2.0592425721488277,
+      "home_bias": 0.17057455905257493,
+      "away_bias": -0.11357005339230405,
+      "selected_status": "selected",
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.2182941966043073,
+          "away_mae": 1.9384837077839256,
+          "combined_mae": 2.078388952194117,
+          "home_bias": 0.37833575614889037,
+          "away_bias": -0.2671756078432274,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.27787920130845,
+          "away_mae": 1.8708589533404383,
+          "combined_mae": 2.074369077324444,
+          "home_bias": 0.0523169805298766,
+          "away_bias": -0.11933845322531543,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.2964031426184834,
+          "away_mae": 1.7535362312373612,
+          "combined_mae": 2.024969686927922,
+          "home_bias": 0.08107094047895787,
+          "away_bias": 0.04580390089163066,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_corners_lambda_0.10",
+      "statistic": "corners",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.1,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 2.2685403125210524,
+      "away_mae": 1.8520355813491152,
+      "combined_mae": 2.0602879469350834,
+      "home_bias": 0.07828365479237712,
+      "away_bias": -0.02204876497528336,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.206231371059675,
+          "away_mae": 1.9016830400648328,
+          "combined_mae": 2.053957205562254,
+          "home_bias": 0.21252867087553787,
+          "away_bias": -0.11286754845532763,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.329823075727611,
+          "away_mae": 1.8811693216919314,
+          "combined_mae": 2.1054961987097713,
+          "home_bias": -0.03508955943664025,
+          "away_bias": -0.051887176995451444,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.269566490775871,
+          "away_mae": 1.773254382290581,
+          "combined_mae": 2.021410436533226,
+          "home_bias": 0.05741185293823373,
+          "away_bias": 0.098608430524929,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    },
+    {
+      "variant_id": "esp1_corners_lambda_0.02",
+      "statistic": "corners",
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "candidate_lambda": 0.02,
+      "training_period": {
+        "start_season": "2122",
+        "end_season": "2324",
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "validation_period": {
+        "start_season": "2223",
+        "end_season": "2425",
+        "season_codes": [
+          "2223",
+          "2324",
+          "2425"
+        ]
+      },
+      "evaluation_sample_count": 1140,
+      "home_mae": 2.273263724126995,
+      "away_mae": 1.9013481077020344,
+      "combined_mae": 2.0873059159145146,
+      "home_bias": 0.36472022056654835,
+      "away_bias": -0.3080304757558141,
+      "selected_status": "rejected",
+      "selection_reason": "rejected because the reference lambda was retained under the fixed material-improvement rule",
+      "model_version": "football_gap_lambda_fitting_v1",
+      "fold_count": 3,
+      "folds": [
+        {
+          "fold_id": "fold_1",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2122",
+            "season_codes": [
+              "2122"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2223",
+            "end_season": "2223",
+            "season_codes": [
+              "2223"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.2690092670137822,
+          "away_mae": 2.0342560370966027,
+          "combined_mae": 2.1516326520551927,
+          "home_bias": 0.5930761580239907,
+          "away_bias": -0.4785423370673454,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_2",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2223",
+            "season_codes": [
+              "2122",
+              "2223"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2324",
+            "end_season": "2324",
+            "season_codes": [
+              "2324"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.244851130426402,
+          "away_mae": 1.8961672022580378,
+          "combined_mae": 2.07050916634222,
+          "home_bias": 0.2617890345917627,
+          "away_bias": -0.3161369265704502,
+          "model_version": "football_gap_lambda_fitting_v1"
+        },
+        {
+          "fold_id": "fold_3",
+          "training_period": {
+            "start_season": "2122",
+            "end_season": "2324",
+            "season_codes": [
+              "2122",
+              "2223",
+              "2324"
+            ]
+          },
+          "validation_period": {
+            "start_season": "2425",
+            "end_season": "2425",
+            "season_codes": [
+              "2425"
+            ]
+          },
+          "evaluation_sample_count": 380,
+          "home_mae": 2.3059307749408013,
+          "away_mae": 1.7736210837514625,
+          "combined_mae": 2.039775929346132,
+          "home_bias": 0.23929546908389163,
+          "away_bias": -0.12941216362964666,
+          "model_version": "football_gap_lambda_fitting_v1"
+        }
+      ],
+      "final_holdout_season": "2526"
+    }
+  ],
+  "selections": [
+    {
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "statistic": "corners",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng1_corners_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 2.2701275321950316,
+      "reference_validation_combined_mae": 2.2701275321950316,
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.008757, below the fixed material threshold 0.01",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 380,
+        "home_mae": 2.097051479154769,
+        "away_mae": 2.1192370902318203,
+        "combined_mae": 2.108144284693295,
+        "home_bias": -0.11748517024177345,
+        "away_bias": -0.08616566600722565
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "statistic": "corners",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng2_corners_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 2.15044509408712,
+      "reference_validation_combined_mae": 2.15044509408712,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 2.3283023012592308,
+        "away_mae": 1.9503001306761776,
+        "combined_mae": 2.1393012159677043,
+        "home_bias": 0.1071693480723666,
+        "away_bias": 0.03226278589779934
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "statistic": "corners",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng3_corners_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 2.1647520606754234,
+      "reference_validation_combined_mae": 2.1647520606754234,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 2.2210639269181733,
+        "away_mae": 2.1191074013983386,
+        "combined_mae": 2.170085664158256,
+        "home_bias": 0.16593405924979515,
+        "away_bias": -0.020410638687465326
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "statistic": "corners",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng4_corners_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 2.096323007600656,
+      "reference_validation_combined_mae": 2.096323007600656,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 2.186681633996376,
+        "away_mae": 2.000037682780752,
+        "combined_mae": 2.093359658388564,
+        "home_bias": 0.09781461660528158,
+        "away_bias": -0.058456327733798594
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "statistic": "corners",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "esp1_corners_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 2.0592425721488277,
+      "reference_validation_combined_mae": 2.0592425721488277,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 380,
+        "home_mae": 2.32305660754504,
+        "away_mae": 1.91690704637031,
+        "combined_mae": 2.119981826957675,
+        "home_bias": 0.014008241982970317,
+        "away_bias": 0.040078673927257814
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "statistic": "shots",
+      "selected_lambda": 0.1,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng1_shots_lambda_0.10",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 3.8450309236329416,
+      "reference_validation_combined_mae": 3.917372785151125,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 380,
+        "home_mae": 3.395248904870619,
+        "away_mae": 3.3498274605744,
+        "combined_mae": 3.3725381827225096,
+        "home_bias": 0.041139049305653375,
+        "away_bias": -0.2983272573941152
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "statistic": "shots",
+      "selected_lambda": 0.1,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng2_shots_lambda_0.10",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 3.529751420774611,
+      "reference_validation_combined_mae": 3.5462412282218647,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 3.8709731823437017,
+        "away_mae": 3.362690391142439,
+        "combined_mae": 3.6168317867430706,
+        "home_bias": 0.2862006006232836,
+        "away_bias": 0.22996135284754027
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "statistic": "shots",
+      "selected_lambda": 0.1,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng3_shots_lambda_0.10",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 3.5236796021145094,
+      "reference_validation_combined_mae": 3.574471224399527,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 3.5887133281578074,
+        "away_mae": 3.431455427615605,
+        "combined_mae": 3.5100843778867064,
+        "home_bias": 0.27601934641722004,
+        "away_bias": 0.13291728660812213
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "statistic": "shots",
+      "selected_lambda": 0.1,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng4_shots_lambda_0.10",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 3.5279404267551957,
+      "reference_validation_combined_mae": 3.564446340233496,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 3.7049890619519594,
+        "away_mae": 3.2860379451804858,
+        "combined_mae": 3.4955135035662224,
+        "home_bias": -0.008709745055836604,
+        "away_bias": 0.045809045607140955
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "statistic": "shots",
+      "selected_lambda": 0.1,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "esp1_shots_lambda_0.10",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 3.5036394820617147,
+      "reference_validation_combined_mae": 3.5377707497053503,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 380,
+        "home_mae": 3.77247896573363,
+        "away_mae": 3.610536655746475,
+        "combined_mae": 3.6915078107400525,
+        "home_bias": 0.36352683684357096,
+        "away_bias": 0.01421842014105436
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "statistic": "shots_on_target",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng1_shots_on_target_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 1.828123008079702,
+      "reference_validation_combined_mae": 1.828123008079702,
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.006562, below the fixed material threshold 0.01",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 380,
+        "home_mae": 1.7568023921014346,
+        "away_mae": 1.6326792899747222,
+        "combined_mae": 1.6947408410380782,
+        "home_bias": -0.29793007175213504,
+        "away_bias": -0.22003804683254252
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "statistic": "shots_on_target",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng2_shots_on_target_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 1.6875913715890856,
+      "reference_validation_combined_mae": 1.6875913715890856,
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.000842, below the fixed material threshold 0.01",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 1.837483006348827,
+        "away_mae": 1.6726855511953564,
+        "combined_mae": 1.7550842787720917,
+        "home_bias": 0.11205539526797745,
+        "away_bias": 0.06357641096132663
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "statistic": "shots_on_target",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng3_shots_on_target_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 1.739296349519003,
+      "reference_validation_combined_mae": 1.739296349519003,
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.009680, below the fixed material threshold 0.01",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 1.8926572666629873,
+        "away_mae": 1.7633568237052664,
+        "combined_mae": 1.8280070451841268,
+        "home_bias": 0.04298238985644235,
+        "away_bias": -0.09840844901299615
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "statistic": "shots_on_target",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "eng4_shots_on_target_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 1.7502314477704584,
+      "reference_validation_combined_mae": 1.7502314477704584,
+      "selection_reason": "reference lambda retained because the best non-reference candidate improved aggregate validation combined MAE by only 0.005661, below the fixed material threshold 0.01",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 552,
+        "home_mae": 1.8204708244990468,
+        "away_mae": 1.6619733468427875,
+        "combined_mae": 1.741222085670917,
+        "home_bias": -0.028226903400853487,
+        "away_bias": -0.059999020936234576
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    },
+    {
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "statistic": "shots_on_target",
+      "selected_lambda": 0.05,
+      "reference_lambda": 0.05,
+      "selected_variant_id": "esp1_shots_on_target_lambda_0.05",
+      "validation_fold_count": 3,
+      "warmup_season": "2122",
+      "validation_seasons": [
+        "2223",
+        "2324",
+        "2425"
+      ],
+      "final_holdout_season": "2526",
+      "selected_validation_combined_mae": 1.7362554118840012,
+      "reference_validation_combined_mae": 1.7362554118840012,
+      "selection_reason": "selected lowest aggregate validation combined MAE from the fixed lambda grid",
+      "selected_holdout_metrics": {
+        "evaluation_sample_count": 380,
+        "home_mae": 1.6880148130471264,
+        "away_mae": 1.6766924263883671,
+        "combined_mae": 1.6823536197177467,
+        "home_bias": 0.18823595706162674,
+        "away_bias": 0.03336925118351465
+      },
+      "model_version": "football_gap_lambda_fitting_v1"
+    }
+  ],
+  "insufficient_scope": [],
+  "code_identity": {
+    "fitting_module": "sports_ai.experiments.football_gap_lambda_fitting",
+    "replay_module": "sports_ai.experiments.football_gap_shots_walkforward",
+    "engine_module": "sports_ai.agents.football.gap_ratings"
+  }
+}

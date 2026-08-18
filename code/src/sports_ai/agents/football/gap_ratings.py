@@ -32,7 +32,7 @@ class GapStateRecord:
     attack_rating: float
     defense_rating: float
     matches_observed: int
-    as_of_date: str | None
+    as_of: str | None
     learning_rate: float
     model_version: str
 
@@ -163,7 +163,7 @@ class GapRatingsEngine:
             attack_rating=baseline,
             defense_rating=baseline,
             matches_observed=0,
-            as_of_date=None,
+            as_of=None,
             learning_rate=config.learning_rate,
             model_version=config.model_version,
         )
@@ -248,7 +248,7 @@ class GapRatingsEngine:
             attack_rating=home_state.attack_rating + learning_rate * error_home,
             defense_rating=home_state.defense_rating + learning_rate * error_away,
             matches_observed=home_state.matches_observed + 1,
-            as_of_date=observation.match_date,
+            as_of=observation.match_date,
             learning_rate=home_state.learning_rate,
             model_version=home_state.model_version,
         )
@@ -260,7 +260,7 @@ class GapRatingsEngine:
             attack_rating=away_state.attack_rating + learning_rate * error_away,
             defense_rating=away_state.defense_rating + learning_rate * error_home,
             matches_observed=away_state.matches_observed + 1,
-            as_of_date=observation.match_date,
+            as_of=observation.match_date,
             learning_rate=away_state.learning_rate,
             model_version=away_state.model_version,
         )

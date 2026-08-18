@@ -5,6 +5,8 @@ import pytest
 
 from sports_ai.experiments.football_gap_shots_walkforward import (
     DEFAULT_LEARNING_RATE,
+    ENGINE_MODEL_VERSION,
+    build_historical_prediction_as_of,
     run_gap_walkforward_experiment,
     write_gap_walkforward_artifacts,
 )
@@ -440,3 +442,30 @@ def test_walkforward_artifact_serialization_is_consistent(tmp_path):
     assert len(final_state["state_records"]) == len(result["final_state"]["state_records"])
     assert "Football GAP Shots Walk-Forward" in markdown_path.read_text(encoding="utf-8")
     assert manifest["learning_rate"] == pytest.approx(DEFAULT_LEARNING_RATE)
+
+
+def test_walkforward_predictions_persist_explicit_as_of_and_model_version(tmp_path):
+    research_db = tmp_path / "football_research.sqlite"
+    _create_store(research_db, _base_rows())
+
+    result = _run(research_db)
+
+    for row in result["predictions"]:
+        assert row["as_of"] == build_historical_prediction_as_of(
+            match_date=row["match_date"],
+            kickoff_time=row["kickoff_time"],
+        )
+        assert row["as_of"] <= f"{row['match_date']}T{row['kickoff_time'] or '00:00'}:00"
+        assert row["model_version"] == ENGINE_MODEL_VERSION
+
+
+def test_walkforward_as_of_is_deterministic_across_reruns(tmp_path):
+    research_db = tmp_path / "football_research.sqlite"
+    _create_store(research_db, _base_rows())
+
+    first = _run(research_db)
+    second = _run(research_db)
+
+    first_as_of = [row["as_of"] for row in first["predictions"]]
+    second_as_of = [row["as_of"] for row in second["predictions"]]
+    assert first_as_of == second_as_of

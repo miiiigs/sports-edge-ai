@@ -1,0 +1,1142 @@
+[
+  {
+    "variant_id": "eng1_2223_home_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-22T16:00:00",
+    "coefficients": {
+      "beta_shots": 0.11481476362861931,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 380
+  },
+  {
+    "variant_id": "eng1_2223_away_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-22T16:00:00",
+    "coefficients": {
+      "beta_shots": 0.108838523933733,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 380
+  },
+  {
+    "variant_id": "eng1_2324_home_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-28T16:30:00",
+    "coefficients": {
+      "beta_shots": 0.11893680972327575,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 760
+  },
+  {
+    "variant_id": "eng1_2324_away_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-28T16:30:00",
+    "coefficients": {
+      "beta_shots": 0.07244626117795175,
+      "beta_shots_on_target": 0.09735697611351363
+    },
+    "sample_size": 760
+  },
+  {
+    "variant_id": "eng1_2425_home_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-05-19T16:00:00",
+    "coefficients": {
+      "beta_shots": 0.12105854653793775,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1140
+  },
+  {
+    "variant_id": "eng1_2425_away_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-05-19T16:00:00",
+    "coefficients": {
+      "beta_shots": 0.11313716289448973,
+      "beta_shots_on_target": 0.0016903130425011998
+    },
+    "sample_size": 1140
+  },
+  {
+    "variant_id": "eng1_2526_home_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-25T16:00:00",
+    "coefficients": {
+      "beta_shots": 0.11661636266881399,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1520
+  },
+  {
+    "variant_id": "eng1_2526_away_conversion_fixed_form_v1",
+    "competition_id": "ENG1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-25T16:00:00",
+    "coefficients": {
+      "beta_shots": 0.11463176221557707,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1520
+  },
+  {
+    "variant_id": "eng2_2223_home_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-07T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.11838929899530398,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 552
+  },
+  {
+    "variant_id": "eng2_2223_away_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-07T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.10017570417233494,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 552
+  },
+  {
+    "variant_id": "eng2_2324_home_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-08T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.0017525419777059104,
+      "beta_shots_on_target": 0.33089372767514447
+    },
+    "sample_size": 1104
+  },
+  {
+    "variant_id": "eng2_2324_away_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-08T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.1025210904916076,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1104
+  },
+  {
+    "variant_id": "eng2_2425_home_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-05-04T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.03984119983733917,
+      "beta_shots_on_target": 0.21920991392257433
+    },
+    "sample_size": 1656
+  },
+  {
+    "variant_id": "eng2_2425_away_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-05-04T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.10430135981761131,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1656
+  },
+  {
+    "variant_id": "eng2_2526_home_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-03T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.07059297590940926,
+      "beta_shots_on_target": 0.12341963826435158
+    },
+    "sample_size": 2208
+  },
+  {
+    "variant_id": "eng2_2526_away_conversion_fixed_form_v1",
+    "competition_id": "ENG2",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-03T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.10296987862117095,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 2208
+  },
+  {
+    "variant_id": "eng3_2223_home_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-04-30T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.11857688761040923,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 552
+  },
+  {
+    "variant_id": "eng3_2223_away_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-04-30T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.08101410077563265,
+      "beta_shots_on_target": 0.06458118993931676
+    },
+    "sample_size": 552
+  },
+  {
+    "variant_id": "eng3_2324_home_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-07T12:00:00",
+    "coefficients": {
+      "beta_shots": 0.11370818227755335,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1104
+  },
+  {
+    "variant_id": "eng3_2324_away_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-07T12:00:00",
+    "coefficients": {
+      "beta_shots": 0.048406254666252674,
+      "beta_shots_on_target": 0.1573714286238434
+    },
+    "sample_size": 1104
+  },
+  {
+    "variant_id": "eng3_2425_home_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-04-27T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.11234941460019726,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1656
+  },
+  {
+    "variant_id": "eng3_2425_away_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-04-27T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.0565090674194342,
+      "beta_shots_on_target": 0.13686926569402744
+    },
+    "sample_size": 1656
+  },
+  {
+    "variant_id": "eng3_2526_home_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-03T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.11260909654716364,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 2208
+  },
+  {
+    "variant_id": "eng3_2526_away_conversion_fixed_form_v1",
+    "competition_id": "ENG3",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-03T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.06888800027983082,
+      "beta_shots_on_target": 0.1049068216936195
+    },
+    "sample_size": 2208
+  },
+  {
+    "variant_id": "eng4_2223_home_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-07T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.11098660406949457,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 552
+  },
+  {
+    "variant_id": "eng4_2223_away_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-07T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.03340903752616961,
+      "beta_shots_on_target": 0.1866646219703869
+    },
+    "sample_size": 552
+  },
+  {
+    "variant_id": "eng4_2324_home_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-08T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.10766426463863002,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 1104
+  },
+  {
+    "variant_id": "eng4_2324_away_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-05-08T12:30:00",
+    "coefficients": {
+      "beta_shots": 0.0037834668959808543,
+      "beta_shots_on_target": 0.27628764274026835
+    },
+    "sample_size": 1104
+  },
+  {
+    "variant_id": "eng4_2425_home_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-04-27T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.06858559059871124,
+      "beta_shots_on_target": 0.13510663730769365
+    },
+    "sample_size": 1656
+  },
+  {
+    "variant_id": "eng4_2425_away_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-04-27T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.10431899387838875,
+      "beta_shots_on_target": 0.0019770145149651673
+    },
+    "sample_size": 1656
+  },
+  {
+    "variant_id": "eng4_2526_home_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-03T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.1009968521843315,
+      "beta_shots_on_target": 0.0316375267809788
+    },
+    "sample_size": 2208
+  },
+  {
+    "variant_id": "eng4_2526_away_conversion_fixed_form_v1",
+    "competition_id": "ENG4",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-03T15:00:00",
+    "coefficients": {
+      "beta_shots": 0.10438652291208687,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 2208
+  },
+  {
+    "variant_id": "esp1_2223_home_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-22T21:00:00",
+    "coefficients": {
+      "beta_shots": 0.06266335847168922,
+      "beta_shots_on_target": 0.16254880644000158
+    },
+    "sample_size": 380
+  },
+  {
+    "variant_id": "esp1_2223_away_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2122",
+      "season_codes": [
+        "2122"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2223",
+      "end_season": "2223",
+      "season_codes": [
+        "2223"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2022-05-22T21:00:00",
+    "coefficients": {
+      "beta_shots": 0.09773056996680263,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 380
+  },
+  {
+    "variant_id": "esp1_2324_home_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-06-04T20:00:00",
+    "coefficients": {
+      "beta_shots": 0.07979441096111874,
+      "beta_shots_on_target": 0.10185211286259914
+    },
+    "sample_size": 760
+  },
+  {
+    "variant_id": "esp1_2324_away_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2223",
+      "season_codes": [
+        "2122",
+        "2223"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2324",
+      "end_season": "2324",
+      "season_codes": [
+        "2324"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2023-06-04T20:00:00",
+    "coefficients": {
+      "beta_shots": 0.09952167758797838,
+      "beta_shots_on_target": 0.0
+    },
+    "sample_size": 760
+  },
+  {
+    "variant_id": "esp1_2425_home_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-05-26T20:00:00",
+    "coefficients": {
+      "beta_shots": 0.01977032715930097,
+      "beta_shots_on_target": 0.27976127824372404
+    },
+    "sample_size": 1140
+  },
+  {
+    "variant_id": "esp1_2425_away_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2324",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2425",
+      "end_season": "2425",
+      "season_codes": [
+        "2425"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2024-05-26T20:00:00",
+    "coefficients": {
+      "beta_shots": 0.04219076604908778,
+      "beta_shots_on_target": 0.17606309557932553
+    },
+    "sample_size": 1140
+  },
+  {
+    "variant_id": "esp1_2526_home_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "home",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-25T20:00:00",
+    "coefficients": {
+      "beta_shots": 0.028227958955708343,
+      "beta_shots_on_target": 0.2509652052483562
+    },
+    "sample_size": 1520
+  },
+  {
+    "variant_id": "esp1_2526_away_conversion_fixed_form_v1",
+    "competition_id": "ESP1",
+    "venue": "away",
+    "feature_definition": "expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side; coefficients are fit separately by competition and venue with non-negative least squares and no intercept.",
+    "train_period": {
+      "start_season": "2122",
+      "end_season": "2425",
+      "season_codes": [
+        "2122",
+        "2223",
+        "2324",
+        "2425"
+      ]
+    },
+    "validation_period": {
+      "start_season": "2526",
+      "end_season": "2526",
+      "season_codes": [
+        "2526"
+      ]
+    },
+    "model_version": "football_day8_goal_conversion_v1",
+    "as_of": "2025-05-25T20:00:00",
+    "coefficients": {
+      "beta_shots": 0.04280660841048907,
+      "beta_shots_on_target": 0.1820095272326725
+    },
+    "sample_size": 1520
+  }
+]

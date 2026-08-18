@@ -1,0 +1,1569 @@
+{
+  "generated_at": "2026-08-17T18:37:41+00:00",
+  "experiment_id": "EXP-012",
+  "experiment_version": "football_day9_scoreline_model_v1",
+  "source_research_db_path": "research\\football_research\\store\\football_research.sqlite",
+  "day7_gap_baseline_experiment_version": "football_gap_lambda_fitting_v1",
+  "day8_experiment_version": "football_day8_goal_conversion_v1",
+  "day8_conversion_model_version": "football_day8_goal_conversion_v1",
+  "scoreline_model_version": "football_day9_dixon_coles_scoreline_v1",
+  "day8_to_day9_interface_policy_id": "day8_expected_goals_are_day9_intensities_v1",
+  "day8_to_day9_interface_decision": "Day 8 expected_goals_home and expected_goals_away are the canonical pre-match goal intensities for Day 9. The Day 9 scoreline layer does not fit a second competing goals model. It applies Dixon-Coles low-score dependence around those fixed intensities.",
+  "day8_to_day9_interface_justification": "This avoids bypassing the closed Day 8 conversion layer and avoids double-counting the venue effect already present in the competition-and-venue Day 8 conversion.",
+  "gamma_handling_policy_id": "gamma_omitted_to_avoid_double_counting_day8_venue_effects_v1",
+  "gamma_handling_description": "The explicit Dixon-Coles home-advantage gamma term is not re-estimated in Day 9 because the Day 8 competition-and-venue conversion already produces asymmetric home and away goal intensities. Adding gamma here would create a second home-advantage channel and risk double-counting.",
+  "rho_grid": [
+    -0.2,
+    -0.15,
+    -0.13,
+    -0.1,
+    -0.05,
+    0.0,
+    0.05
+  ],
+  "time_decay_grid": [
+    0.0,
+    0.001
+  ],
+  "default_rho": 0.0,
+  "default_xi": 0.0,
+  "max_goals": 10,
+  "truncation_policy_id": "truncate_to_0_10_measure_tail_then_renormalize_in_matrix_v1",
+  "truncation_policy_description": "Construct the 0..10 x 0..10 matrix, record the raw in-matrix mass and the tail mass beyond 10 from the independent Poisson baseline, then renormalize the in-matrix probabilities to sum to one. Tail mass is preserved as a separate diagnostic field rather than silently discarded.",
+  "rho_fit_objective_id": "weighted_dixon_coles_observed_score_log_likelihood_v1",
+  "rho_fit_objective_description": "Fit rho on prior historical score outcomes only by maximizing the canonical Dixon-Coles low-score-adjusted observed-score log likelihood. No betting ROI objective is used.",
+  "time_decay_selection_policy_id": "prior_out_of_sample_log_likelihood_with_flat_reference_default_v1",
+  "time_decay_selection_policy_description": "Compare the fixed xi grid using only prior out-of-sample fold log likelihood. Default to the simpler flat-weight xi=0.0 before any comparison evidence exists and prefer xi=0.0 on ties.",
+  "prediction_count": 9664,
+  "rho_variant_count": 210,
+  "competitions_processed": [
+    "ENG1",
+    "ENG2",
+    "ENG3",
+    "ENG4",
+    "ESP1"
+  ],
+  "seasons_processed": [
+    "2223",
+    "2324",
+    "2425",
+    "2526"
+  ],
+  "final_rho_by_competition": [
+    {
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "selected_rho": 0.0,
+      "selected_xi": 0.0,
+      "latest_season_evaluated": "2526",
+      "pdf_reference_rho": -0.13,
+      "gamma_handling": "gamma_omitted_to_avoid_double_counting_day8_venue_effects_v1"
+    },
+    {
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "selected_rho": 0.0,
+      "selected_xi": 0.0,
+      "latest_season_evaluated": "2526",
+      "pdf_reference_rho": -0.13,
+      "gamma_handling": "gamma_omitted_to_avoid_double_counting_day8_venue_effects_v1"
+    },
+    {
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "selected_rho": 0.0,
+      "selected_xi": 0.0,
+      "latest_season_evaluated": "2526",
+      "pdf_reference_rho": -0.13,
+      "gamma_handling": "gamma_omitted_to_avoid_double_counting_day8_venue_effects_v1"
+    },
+    {
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "selected_rho": -0.05,
+      "selected_xi": 0.0,
+      "latest_season_evaluated": "2526",
+      "pdf_reference_rho": -0.13,
+      "gamma_handling": "gamma_omitted_to_avoid_double_counting_day8_venue_effects_v1"
+    },
+    {
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "selected_rho": 0.0,
+      "selected_xi": 0.0,
+      "latest_season_evaluated": "2526",
+      "pdf_reference_rho": -0.13,
+      "gamma_handling": "gamma_omitted_to_avoid_double_counting_day8_venue_effects_v1"
+    }
+  ],
+  "time_decay_summary": [
+    {
+      "competition_id": "ENG1",
+      "competition_name": "Premier League",
+      "selected_xi": 0.0,
+      "selected_xi_reason": "selected by cumulative out-of-sample fold log likelihood with xi=0.0 as the simpler tie-break",
+      "cumulative_out_of_sample_log_likelihood_by_xi": {
+        "0.0000": -3414.9721247855177,
+        "0.0010": -3414.9721247855177
+      },
+      "fold_count": 3
+    },
+    {
+      "competition_id": "ENG2",
+      "competition_name": "Championship",
+      "selected_xi": 0.0,
+      "selected_xi_reason": "selected by cumulative out-of-sample fold log likelihood with xi=0.0 as the simpler tie-break",
+      "cumulative_out_of_sample_log_likelihood_by_xi": {
+        "0.0000": -4709.696288654277,
+        "0.0010": -4709.696288654277
+      },
+      "fold_count": 3
+    },
+    {
+      "competition_id": "ENG3",
+      "competition_name": "League One",
+      "selected_xi": 0.0,
+      "selected_xi_reason": "selected by cumulative out-of-sample fold log likelihood with xi=0.0 as the simpler tie-break",
+      "cumulative_out_of_sample_log_likelihood_by_xi": {
+        "0.0000": -4761.077159485858,
+        "0.0010": -4761.077159485858
+      },
+      "fold_count": 3
+    },
+    {
+      "competition_id": "ENG4",
+      "competition_name": "League Two",
+      "selected_xi": 0.0,
+      "selected_xi_reason": "selected by cumulative out-of-sample fold log likelihood with xi=0.0 as the simpler tie-break",
+      "cumulative_out_of_sample_log_likelihood_by_xi": {
+        "0.0000": -4901.22732885671,
+        "0.0010": -4901.22732885671
+      },
+      "fold_count": 3
+    },
+    {
+      "competition_id": "ESP1",
+      "competition_name": "La Liga",
+      "selected_xi": 0.0,
+      "selected_xi_reason": "selected by cumulative out-of-sample fold log likelihood with xi=0.0 as the simpler tie-break",
+      "cumulative_out_of_sample_log_likelihood_by_xi": {
+        "0.0000": -3235.9768540415944,
+        "0.0010": -3235.9768540415944
+      },
+      "fold_count": 3
+    }
+  ],
+  "pdf_reference_sanity": {
+    "gamma_approx": 0.29,
+    "rho_approx": -0.13,
+    "gamma_handling": "intentionally omitted in Day 9 to avoid double-counting Day 8 home/away effects"
+  },
+  "diagnostics": {
+    "overall": {
+      "prediction_count": 9664,
+      "plain_poisson_log_likelihood": -27914.393116660576,
+      "dixon_coles_log_likelihood": -27917.242266083787,
+      "log_likelihood_improvement": -2.849149423211202,
+      "average_plain_draw_probability": 0.25253984695834336,
+      "average_dixon_coles_draw_probability": 0.2537535169679147,
+      "average_draw_probability_difference": 0.001213670009571341,
+      "draw_probability_increase_fixture_share": 0.17135761589403972,
+      "average_tail_mass_beyond_10": 2.185330003864616e-06,
+      "max_tail_mass_beyond_10": 0.00022393919680585572,
+      "average_matrix_normalization_error": 5.0306980803327406e-17,
+      "max_matrix_normalization_error": 2.220446049250313e-16,
+      "average_full_distribution_mass_estimate_error": -1.1603117289646193e-18,
+      "max_abs_full_distribution_mass_estimate_error": 1.1102230246251565e-16,
+      "average_marginal_home_mean_gap": 1.844081215350445e-05,
+      "average_marginal_away_mean_gap": 1.5861099705876665e-06,
+      "observed_score_outside_matrix_count": 0
+    },
+    "by_competition": {
+      "ENG1": {
+        "prediction_count": 1520,
+        "plain_poisson_log_likelihood": -4566.497797133804,
+        "dixon_coles_log_likelihood": -4566.888732091408,
+        "log_likelihood_improvement": -0.39093495760425867,
+        "average_plain_draw_probability": 0.2308683668872232,
+        "average_dixon_coles_draw_probability": 0.22823257422634263,
+        "average_draw_probability_difference": -0.0026357926608805552,
+        "draw_probability_increase_fixture_share": 0.0,
+        "average_tail_mass_beyond_10": 7.030320337183727e-06,
+        "max_tail_mass_beyond_10": 0.00022393919680585572,
+        "average_matrix_normalization_error": 5.0033077096594224e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": -2.0451476769410776e-18,
+        "max_abs_full_distribution_mass_estimate_error": 1.1102230246251565e-16,
+        "average_marginal_home_mean_gap": 5.71937268034267e-05,
+        "average_marginal_away_mean_gap": 6.041313140920043e-06,
+        "observed_score_outside_matrix_count": 0
+      },
+      "ENG2": {
+        "prediction_count": 2208,
+        "plain_poisson_log_likelihood": -6268.92165473645,
+        "dixon_coles_log_likelihood": -6268.92165473645,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.25622658088790934,
+        "average_dixon_coles_draw_probability": 0.25622658088790934,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0,
+        "average_tail_mass_beyond_10": 9.87054526880594e-07,
+        "max_tail_mass_beyond_10": 1.9929396936735344e-05,
+        "average_matrix_normalization_error": 5.2091986119187596e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": 0.0,
+        "max_abs_full_distribution_mass_estimate_error": 0.0,
+        "average_marginal_home_mean_gap": 8.714222105310385e-06,
+        "average_marginal_away_mean_gap": 6.403880839138076e-07,
+        "observed_score_outside_matrix_count": 0
+      },
+      "ENG3": {
+        "prediction_count": 2208,
+        "plain_poisson_log_likelihood": -6369.90265827318,
+        "dixon_coles_log_likelihood": -6369.90265827318,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2570531113950606,
+        "average_dixon_coles_draw_probability": 0.2570531113950606,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0,
+        "average_tail_mass_beyond_10": 1.044406096721784e-06,
+        "max_tail_mass_beyond_10": 2.1714774958492278e-05,
+        "average_matrix_normalization_error": 4.9879585164318627e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": 0.0,
+        "max_abs_full_distribution_mass_estimate_error": 0.0,
+        "average_marginal_home_mean_gap": 9.125386957256973e-06,
+        "average_marginal_away_mean_gap": 7.413209012258884e-07,
+        "observed_score_outside_matrix_count": 0
+      },
+      "ENG4": {
+        "prediction_count": 2208,
+        "plain_poisson_log_likelihood": -6416.689545328884,
+        "dixon_coles_log_likelihood": -6418.230127198524,
+        "log_likelihood_improvement": -1.5405818696399365,
+        "average_plain_draw_probability": 0.2619574853316352,
+        "average_dixon_coles_draw_probability": 0.2711129479172102,
+        "average_draw_probability_difference": 0.009155462585574958,
+        "draw_probability_increase_fixture_share": 0.75,
+        "average_tail_mass_beyond_10": 7.363046161782695e-07,
+        "max_tail_mass_beyond_10": 1.9616986341786102e-05,
+        "average_matrix_normalization_error": 4.9829303324435244e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": -2.5140919941692856e-18,
+        "max_abs_full_distribution_mass_estimate_error": 1.1102230246251565e-16,
+        "average_marginal_home_mean_gap": 6.306982949068411e-06,
+        "average_marginal_away_mean_gap": 6.957488021386353e-07,
+        "observed_score_outside_matrix_count": 0
+      },
+      "ESP1": {
+        "prediction_count": 1520,
+        "plain_poisson_log_likelihood": -4292.381461188255,
+        "dixon_coles_log_likelihood": -4293.299093784225,
+        "log_likelihood_improvement": -0.9176325959697351,
+        "average_plain_draw_probability": 0.24861939155513332,
+        "average_dixon_coles_draw_probability": 0.24567205631045333,
+        "average_draw_probability_difference": -0.002947335244680016,
+        "draw_probability_increase_fixture_share": 0.0,
+        "average_tail_mass_beyond_10": 2.8432346022320465e-06,
+        "max_tail_mass_beyond_10": 9.99775232747302e-05,
+        "average_matrix_normalization_error": 4.9302667211972414e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": -1.6799427346301711e-18,
+        "max_abs_full_distribution_mass_estimate_error": 1.1102230246251565e-16,
+        "average_marginal_home_mean_gap": 2.4974913650372804e-05,
+        "average_marginal_away_mean_gap": 1.0252263074014396e-06,
+        "observed_score_outside_matrix_count": 0
+      }
+    },
+    "by_season": {
+      "2223": {
+        "prediction_count": 2416,
+        "plain_poisson_log_likelihood": -6894.292510259831,
+        "dixon_coles_log_likelihood": -6894.292510259831,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.25461422774557735,
+        "average_dixon_coles_draw_probability": 0.25461422774557735,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0,
+        "average_tail_mass_beyond_10": 1.4599563572411585e-06,
+        "max_tail_mass_beyond_10": 3.727355673843746e-05,
+        "average_matrix_normalization_error": 5.05941866768335e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": 0.0,
+        "max_abs_full_distribution_mass_estimate_error": 0.0,
+        "average_marginal_home_mean_gap": 1.2652958788189295e-05,
+        "average_marginal_away_mean_gap": 9.856521150181464e-07,
+        "observed_score_outside_matrix_count": 0
+      },
+      "2324": {
+        "prediction_count": 2416,
+        "plain_poisson_log_likelihood": -7220.208492053324,
+        "dixon_coles_log_likelihood": -7221.531755833612,
+        "log_likelihood_improvement": -1.3232637802875615,
+        "average_plain_draw_probability": 0.25276680853526334,
+        "average_dixon_coles_draw_probability": 0.2520822933400959,
+        "average_draw_probability_difference": -0.0006845151951673973,
+        "draw_probability_increase_fixture_share": 0.22847682119205298,
+        "average_tail_mass_beyond_10": 2.281296772117591e-06,
+        "max_tail_mass_beyond_10": 0.00014714353179889894,
+        "average_matrix_normalization_error": 4.953726906233107e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": -3.4464704820731266e-18,
+        "max_abs_full_distribution_mass_estimate_error": 1.1102230246251565e-16,
+        "average_marginal_home_mean_gap": 1.9744240745054344e-05,
+        "average_marginal_away_mean_gap": 1.1124534023923824e-06,
+        "observed_score_outside_matrix_count": 0
+      },
+      "2425": {
+        "prediction_count": 2416,
+        "plain_poisson_log_likelihood": -6908.384431959265,
+        "dixon_coles_log_likelihood": -6908.589591405192,
+        "log_likelihood_improvement": -0.205159445926256,
+        "average_plain_draw_probability": 0.2512806601704654,
+        "average_dixon_coles_draw_probability": 0.25404549166911544,
+        "average_draw_probability_difference": 0.0027648314986500264,
+        "draw_probability_increase_fixture_share": 0.22847682119205298,
+        "average_tail_mass_beyond_10": 2.888582803974468e-06,
+        "max_tail_mass_beyond_10": 0.00022393919680585572,
+        "average_matrix_normalization_error": 5.2018727809423726e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": -7.352470361756004e-19,
+        "max_abs_full_distribution_mass_estimate_error": 1.1102230246251565e-16,
+        "average_marginal_home_mean_gap": 2.37918726381998e-05,
+        "average_marginal_away_mean_gap": 2.3841368822697803e-06,
+        "observed_score_outside_matrix_count": 0
+      },
+      "2526": {
+        "prediction_count": 2416,
+        "plain_poisson_log_likelihood": -6891.5076823881545,
+        "dixon_coles_log_likelihood": -6892.828408585154,
+        "log_likelihood_improvement": -1.3207261969992032,
+        "average_plain_draw_probability": 0.25149769138206723,
+        "average_dixon_coles_draw_probability": 0.25427205511687,
+        "average_draw_probability_difference": 0.0027743637348027345,
+        "draw_probability_increase_fixture_share": 0.22847682119205298,
+        "average_tail_mass_beyond_10": 2.1114840821252454e-06,
+        "max_tail_mass_beyond_10": 9.99775232747302e-05,
+        "average_matrix_normalization_error": 4.907773966472132e-17,
+        "max_matrix_normalization_error": 2.220446049250313e-16,
+        "average_full_distribution_mass_estimate_error": -4.595293976097503e-19,
+        "max_abs_full_distribution_mass_estimate_error": 1.1102230246251565e-16,
+        "average_marginal_home_mean_gap": 1.757417644257437e-05,
+        "average_marginal_away_mean_gap": 1.8621974826703568e-06,
+        "observed_score_outside_matrix_count": 0
+      }
+    },
+    "by_fold": [
+      {
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "season_code": "2223",
+        "train_period": {
+          "start_season": null,
+          "end_season": null,
+          "season_codes": []
+        },
+        "evaluation_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "first Day 8 evaluation season for this competition, so default to the simpler flat-weight xi=0.0 and the plain-Poisson-equivalent rho=0.0 before any prior scoreline evidence exists",
+        "rho_selection_reason": "no prior Day 8 expected-goal outcomes exist yet for this competition, so rho defaults to 0.0",
+        "sample_size_train": 0,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1151.91660730589,
+        "dixon_coles_log_likelihood": -1151.91660730589,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.24011359627178055,
+        "average_dixon_coles_draw_probability": 0.24011359627178055,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "season_code": "2324",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2324",
+          "end_season": "2324",
+          "season_codes": [
+            "2324"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.05,
+        "xi_selection_reason": "no prior out-of-sample xi comparison exists yet, so keep the simpler flat-weight xi=0.0 default",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.05 by weighted training log likelihood",
+        "sample_size_train": 380,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.05,
+            "training_weighted_dixon_coles_log_likelihood": -1151.772564284374,
+            "training_weighted_plain_poisson_log_likelihood": -1151.9166073058916,
+            "training_weighted_log_likelihood_improvement": 0.14404302151751835,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1182.9758453500287,
+            "dixon_coles_log_likelihood": -1183.3667803076323,
+            "log_likelihood_improvement": -0.39093495760357655,
+            "average_plain_draw_probability": 0.2274269136831549,
+            "average_dixon_coles_draw_probability": 0.21688374303963268,
+            "average_draw_probability_difference": -0.010543170643522221,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.05,
+            "training_weighted_dixon_coles_log_likelihood": -1006.7915140300008,
+            "training_weighted_plain_poisson_log_likelihood": -1007.0226398855028,
+            "training_weighted_log_likelihood_improvement": 0.23112585550200038,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1182.9758453500287,
+            "dixon_coles_log_likelihood": -1183.3667803076323,
+            "log_likelihood_improvement": -0.39093495760357655,
+            "average_plain_draw_probability": 0.2274269136831549,
+            "average_dixon_coles_draw_probability": 0.21688374303963268,
+            "average_draw_probability_difference": -0.010543170643522221,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1182.9758453500287,
+        "dixon_coles_log_likelihood": -1183.3667803076323,
+        "log_likelihood_improvement": -0.39093495760357655,
+        "average_plain_draw_probability": 0.2274269136831549,
+        "average_dixon_coles_draw_probability": 0.21688374303963268,
+        "average_draw_probability_difference": -0.010543170643522221,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "season_code": "2425",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2324",
+          "season_codes": [
+            "2223",
+            "2324"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2425",
+          "end_season": "2425",
+          "season_codes": [
+            "2425"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -1183.366780, xi=0.0010: -1183.366780); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 760,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -2334.89245265592,
+            "training_weighted_plain_poisson_log_likelihood": -2334.89245265592,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1139.349767692206,
+            "dixon_coles_log_likelihood": -1139.349767692206,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2213313416356522,
+            "average_dixon_coles_draw_probability": 0.2213313416356522,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -1744.5592595501123,
+            "training_weighted_plain_poisson_log_likelihood": -1744.5592595501123,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1139.349767692206,
+            "dixon_coles_log_likelihood": -1139.349767692206,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2213313416356522,
+            "average_dixon_coles_draw_probability": 0.2213313416356522,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1139.349767692206,
+        "dixon_coles_log_likelihood": -1139.349767692206,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2213313416356522,
+        "average_dixon_coles_draw_probability": 0.2213313416356522,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "season_code": "2526",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2425",
+          "season_codes": [
+            "2223",
+            "2324",
+            "2425"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2526",
+          "end_season": "2526",
+          "season_codes": [
+            "2526"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -2322.716548, xi=0.0010: -2322.716548); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 1140,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -3474.242220348127,
+            "training_weighted_plain_poisson_log_likelihood": -3474.242220348127,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1092.2555767856795,
+            "dixon_coles_log_likelihood": -1092.2555767856795,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.23460161595830512,
+            "average_dixon_coles_draw_probability": 0.23460161595830512,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -2199.7996961652925,
+            "training_weighted_plain_poisson_log_likelihood": -2199.7996961652925,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1092.2555767856795,
+            "dixon_coles_log_likelihood": -1092.2555767856795,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.23460161595830512,
+            "average_dixon_coles_draw_probability": 0.23460161595830512,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1092.2555767856795,
+        "dixon_coles_log_likelihood": -1092.2555767856795,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.23460161595830512,
+        "average_dixon_coles_draw_probability": 0.23460161595830512,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG2",
+        "competition_name": "Championship",
+        "season_code": "2223",
+        "train_period": {
+          "start_season": null,
+          "end_season": null,
+          "season_codes": []
+        },
+        "evaluation_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "first Day 8 evaluation season for this competition, so default to the simpler flat-weight xi=0.0 and the plain-Poisson-equivalent rho=0.0 before any prior scoreline evidence exists",
+        "rho_selection_reason": "no prior Day 8 expected-goal outcomes exist yet for this competition, so rho defaults to 0.0",
+        "sample_size_train": 0,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1559.2253660821739,
+        "dixon_coles_log_likelihood": -1559.2253660821739,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2570296098046847,
+        "average_dixon_coles_draw_probability": 0.2570296098046847,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG2",
+        "competition_name": "Championship",
+        "season_code": "2324",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2324",
+          "end_season": "2324",
+          "season_codes": [
+            "2324"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "no prior out-of-sample xi comparison exists yet, so keep the simpler flat-weight xi=0.0 default",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 552,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -1559.2253660821732,
+            "training_weighted_plain_poisson_log_likelihood": -1559.2253660821732,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1612.7610890436251,
+            "dixon_coles_log_likelihood": -1612.7610890436251,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.25825395985445315,
+            "average_dixon_coles_draw_probability": 0.25825395985445315,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -1359.9513947135918,
+            "training_weighted_plain_poisson_log_likelihood": -1359.9513947135918,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1612.7610890436251,
+            "dixon_coles_log_likelihood": -1612.7610890436251,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.25825395985445315,
+            "average_dixon_coles_draw_probability": 0.25825395985445315,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1612.7610890436251,
+        "dixon_coles_log_likelihood": -1612.7610890436251,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.25825395985445315,
+        "average_dixon_coles_draw_probability": 0.25825395985445315,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG2",
+        "competition_name": "Championship",
+        "season_code": "2425",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2324",
+          "season_codes": [
+            "2223",
+            "2324"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2425",
+          "end_season": "2425",
+          "season_codes": [
+            "2425"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -1612.761089, xi=0.0010: -1612.761089); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 1104,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -3171.9864551258006,
+            "training_weighted_plain_poisson_log_likelihood": -3171.9864551258006,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1526.9386997625068,
+            "dixon_coles_log_likelihood": -1526.9386997625068,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2561619059425926,
+            "average_dixon_coles_draw_probability": 0.2561619059425926,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -2365.43348494537,
+            "training_weighted_plain_poisson_log_likelihood": -2365.43348494537,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1526.9386997625068,
+            "dixon_coles_log_likelihood": -1526.9386997625068,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2561619059425926,
+            "average_dixon_coles_draw_probability": 0.2561619059425926,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1526.9386997625068,
+        "dixon_coles_log_likelihood": -1526.9386997625068,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2561619059425926,
+        "average_dixon_coles_draw_probability": 0.2561619059425926,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG2",
+        "competition_name": "Championship",
+        "season_code": "2526",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2425",
+          "season_codes": [
+            "2223",
+            "2324",
+            "2425"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2526",
+          "end_season": "2526",
+          "season_codes": [
+            "2526"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -3139.699789, xi=0.0010: -3139.699789); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 1656,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -4698.925154888311,
+            "training_weighted_plain_poisson_log_likelihood": -4698.925154888311,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1569.9964998481448,
+            "dixon_coles_log_likelihood": -1569.9964998481448,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2534608479499068,
+            "average_dixon_coles_draw_probability": 0.2534608479499068,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -2992.262503744201,
+            "training_weighted_plain_poisson_log_likelihood": -2992.262503744201,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1569.9964998481448,
+            "dixon_coles_log_likelihood": -1569.9964998481448,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2534608479499068,
+            "average_dixon_coles_draw_probability": 0.2534608479499068,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1569.9964998481448,
+        "dixon_coles_log_likelihood": -1569.9964998481448,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2534608479499068,
+        "average_dixon_coles_draw_probability": 0.2534608479499068,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG3",
+        "competition_name": "League One",
+        "season_code": "2223",
+        "train_period": {
+          "start_season": null,
+          "end_season": null,
+          "season_codes": []
+        },
+        "evaluation_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "first Day 8 evaluation season for this competition, so default to the simpler flat-weight xi=0.0 and the plain-Poisson-equivalent rho=0.0 before any prior scoreline evidence exists",
+        "rho_selection_reason": "no prior Day 8 expected-goal outcomes exist yet for this competition, so rho defaults to 0.0",
+        "sample_size_train": 0,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1608.8254987873227,
+        "dixon_coles_log_likelihood": -1608.8254987873227,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2482825501555693,
+        "average_dixon_coles_draw_probability": 0.2482825501555693,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG3",
+        "competition_name": "League One",
+        "season_code": "2324",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2324",
+          "end_season": "2324",
+          "season_codes": [
+            "2324"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "no prior out-of-sample xi comparison exists yet, so keep the simpler flat-weight xi=0.0 default",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 552,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -1608.8254987873202,
+            "training_weighted_plain_poisson_log_likelihood": -1608.8254987873202,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1578.3388026019552,
+            "dixon_coles_log_likelihood": -1578.3388026019552,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2560994420502847,
+            "average_dixon_coles_draw_probability": 0.2560994420502847,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -1412.915054537194,
+            "training_weighted_plain_poisson_log_likelihood": -1412.915054537194,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1578.3388026019552,
+            "dixon_coles_log_likelihood": -1578.3388026019552,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2560994420502847,
+            "average_dixon_coles_draw_probability": 0.2560994420502847,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1578.3388026019552,
+        "dixon_coles_log_likelihood": -1578.3388026019552,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2560994420502847,
+        "average_dixon_coles_draw_probability": 0.2560994420502847,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG3",
+        "competition_name": "League One",
+        "season_code": "2425",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2324",
+          "season_codes": [
+            "2223",
+            "2324"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2425",
+          "end_season": "2425",
+          "season_codes": [
+            "2425"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -1578.338803, xi=0.0010: -1578.338803); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 1104,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -3187.164301389277,
+            "training_weighted_plain_poisson_log_likelihood": -3187.164301389277,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1597.0155881037138,
+            "dixon_coles_log_likelihood": -1597.0155881037138,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2637753738547779,
+            "average_dixon_coles_draw_probability": 0.2637753738547779,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -2386.3787017575596,
+            "training_weighted_plain_poisson_log_likelihood": -2386.3787017575596,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1597.0155881037138,
+            "dixon_coles_log_likelihood": -1597.0155881037138,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2637753738547779,
+            "average_dixon_coles_draw_probability": 0.2637753738547779,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1597.0155881037138,
+        "dixon_coles_log_likelihood": -1597.0155881037138,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2637753738547779,
+        "average_dixon_coles_draw_probability": 0.2637753738547779,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG3",
+        "competition_name": "League One",
+        "season_code": "2526",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2425",
+          "season_codes": [
+            "2223",
+            "2324",
+            "2425"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2526",
+          "end_season": "2526",
+          "season_codes": [
+            "2526"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -3175.354391, xi=0.0010: -3175.354391); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 1656,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -4784.179889492993,
+            "training_weighted_plain_poisson_log_likelihood": -4784.179889492993,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1585.7227687801885,
+            "dixon_coles_log_likelihood": -1585.7227687801885,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2600550795196105,
+            "average_dixon_coles_draw_probability": 0.2600550795196105,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -3063.893616746124,
+            "training_weighted_plain_poisson_log_likelihood": -3063.893616746124,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1585.7227687801885,
+            "dixon_coles_log_likelihood": -1585.7227687801885,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.2600550795196105,
+            "average_dixon_coles_draw_probability": 0.2600550795196105,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1585.7227687801885,
+        "dixon_coles_log_likelihood": -1585.7227687801885,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2600550795196105,
+        "average_dixon_coles_draw_probability": 0.2600550795196105,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG4",
+        "competition_name": "League Two",
+        "season_code": "2223",
+        "train_period": {
+          "start_season": null,
+          "end_season": null,
+          "season_codes": []
+        },
+        "evaluation_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "first Day 8 evaluation season for this competition, so default to the simpler flat-weight xi=0.0 and the plain-Poisson-equivalent rho=0.0 before any prior scoreline evidence exists",
+        "rho_selection_reason": "no prior Day 8 expected-goal outcomes exist yet for this competition, so rho defaults to 0.0",
+        "sample_size_train": 0,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1517.0027983418138,
+        "dixon_coles_log_likelihood": -1517.0027983418138,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.270479492149577,
+        "average_dixon_coles_draw_probability": 0.270479492149577,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ENG4",
+        "competition_name": "League Two",
+        "season_code": "2324",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2324",
+          "end_season": "2324",
+          "season_codes": [
+            "2324"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": -0.05,
+        "xi_selection_reason": "no prior out-of-sample xi comparison exists yet, so keep the simpler flat-weight xi=0.0 default",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=-0.05 by weighted training log likelihood",
+        "sample_size_train": 552,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": -0.05,
+            "training_weighted_dixon_coles_log_likelihood": -1516.6355115862602,
+            "training_weighted_plain_poisson_log_likelihood": -1517.0027983418152,
+            "training_weighted_log_likelihood_improvement": 0.36728675555491463,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1734.3802050224754,
+            "dixon_coles_log_likelihood": -1734.3949012491887,
+            "log_likelihood_improvement": -0.014696226713340366,
+            "average_plain_draw_probability": 0.26331242929829624,
+            "average_dixon_coles_draw_probability": 0.27569026572026656,
+            "average_draw_probability_difference": 0.012377836421970356,
+            "draw_probability_increase_fixture_share": 1.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": -0.05,
+            "training_weighted_dixon_coles_log_likelihood": -1331.3897009677269,
+            "training_weighted_plain_poisson_log_likelihood": -1331.7816758632557,
+            "training_weighted_log_likelihood_improvement": 0.3919748955288469,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1734.3802050224754,
+            "dixon_coles_log_likelihood": -1734.3949012491887,
+            "log_likelihood_improvement": -0.014696226713340366,
+            "average_plain_draw_probability": 0.26331242929829624,
+            "average_dixon_coles_draw_probability": 0.27569026572026656,
+            "average_draw_probability_difference": 0.012377836421970356,
+            "draw_probability_increase_fixture_share": 1.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1734.3802050224754,
+        "dixon_coles_log_likelihood": -1734.3949012491887,
+        "log_likelihood_improvement": -0.014696226713340366,
+        "average_plain_draw_probability": 0.26331242929829624,
+        "average_dixon_coles_draw_probability": 0.27569026572026656,
+        "average_draw_probability_difference": 0.012377836421970356,
+        "draw_probability_increase_fixture_share": 1.0
+      },
+      {
+        "competition_id": "ENG4",
+        "competition_name": "League Two",
+        "season_code": "2425",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2324",
+          "season_codes": [
+            "2223",
+            "2324"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2425",
+          "end_season": "2425",
+          "season_codes": [
+            "2425"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": -0.05,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -1734.394901, xi=0.0010: -1734.394901); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=-0.05 by weighted training log likelihood",
+        "sample_size_train": 1104,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": -0.05,
+            "training_weighted_dixon_coles_log_likelihood": -3251.030412835448,
+            "training_weighted_plain_poisson_log_likelihood": -3251.38300336429,
+            "training_weighted_log_likelihood_improvement": 0.352590528842029,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1579.4370973783741,
+            "dixon_coles_log_likelihood": -1579.642256824301,
+            "log_likelihood_improvement": -0.20515944592693813,
+            "average_plain_draw_probability": 0.2565952593903367,
+            "average_dixon_coles_draw_probability": 0.26869640594964556,
+            "average_draw_probability_difference": 0.012101146559308811,
+            "draw_probability_increase_fixture_share": 1.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": -0.05,
+            "training_weighted_dixon_coles_log_likelihood": -2465.7606461699816,
+            "training_weighted_plain_poisson_log_likelihood": -2466.019814211767,
+            "training_weighted_log_likelihood_improvement": 0.25916804178541497,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1579.4370973783741,
+            "dixon_coles_log_likelihood": -1579.642256824301,
+            "log_likelihood_improvement": -0.20515944592693813,
+            "average_plain_draw_probability": 0.2565952593903367,
+            "average_dixon_coles_draw_probability": 0.26869640594964556,
+            "average_draw_probability_difference": 0.012101146559308811,
+            "draw_probability_increase_fixture_share": 1.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1579.4370973783741,
+        "dixon_coles_log_likelihood": -1579.642256824301,
+        "log_likelihood_improvement": -0.20515944592693813,
+        "average_plain_draw_probability": 0.2565952593903367,
+        "average_dixon_coles_draw_probability": 0.26869640594964556,
+        "average_draw_probability_difference": 0.012101146559308811,
+        "draw_probability_increase_fixture_share": 1.0
+      },
+      {
+        "competition_id": "ENG4",
+        "competition_name": "League Two",
+        "season_code": "2526",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2425",
+          "season_codes": [
+            "2223",
+            "2324",
+            "2425"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2526",
+          "end_season": "2526",
+          "season_codes": [
+            "2526"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": -0.05,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -3314.037158, xi=0.0010: -3314.037158); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=-0.05 by weighted training log likelihood",
+        "sample_size_train": 1656,
+        "sample_size_evaluation": 552,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": -0.05,
+            "training_weighted_dixon_coles_log_likelihood": -4830.672669659743,
+            "training_weighted_plain_poisson_log_likelihood": -4830.820100742666,
+            "training_weighted_log_likelihood_improvement": 0.14743108292259421,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1585.8694445862213,
+            "dixon_coles_log_likelihood": -1587.1901707832205,
+            "log_likelihood_improvement": -1.3207261969992032,
+            "average_plain_draw_probability": 0.2574427604883309,
+            "average_dixon_coles_draw_probability": 0.2695856278493516,
+            "average_draw_probability_difference": 0.012142867361020663,
+            "draw_probability_increase_fixture_share": 1.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": -0.05,
+            "training_weighted_dixon_coles_log_likelihood": -3101.3892247320923,
+            "training_weighted_plain_poisson_log_likelihood": -3101.4230006119046,
+            "training_weighted_log_likelihood_improvement": 0.03377587981231045,
+            "evaluation_sample_size": 552,
+            "plain_poisson_log_likelihood": -1585.8694445862213,
+            "dixon_coles_log_likelihood": -1587.1901707832205,
+            "log_likelihood_improvement": -1.3207261969992032,
+            "average_plain_draw_probability": 0.2574427604883309,
+            "average_dixon_coles_draw_probability": 0.2695856278493516,
+            "average_draw_probability_difference": 0.012142867361020663,
+            "draw_probability_increase_fixture_share": 1.0
+          }
+        ],
+        "evaluation_sample_size": 552,
+        "plain_poisson_log_likelihood": -1585.8694445862213,
+        "dixon_coles_log_likelihood": -1587.1901707832205,
+        "log_likelihood_improvement": -1.3207261969992032,
+        "average_plain_draw_probability": 0.2574427604883309,
+        "average_dixon_coles_draw_probability": 0.2695856278493516,
+        "average_draw_probability_difference": 0.012142867361020663,
+        "draw_probability_increase_fixture_share": 1.0
+      },
+      {
+        "competition_id": "ESP1",
+        "competition_name": "La Liga",
+        "season_code": "2223",
+        "train_period": {
+          "start_season": null,
+          "end_season": null,
+          "season_codes": []
+        },
+        "evaluation_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "first Day 8 evaluation season for this competition, so default to the simpler flat-weight xi=0.0 and the plain-Poisson-equivalent rho=0.0 before any prior scoreline evidence exists",
+        "rho_selection_reason": "no prior Day 8 expected-goal outcomes exist yet for this competition, so rho defaults to 0.0",
+        "sample_size_train": 0,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1057.3222397426302,
+        "dixon_coles_log_likelihood": -1057.3222397426302,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.2517574096984514,
+        "average_dixon_coles_draw_probability": 0.2517574096984514,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ESP1",
+        "competition_name": "La Liga",
+        "season_code": "2324",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2223",
+          "season_codes": [
+            "2223"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2324",
+          "end_season": "2324",
+          "season_codes": [
+            "2324"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.05,
+        "xi_selection_reason": "no prior out-of-sample xi comparison exists yet, so keep the simpler flat-weight xi=0.0 default",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.05 by weighted training log likelihood",
+        "sample_size_train": 380,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.05,
+            "training_weighted_dixon_coles_log_likelihood": -1056.7536956321787,
+            "training_weighted_plain_poisson_log_likelihood": -1057.322239742629,
+            "training_weighted_log_likelihood_improvement": 0.5685441104503752,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1111.7525500352403,
+            "dixon_coles_log_likelihood": -1112.6701826312103,
+            "log_likelihood_improvement": -0.9176325959699625,
+            "average_plain_draw_probability": 0.24997590367769093,
+            "average_dixon_coles_draw_probability": 0.23818656269897087,
+            "average_draw_probability_difference": -0.011789340978720064,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.05,
+            "training_weighted_dixon_coles_log_likelihood": -924.584366321134,
+            "training_weighted_plain_poisson_log_likelihood": -925.0585881121245,
+            "training_weighted_log_likelihood_improvement": 0.47422179099055484,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1111.7525500352403,
+            "dixon_coles_log_likelihood": -1112.6701826312103,
+            "log_likelihood_improvement": -0.9176325959699625,
+            "average_plain_draw_probability": 0.24997590367769093,
+            "average_dixon_coles_draw_probability": 0.23818656269897087,
+            "average_draw_probability_difference": -0.011789340978720064,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1111.7525500352403,
+        "dixon_coles_log_likelihood": -1112.6701826312103,
+        "log_likelihood_improvement": -0.9176325959699625,
+        "average_plain_draw_probability": 0.24997590367769093,
+        "average_dixon_coles_draw_probability": 0.23818656269897087,
+        "average_draw_probability_difference": -0.011789340978720064,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ESP1",
+        "competition_name": "La Liga",
+        "season_code": "2425",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2324",
+          "season_codes": [
+            "2223",
+            "2324"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2425",
+          "end_season": "2425",
+          "season_codes": [
+            "2425"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -1112.670183, xi=0.0010: -1112.670183); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 760,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -2169.074789777868,
+            "training_weighted_plain_poisson_log_likelihood": -2169.074789777868,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1065.6432790224644,
+            "dixon_coles_log_likelihood": -1065.6432790224644,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.24826895662811116,
+            "average_dixon_coles_draw_probability": 0.24826895662811116,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -1616.0453055384376,
+            "training_weighted_plain_poisson_log_likelihood": -1616.0453055384376,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1065.6432790224644,
+            "dixon_coles_log_likelihood": -1065.6432790224644,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.24826895662811116,
+            "average_dixon_coles_draw_probability": 0.24826895662811116,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1065.6432790224644,
+        "dixon_coles_log_likelihood": -1065.6432790224644,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.24826895662811116,
+        "average_dixon_coles_draw_probability": 0.24826895662811116,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      },
+      {
+        "competition_id": "ESP1",
+        "competition_name": "La Liga",
+        "season_code": "2526",
+        "train_period": {
+          "start_season": "2223",
+          "end_season": "2425",
+          "season_codes": [
+            "2223",
+            "2324",
+            "2425"
+          ]
+        },
+        "evaluation_period": {
+          "start_season": "2526",
+          "end_season": "2526",
+          "season_codes": [
+            "2526"
+          ]
+        },
+        "selected_xi_for_predictions": 0.0,
+        "selected_rho_for_predictions": 0.0,
+        "xi_selection_reason": "selected xi by cumulative prior out-of-sample log likelihood (xi=0.0000: -2178.313462, xi=0.0010: -2178.313462); ties favor xi=0.0",
+        "rho_selection_reason": "fit rho chronologically on prior Day 8 expected-goal outcomes under xi=0.0000; selected rho=+0.00 by weighted training log likelihood",
+        "sample_size_train": 1140,
+        "sample_size_evaluation": 380,
+        "as_of_policy_id": "persisted_prediction_as_of_from_day8_v1",
+        "as_of_policy_description": "Reuse the persisted Day 8 historical pre-match as_of field directly. Day 9 does not invent a new timestamp and does not move as_of later than kickoff.",
+        "model_version": "football_day9_dixon_coles_scoreline_v1",
+        "xi_candidate_summaries": [
+          {
+            "candidate_xi": 0.0,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -3234.7180688003305,
+            "training_weighted_plain_poisson_log_likelihood": -3234.7180688003305,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1057.66339238792,
+            "dixon_coles_log_likelihood": -1057.66339238792,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.24447529621627984,
+            "average_dixon_coles_draw_probability": 0.24447529621627984,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          },
+          {
+            "candidate_xi": 0.001,
+            "best_rho": 0.0,
+            "training_weighted_dixon_coles_log_likelihood": -2055.860990960621,
+            "training_weighted_plain_poisson_log_likelihood": -2055.860990960621,
+            "training_weighted_log_likelihood_improvement": 0.0,
+            "evaluation_sample_size": 380,
+            "plain_poisson_log_likelihood": -1057.66339238792,
+            "dixon_coles_log_likelihood": -1057.66339238792,
+            "log_likelihood_improvement": 0.0,
+            "average_plain_draw_probability": 0.24447529621627984,
+            "average_dixon_coles_draw_probability": 0.24447529621627984,
+            "average_draw_probability_difference": 0.0,
+            "draw_probability_increase_fixture_share": 0.0
+          }
+        ],
+        "evaluation_sample_size": 380,
+        "plain_poisson_log_likelihood": -1057.66339238792,
+        "dixon_coles_log_likelihood": -1057.66339238792,
+        "log_likelihood_improvement": 0.0,
+        "average_plain_draw_probability": 0.24447529621627984,
+        "average_dixon_coles_draw_probability": 0.24447529621627984,
+        "average_draw_probability_difference": 0.0,
+        "draw_probability_increase_fixture_share": 0.0
+      }
+    ]
+  }
+}

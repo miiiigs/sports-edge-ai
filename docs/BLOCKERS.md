@@ -1,17 +1,27 @@
 # Blockers
 
-Last updated: Saturday, August 15, 2026
+Last updated: Tuesday, August 18, 2026
+
+## Resolved / superseded
+
+- Resolved on Monday, August 17, 2026: the repository contains the authoritative
+  `initial_data/00-developer-brief.pdf`, so the earlier blocker that treated the missing
+  `00-developer-brief.md` mirror as a specification gap is superseded. The PDF itself defines
+  `R1-R10`, and the project now uses the PDF-first authority order. The missing Markdown mirror is
+  a documentation convenience issue, not a live implementation blocker.
 
 ## Technical
 
-- `00-developer-brief.md` is referenced by the governing PDFs, but is not present in the repo, so
-  `R1-R10` and shared arithmetic/staking references cannot be fully verified
 - the supplied PDFs and companion Markdown files are not identical, so requirements must continue
   to be resolved through the PDF-first authority order rather than merged casually
 - the final football/tennis split architecture is still unresolved at the dependency-map level, so
   the current repo remains a temporary migration workspace
 - the live production PostgreSQL design is still unresolved and should not be assumed from the
   current SQLite research implementation
+- Day 11 arithmetic semantics for push and quarter-line football markets are still unresolved:
+  Day 10 now produces the correct settlement-aware fair prices, but Day 11 still needs an
+  authoritative definition of how `model_probability` and edge calculations should represent
+  push, half-win, and half-loss markets without collapsing them into binary probabilities
 
 ## Data
 
@@ -21,6 +31,10 @@ Last updated: Saturday, August 15, 2026
 - canonical multi-provider football team identity / alias mapping is not implemented yet
 - `SP1` referee coverage is incomplete in the current loaded scope; this does not block GAP field
   readiness, but it does limit later referee/cards/veto functionality for that league
+- current forward-production football parameter snapshots are not resolved yet:
+  the loaded Day 8 conversion coefficients, Day 8 corner-distribution parameters, and Day 9 rho
+  values are valid historical walk-forward artifacts, but they are not automatically a present-tense
+  2026-27 production fit for paper predictions
 
 ## Provider / operations
 
@@ -30,13 +44,25 @@ Last updated: Saturday, August 15, 2026
 
 ## Client confirmation
 
-- whether `00-developer-brief.md` can be provided or its omitted rules should be restated elsewhere
-- whether quarter-Kelly or half-Kelly is authoritative once the upstream brief question is resolved
+- whether the team wants a Markdown mirror of `00-developer-brief.pdf` for convenience, even though
+  it is no longer a specification blocker
+- whether quarter-Kelly or half-Kelly is authoritative once the broader staking-layer work resumes
 - which sharp-reference provider should be treated as authoritative for football live scanning
 - when the football/tennis repository and database split should be executed after dependency mapping
 
 ## Practical meaning
 
 These blockers do not prevent continued football GAP migration work inside the current repository.
-They do prevent the project from honestly claiming that the full football-spec archive, staking
-rules, provider stack, or final deployment architecture are already settled.
+They do prevent the project from honestly claiming that the full football-spec archive, provider
+stack, final deployment architecture, or later paper-candidate path are already settled.
+
+The Day 10 iteration on Tuesday, August 18, 2026 did not reopen the closed Day 7 through Day 9
+model layers. It did surface two precise follow-on dependencies that now matter before Day 11 or
+current paper output can be described honestly:
+
+- settlement-aware Day 11 probability / edge semantics for push and quarter-line markets
+- an as-of-current forward-production fit for Day 8 and Day 9 football parameters
+
+Day 10 is now closed for the currently loaded football scope, but Day 11 and later live paper
+output still depend materially on the unresolved archive-scope, live-odds, sharp-reference,
+provider, arithmetic, and deployment items listed here.

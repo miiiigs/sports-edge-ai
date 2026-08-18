@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-08-18T11:34:23+00:00",
+  "experiment_id": "EXP-013",
+  "experiment_version": "football_day10_market_pricing_v1",
+  "source_research_db_path": "research\\football_research\\store\\football_research.sqlite",
+  "pricing_model_version": "football_day10_market_pricing_v1",
+  "settlement_engine_version": "football_day10_settlement_engine_v1",
+  "output_schema_version": "football_day10_market_price_record_v1",
+  "day10_input_contract_version": "football_day10_sanitized_prematch_input_v1",
+  "sanitized_input_policy_id": "prematch_only_pricing_input_excludes_outcomes_and_market_data_v1",
+  "sanitized_input_policy_description": "Construct a Day 10 pricing input from pre-match model content only. Exclude realized outcomes, sportsbook odds, close prices, ROI, edges, thresholds, and decision fields.",
+  "day9_to_day10_interface_policy_id": "persisted_day9_scoreline_matrix_is_canonical_goals_object_v1",
+  "day9_to_day10_interface_policy_description": "Day 10 uses the persisted Day 9 scoreline matrix directly as the single canonical goals probability object. It does not recompute Poisson probabilities from expected goals or rho.",
+  "day8_to_day10_corner_interface_policy_id": "persisted_day8_corner_distribution_is_canonical_v1",
+  "day8_to_day10_corner_interface_policy_description": "Day 10 uses the Day 8 predicted corner means, selected corner distribution family, and persisted dispersion parameter directly as the canonical corners object.",
+  "settlement_pricing_policy_id": "zero_ev_with_partial_and_push_settlement_v1",
+  "settlement_pricing_policy_description": "Fair decimal price is 1 + L/W, where W = P(full_win) + 0.5*P(half_win) and L = P(full_loss) + 0.5*P(half_loss).",
+  "asian_handicap_line_convention": "home_handicap",
+  "corner_support_policy_id": "adaptive_support_measure_tail_then_renormalize_v1",
+  "corner_support_tail_tolerance": 1e-12,
+  "line_catalog_version": "football_day10_engineering_verification_lines_v1",
+  "engineering_verification_lines": {
+    "goals_total_lines": [
+      1.5,
+      2.0,
+      2.25,
+      2.5,
+      2.75,
+      3.0
+    ],
+    "asian_handicap_lines": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "corner_total_lines": [
+      8.5,
+      9.0,
+      9.25,
+      9.5,
+      9.75,
+      10.0,
+      10.5
+    ]
+  },
+  "pricing_input_count": 9664,
+  "market_price_count": 473536,
+  "market_family_counts": {
+    "1x2": 28992,
+    "btts": 19328,
+    "goals_total": 115968,
+    "asian_handicap": 173952,
+    "corner_total": 135296
+  },
+  "source_day9_prediction_count": 9664,
+  "source_day9_scoreline_model_version": "football_day9_dixon_coles_scoreline_v1",
+  "source_day8_conversion_model_version": "football_day8_goal_conversion_v1",
+  "source_day8_experiment_version": "football_day8_goal_conversion_v1",
+  "source_day9_experiment_version": "football_day9_scoreline_model_v1",
+  "day11_probability_semantics_note": "Settlement-aware fair prices are preserved directly. Day 11 must define how any derived model_probability or edge field represents push and quarter-line markets.",
+  "forward_production_fit_dependency_note": "Historical Day 8 and Day 9 parameters in the loaded archive are valid for walk-forward evaluation, but they are not automatically a current forward-production snapshot."
+}

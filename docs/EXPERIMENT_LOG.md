@@ -1,6 +1,6 @@
 # Experiment Log
 
-Last updated: Saturday, August 15, 2026
+Last updated: Tuesday, August 18, 2026
 
 ## EXP-000 - Historical Football Close Discrepancy Lane
 
@@ -256,6 +256,316 @@ Last updated: Saturday, August 15, 2026
   - `research/football_research/football_gap_shots_walkforward_reference_2026-08-15.md`
 - `conclusion`: the first historical shots GAP path is now mechanically reproducible and temporally valid enough to support the next statistic-specific runner
 - `interpretation`: these diagnostics validate chronology and state behavior only; they do not constitute model selection, betting validation, or evidence of edge
+
+## EXP-008 - Chronological Football Shots-on-Target GAP Walk-Forward
+
+- `date`: 2026-08-17
+- `scope`: second deterministic chronological football GAP replay using `shots_on_target` only
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_gap_shots_on_target_walkforward.py`
+  - `code/src/sports_ai/experiments/football_gap_shots_walkforward.py`
+  - `code/src/sports_ai/agents/football/gap_ratings.py`
+- `input scope`:
+  - competitions `ENG1`, `ENG2`, `ENG3`, `ENG4`, `ESP1`
+  - seasons `2122`, `2223`, `2324`, `2425`, `2526`
+  - only readiness-approved league-seasons
+- `initialization policy`:
+  - per competition, derive home/away SOT baselines from the earliest approved season only
+  - process that season as warm-up
+  - exclude warm-up rows from evaluation diagnostics
+- `season policy`:
+  - carry state forward across seasons inside the same competition
+  - do not mix competitions
+  - teams newly appearing in a competition start from the competition baseline with zero current-competition matches
+- `learning rate`: `0.05` labeled `REFERENCE / UNOPTIMIZED`
+- `mechanics verified`:
+  - prediction recorded before update
+  - deterministic replay on fresh engines matches exactly
+  - duplicate event ids are rejected
+  - changing shots columns alone does not alter the SOT replay
+  - a readiness-approved row with missing SOT input fails loudly
+  - market data is not joined into the experiment
+- `counts`:
+  - matches processed: `12,080`
+  - predictions produced: `12,080`
+  - evaluation predictions: `9,664`
+  - skipped events: `0`
+- `overall evaluation diagnostics`:
+  - home MAE about `1.81890`
+  - away MAE about `1.67014`
+  - combined MAE about `1.74452`
+  - home mean error about `+0.09369` as observed-minus-expected
+  - away mean error about `-0.08365` as observed-minus-expected
+- `artifacts`:
+  - `research/football_research/football_gap_shots_on_target_walkforward_reference_2026-08-17_manifest.json`
+  - `research/football_research/football_gap_shots_on_target_walkforward_reference_2026-08-17_predictions.jsonl`
+  - `research/football_research/football_gap_shots_on_target_walkforward_reference_2026-08-17_final_state.json`
+  - `research/football_research/football_gap_shots_on_target_walkforward_reference_2026-08-17.md`
+- `conclusion`: the second Day 7 statistic lane is now mechanically reproducible and reuses the same validated chronology shell as `shots` without widening scope into Day 8 work
+- `interpretation`: these diagnostics validate chronology and state behavior only; they do not constitute model selection, betting validation, or evidence of edge
+
+## EXP-009 - Chronological Football Corners GAP Walk-Forward
+
+- `date`: 2026-08-17
+- `scope`: third deterministic chronological football GAP replay using `corners` only
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_gap_corners_walkforward.py`
+  - `code/src/sports_ai/experiments/football_gap_shots_walkforward.py`
+  - `code/src/sports_ai/agents/football/gap_ratings.py`
+- `input scope`:
+  - competitions `ENG1`, `ENG2`, `ENG3`, `ENG4`, `ESP1`
+  - seasons `2122`, `2223`, `2324`, `2425`, `2526`
+  - only readiness-approved league-seasons
+- `initialization policy`:
+  - per competition, derive home/away corners baselines from the earliest approved season only
+  - process that season as warm-up
+  - exclude warm-up rows from evaluation diagnostics
+- `season policy`:
+  - carry state forward across seasons inside the same competition
+  - do not mix competitions
+  - teams newly appearing in a competition start from the competition baseline with zero current-competition matches
+- `learning rate`: `0.05` labeled `REFERENCE / UNOPTIMIZED`
+- `mechanics verified`:
+  - prediction recorded before update
+  - deterministic replay on fresh engines matches exactly
+  - duplicate event ids are rejected
+  - changing shots columns alone does not alter the corners replay
+  - a readiness-approved row with missing corner input fails loudly
+  - market data is not joined into the experiment
+- `counts`:
+  - matches processed: `12,080`
+  - predictions produced: `12,080`
+  - evaluation predictions: `9,664`
+  - skipped events: `0`
+- `overall evaluation diagnostics`:
+  - home MAE about `2.26330`
+  - away MAE about `2.01939`
+  - combined MAE about `2.14135`
+  - home mean error about `+0.11378` as observed-minus-expected
+  - away mean error about `-0.09605` as observed-minus-expected
+- `artifacts`:
+  - `research/football_research/football_gap_corners_walkforward_reference_2026-08-17_manifest.json`
+  - `research/football_research/football_gap_corners_walkforward_reference_2026-08-17_predictions.jsonl`
+  - `research/football_research/football_gap_corners_walkforward_reference_2026-08-17_final_state.json`
+  - `research/football_research/football_gap_corners_walkforward_reference_2026-08-17.md`
+- `conclusion`: the third Day 7 statistic lane is now mechanically reproducible under the same chronology shell as `shots` and `shots_on_target`, so the next bounded task is `lambda` fitting rather than another replay implementation
+- `interpretation`: these diagnostics validate chronology and state behavior only; they do not constitute model selection, betting validation, or evidence of edge
+
+## EXP-010 - Day 7 Football GAP Lambda Fitting And Fitted Replay Closure
+
+- `date`: 2026-08-17
+- `scope`: walk-forward `lambda` fitting for `shots`, `shots_on_target`, and `corners`, plus fitted replay artifacts with explicit persisted `as_of`
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_gap_lambda_fitting.py`
+  - `code/src/sports_ai/experiments/football_gap_shots_walkforward.py`
+  - `code/src/sports_ai/agents/football/gap_ratings.py`
+- `input scope`:
+  - competitions `ENG1`, `ENG2`, `ENG3`, `ENG4`, `ESP1`
+  - seasons `2122`, `2223`, `2324`, `2425`, `2526`
+  - only readiness-approved league-seasons
+- `fixed lambda grid`:
+  - `0.02`
+  - `0.05`
+  - `0.10`
+- `selection discipline`:
+  - preserve the existing warm-up season per competition
+  - fit separately by competition and statistic
+  - use chronological walk-forward validation folds on `2223`, `2324`, and `2425`
+  - reserve `2526` as the final holdout during selection
+  - retain the `0.05` reference unless a non-reference candidate improves aggregate validation combined MAE by at least `0.01`
+- `variant count`:
+  - `45` total tested competition/statistic/lambda configurations
+- `selected lambdas`:
+  - `shots`: `ENG1=0.10`, `ENG2=0.10`, `ENG3=0.10`, `ENG4=0.10`, `ESP1=0.10`
+  - `shots_on_target`: `ENG1=0.05`, `ENG2=0.05`, `ENG3=0.05`, `ENG4=0.05`, `ESP1=0.05`
+  - `corners`: `ENG1=0.05`, `ENG2=0.05`, `ENG3=0.05`, `ENG4=0.05`, `ESP1=0.05`
+- `persisted-output contract`:
+  - all three fitted prediction lanes now carry explicit `as_of`
+  - all three fitted prediction lanes carry `model_version`
+  - GAP state export now carries explicit `as_of`
+- `fitted replay diagnostics`:
+  - `shots` combined MAE about `3.56459`
+  - `shots_on_target` combined MAE about `1.74452`
+  - `corners` combined MAE about `2.14135`
+- `determinism verified`:
+  - repeated fitting runs produce identical variant records
+  - repeated fitting runs produce identical selections
+  - repeated fitted replay runs produce identical predictions and final state for `shots`, `shots_on_target`, and `corners`
+- `artifacts`:
+  - `research/football_research/football_gap_lambda_fitting_2026-08-17.json`
+  - `research/football_research/football_gap_lambda_fitting_2026-08-17.md`
+  - `research/football_research/football_gap_shots_walkforward_fitted_2026-08-17_manifest.json`
+  - `research/football_research/football_gap_shots_walkforward_fitted_2026-08-17_predictions.jsonl`
+  - `research/football_research/football_gap_shots_walkforward_fitted_2026-08-17_final_state.json`
+  - `research/football_research/football_gap_shots_walkforward_fitted_2026-08-17.md`
+  - `research/football_research/football_gap_shots_on_target_walkforward_fitted_2026-08-17_manifest.json`
+  - `research/football_research/football_gap_shots_on_target_walkforward_fitted_2026-08-17_predictions.jsonl`
+  - `research/football_research/football_gap_shots_on_target_walkforward_fitted_2026-08-17_final_state.json`
+  - `research/football_research/football_gap_shots_on_target_walkforward_fitted_2026-08-17.md`
+  - `research/football_research/football_gap_corners_walkforward_fitted_2026-08-17_manifest.json`
+  - `research/football_research/football_gap_corners_walkforward_fitted_2026-08-17_predictions.jsonl`
+  - `research/football_research/football_gap_corners_walkforward_fitted_2026-08-17_final_state.json`
+  - `research/football_research/football_gap_corners_walkforward_fitted_2026-08-17.md`
+- `conclusion`: Day 7 is now closed for the currently loaded football scope because the three independent GAP statistic lanes, walk-forward lambda fitting, explicit persisted `as_of`, explicit persisted `model_version`, deterministic replay, and goals prohibition are all backed by tests and artifacts
+- `interpretation`: this closes the bounded GAP-statistics foundation only. It does not yet constitute the downstream Day 8 conversion/distribution layer or any market-pricing evidence
+
+## EXP-011 - Day 8 Football Goal Conversion And Corner Distribution Evidence
+
+- `date`: 2026-08-17
+- `scope`: convert the frozen Day 7 fitted GAP outputs into downstream expected goals and compare Poisson versus negative-binomial corner distributions without changing GAP state or `lambda`
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_day8_goal_conversion.py`
+  - `code/src/sports_ai/experiments/football_gap_lambda_fitting.py`
+  - `code/src/sports_ai/experiments/football_gap_shots_walkforward.py`
+- `frozen upstream baseline`:
+  - `shots`, `shots_on_target`, and `corners` predictions come only from the fitted Day 7 artifacts
+  - no goals data is allowed into the GAP input contract
+  - no odds, de-vig, edge, stake, or manager logic is joined
+- `conversion model`:
+  - model version: `football_day8_goal_conversion_v1`
+  - form: `league_and_venue_nonnegative_linear_shots_plus_sot_v1`
+  - equation: `expected_goals_side = beta_shots * predicted_shots_side + beta_shots_on_target * predicted_shots_on_target_side`
+  - fit separately by competition and venue
+  - no intercept
+- `walk-forward design`:
+  - preserve `2122` as the warm-up season inherited from Day 7
+  - for each competition, predict `2223`, `2324`, `2425`, and `2526` one season at a time
+  - for each predicted season, fit conversion coefficients only on prior seasons from the same competition
+  - record fit-period bounds, `as_of`, sample size, and model versions for every fitted conversion record
+- `variant count`:
+  - `40` competition/season/venue conversion fits recorded
+- `prediction count`:
+  - `9,664` evaluation fixtures
+- `overall expected-goal diagnostics`:
+  - mean predicted home goals about `1.50628`
+  - mean observed home goals about `1.46058`
+  - mean predicted away goals about `1.14088`
+  - mean observed away goals about `1.18233`
+  - mean predicted total goals about `2.64716`
+  - mean observed total goals about `2.64290`
+  - total-goal MAE about `1.27561`
+  - total-goal bias about `+0.00426`
+- `corner distribution comparison`:
+  - evaluate Poisson and negative binomial deterministically on each competition/season fold
+  - fit negative-binomial dispersion from prior training rows only
+  - choose the family used for a season from cumulative prior out-of-sample log likelihood only
+  - first evaluation season defaults to Poisson because no prior out-of-sample evidence exists yet
+- `selection summary`:
+  - final cumulative evidence selected `negative_binomial` for `ENG1`, `ENG2`, `ENG3`, `ENG4`, and `ESP1`
+- `determinism verified`:
+  - repeated fresh runs returned identical prediction rows
+  - repeated fresh runs returned identical conversion fit records
+  - repeated fresh runs returned identical corner fold records
+  - repeated fresh runs returned identical diagnostics and corner summaries
+- `artifacts`:
+  - `research/football_research/football_day8_goal_conversion_2026-08-17_manifest.json`
+  - `research/football_research/football_day8_goal_conversion_2026-08-17_predictions.jsonl`
+  - `research/football_research/football_day8_goal_conversion_2026-08-17_conversion_records.json`
+  - `research/football_research/football_day8_goal_conversion_2026-08-17_corner_records.json`
+  - `research/football_research/football_day8_goal_conversion_2026-08-17.md`
+- `conclusion`: Day 8 is now closed for the currently loaded football scope because the downstream expected-goals layer is chronological, league-isolated, deterministic, versioned, and explicitly separated from the upstream GAP state and any market logic
+- `interpretation`: this completes the bounded Day 8 model layer only. It does not yet provide the Day 9 Dixon-Coles scoreline object or any Day 10 market-derivation outputs
+
+## EXP-012 - Day 9 Football Dixon-Coles Scoreline Layer
+
+- `date`: 2026-08-17
+- `scope`: consume the frozen Day 8 expected-goal outputs, fit a chronological Dixon-Coles scoreline layer, and persist the full `0..10 x 0..10` scoreline matrix without deriving markets
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_day9_scoreline_model.py`
+  - `code/src/sports_ai/experiments/football_day8_goal_conversion.py`
+- `interface interpretation`:
+  - Day 8 `expected_goals_home` and `expected_goals_away` are the canonical Day 9 Poisson intensities
+  - Day 9 does not fit a second competing goals model
+  - explicit Day 9 gamma is omitted to avoid double-counting the Day 8 venue effect
+- `fixed scoreline contract`:
+  - independent Poisson baseline over `0..10 x 0..10`
+  - canonical Dixon-Coles tau correction on `0-0`, `1-0`, `0-1`, and `1-1`
+  - fixed rho grid: `-0.20`, `-0.15`, `-0.13`, `-0.10`, `-0.05`, `0.00`, `0.05`
+  - fixed xi grid: `0.0`, `0.001`
+  - first evaluation season per competition defaults to `rho=0.0`, `xi=0.0` before any prior scoreline evidence exists
+- `walk-forward design`:
+  - preserve the inherited `2122` warm-up boundary from Day 7 and Day 8
+  - fit rho using prior Day 8 expected-goal rows and observed score outcomes only
+  - fit separately by competition
+  - select xi for predictions by cumulative prior out-of-sample fold log likelihood, preferring `xi=0.0` on ties
+- `variant count`:
+  - `210` tested rho variants across competition, fold, xi, and rho candidate
+- `real-archive result`:
+  - prediction count: `9664`
+  - final selected rho by competition: `ENG1=0.00`, `ENG2=0.00`, `ENG3=0.00`, `ENG4=-0.05`, `ESP1=0.00`
+  - final selected xi by competition: `0.0` for every loaded competition
+  - overall plain-Poisson log likelihood: `-27914.3931`
+  - overall Dixon-Coles log likelihood: `-27917.2423`
+  - overall log-likelihood delta: `-2.8491`
+  - average draw-probability delta: `+0.001214`
+  - average tail mass beyond `10`: about `0.00000219`
+- `important interpretation`:
+  - the implementation is compliant and deterministic, but the held-out evidence in the currently loaded scope does not show a general likelihood improvement from the fitted Dixon-Coles correction
+  - draw probability rises on average overall, but not generally across all competitions or fixtures, so that discrepancy is recorded rather than forced away
+- `determinism verified`:
+  - repeated fresh real-store runs returned identical predictions
+  - repeated fresh real-store runs returned identical rho-variant records
+  - repeated fresh real-store runs returned identical fold records, diagnostics, final rho summaries, and time-decay summaries
+- `artifacts`:
+  - `research/football_research/football_day9_scoreline_model_2026-08-17_manifest.json`
+  - `research/football_research/football_day9_scoreline_model_2026-08-17_predictions.jsonl`
+  - `research/football_research/football_day9_scoreline_model_2026-08-17_rho_variants.json`
+  - `research/football_research/football_day9_scoreline_model_2026-08-17_fold_records.json`
+  - `research/football_research/football_day9_scoreline_model_2026-08-17.md`
+- `conclusion`: Day 9 is now closed for the currently loaded football scope because the downstream scoreline layer is chronological, versioned, deterministic, explicit about tail handling, and preserved as a single goals-based probability object for Day 10
+- `interpretation`: this completes the bounded Day 9 model layer only. It does not yet derive `1X2`, totals, BTTS, Asian handicap, corners prices, or any edge/recommendation outputs
+
+## EXP-013 - Day 10 Football Market Pricing
+
+- `date`: 2026-08-18
+- `scope`: derive bounded Day 10 football fair prices from the frozen Day 9 scoreline matrix and the Day 8 corner-distribution object only
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_day10_market_pricing.py`
+  - `code/src/sports_ai/experiments/football_day9_scoreline_model.py`
+  - `code/src/sports_ai/experiments/football_day8_goal_conversion.py`
+- `fixed input contract`:
+  - construct a sanitized pre-match pricing input
+  - exclude realized goals, realized corners, bookmaker fields, edges, thresholds, staking, and decisions
+  - carry deterministic scoreline-object and corner-object ids on every market row
+- `goals-market contract`:
+  - treat the persisted Day 9 scoreline matrix as the canonical goals object
+  - derive `1X2`, `BTTS`, goals totals, and Asian handicap directly from that matrix
+  - do not recompute Poisson probabilities from `expected_goals_home`, `expected_goals_away`, or `rho` inside Day 10
+- `corners-market contract`:
+  - treat Day 8 predicted home/away corners, selected corner distribution, and persisted dispersion as the canonical corners object
+  - derive corner totals only from that object
+  - use adaptive support with explicit residual tail mass rather than a fixed `0..10` truncation
+- `settlement arithmetic`:
+  - one generic settlement engine supports integer, half, and quarter lines
+  - fair price uses `1 + L/W` with preserved full-win, half-win, push, half-loss, and full-loss probabilities
+  - the same engine prices goals totals, corner totals, and Asian handicap
+- `engineering verification line catalog`:
+  - goals totals: `1.5`, `2.0`, `2.25`, `2.5`, `2.75`, `3.0`
+  - Asian handicap using `home_handicap`: `-1.0`, `-0.75`, `-0.5`, `-0.25`, `0.0`, `0.25`, `0.5`, `0.75`, `1.0`
+  - corner totals: `8.5`, `9.0`, `9.25`, `9.5`, `9.75`, `10.0`, `10.5`
+- `real-archive result`:
+  - sanitized pricing inputs: `9664`
+  - market-price rows: `473536`
+  - market-family rows:
+    - `1x2`: `28992`
+    - `btts`: `19328`
+    - `goals_total`: `115968`
+    - `asian_handicap`: `173952`
+    - `corner_total`: `135296`
+  - rows with scoreline source ids: `338240`
+  - rows with corner source ids: `135296`
+  - forbidden outcome / bookmaker / edge / stake fields found in market rows: `0`
+- `determinism verified`:
+  - repeated fresh runs returned identical sanitized pricing inputs
+  - repeated fresh runs returned identical market-price rows
+  - repeated fresh runs returned identical non-timestamp manifest content
+- `artifacts`:
+  - `research/football_research/football_day10_market_pricing_2026-08-18_manifest.json`
+  - `research/football_research/football_day10_market_pricing_2026-08-18_pricing_inputs.jsonl`
+  - `research/football_research/football_day10_market_pricing_2026-08-18_market_prices.jsonl`
+  - `research/football_research/football_day10_market_pricing_2026-08-18.md`
+- `conclusion`: Day 10 is now closed for the currently loaded football scope because the system can derive reproducible fair prices for the bounded goals and corner market families directly from frozen pre-match model objects without seeing bookmaker prices or realized outcomes
+- `interpretation`: this completes the bounded Day 10 fair-price layer only. It does not yet resolve Day 11 edge semantics, live odds/sharp-reference integration, forward-production-fit readiness, or later football market families such as shots and shots on target
 
 ## Experiment Template
 

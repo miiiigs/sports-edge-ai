@@ -97,7 +97,7 @@
 - `decision`: treat the August 15, 2026 PDFs as the primary specification authority after direct user instructions, use the companion Markdown files only where they do not conflict, and record any conflict explicitly
 - `reason`: silently blending the PDF and Markdown materials would preserve superseded assumptions and create hidden specification drift
 - `alternatives`: treat PDFs and Markdown as interchangeable, or continue using the older handoff stack as the main authority
-- `consequences`: current football `1X2` work becomes a benchmark/research lane unless it is re-authorized by the new PDFs; missing `00-developer-brief.md` becomes an explicit blocker
+- `consequences`: current football `1X2` work becomes a benchmark/research lane unless it is re-authorized by the new PDFs; the brief authority must be verified from the supplied files instead of guessed from the missing Markdown mirror
 - `status`: active
 
 ## DEC-011
@@ -118,4 +118,84 @@
 - `reason`: this keeps initialization leakage out of evaluated seasons, preserves the current-division-history semantics needed later for promoted/relegated-team rules, and prevents accidental state corruption during replay or resume
 - `alternatives`: initialize from full evaluation-season averages, reset automatically at every season boundary, or rely on the runner alone to prevent duplicate processing
 - `consequences`: evaluated predictions start only after warm-up state exists; new entrants to a competition begin from the competition baseline with zero current-competition observations; idempotency is enforced in the in-memory research engine as well as the experiment layer
+- `status`: active
+
+## DEC-013
+
+- `date`: 2026-08-17
+- `context`: the audit and the Day 7 recovery plan require `shots_on_target` next, but the repo already contains a tested chronological shots shell with the key invariants in place
+- `decision`: reuse and generalize the existing chronological shots GAP walk-forward shell for `shots_on_target` rather than creating a second independent implementation, and fail loudly if a readiness-approved SOT row still contains a missing required statistic value
+- `reason`: this preserves the already-validated chronology, warm-up, isolation, and duplicate-protection mechanics while tightening the data contract for subsequent statistic lanes
+- `alternatives`: duplicate the shots runner into a separate implementation, or silently skip missing approved-input rows
+- `consequences`: the repo now has one statistic-parameterized Day 7 replay shell plus a thin SOT wrapper; the next bounded football task is `corners`, not a redesign of the runner architecture
+- `status`: active
+
+## DEC-014
+
+- `date`: 2026-08-17
+- `context`: the SOT slice succeeded on the real archive and the next Day 7 requirement is the final independent GAP statistic lane before `lambda` fitting
+- `decision`: implement `corners` as another thin wrapper over the same validated chronology shell and stop again after the real replay rather than rolling directly into Day 8
+- `reason`: this keeps the three Day 7 statistics comparable and preserves a clean boundary between mechanical replay validation and later downstream goal-conversion work
+- `alternatives`: build a corners-specific replay path, or start `lambda` fitting and Day 8 work in the same iteration
+- `consequences`: Day 7 now has three completed statistic lanes under one shell, and the next bounded football task is walk-forward `lambda` fitting plus an explicit audit of persisted `as_of` coverage
+- `status`: active
+
+## DEC-015
+
+- `date`: 2026-08-17
+- `context`: the final Day 7 closure pass required an explicit persisted `as_of` contract and a fixed, auditable walk-forward lambda-fitting method before any Day 8 work could be authorized
+- `decision`: define historical pre-match prediction-row `as_of` as fixture kickoff when source `kickoff_time` exists or `match_dateT00:00:00` otherwise, and fit lambda on the fixed grid `0.02 / 0.05 / 0.10` with the latest approved season in each competition reserved as a post-selection holdout
+- `reason`: this satisfies the PDF requirement that persisted outputs explicitly carry `as_of`, avoids inventing unsupported source timestamps, keeps the fitting search small and predeclared, and prevents repeated exposure of the designated final holdout during selection
+- `alternatives`: leave `as_of` implicit in `match_date` and `kickoff_time`, fit lambda on a larger adaptive sweep, or allow the final season into the repeated selection loop
+- `consequences`: all three GAP lanes now persist explicit `as_of` and `model_version`; Day 7 fitting artifacts log every tested variant, every selected lambda, and the reserved-holdout discipline; Day 8 is authorized only because the Day 7 acceptance audit now passes
+- `status`: active
+
+## DEC-016
+
+- `date`: 2026-08-17
+- `context`: the loaded repository snapshot includes `initial_data/00-developer-brief.pdf`, and the bounded next task after Day 7 is the downstream Day 8 conversion/distribution layer for the currently loaded football scope
+- `decision`: treat the PDF brief as the authoritative source for `R1-R10`, close the stale missing-Markdown blocker as superseded, and implement Day 8 only as a downstream layer that converts fitted GAP `shots` and `shots_on_target` into expected goals while comparing Poisson versus negative-binomial corner distributions without retuning GAP `lambda`
+- `reason`: the PDF is the actual authority, so the missing Markdown mirror is not a live blocker; limiting Day 8 to a downstream conversion layer preserves the frozen Day 7 baseline, protects chronology, and avoids silently widening into odds, staking, or manager work
+- `alternatives`: continue treating the missing Markdown mirror as a blocker, retune the GAP layer during Day 8, or jump directly into scoreline and market derivation work
+- `consequences`: Day 8 artifacts now carry explicit fixture identity, competition, kickoff, `as_of`, GAP model version, conversion model version, predicted stats, expected goals, and recorded corner-distribution evidence; Day 9 is authorized only through the downstream Dixon-Coles scoreline path
+- `status`: active
+
+## DEC-017
+
+- `date`: 2026-08-17
+- `context`: Day 8 already produces pre-match `expected_goals_home` and `expected_goals_away`, while the Day 9 PDF text still describes Dixon-Coles in terms of attack/defence parameters plus a home-advantage gamma term
+- `decision`: treat Day 8 expected goals as the canonical Day 9 Poisson intensities, fit only the downstream Dixon-Coles low-score dependence layer around them, and omit an explicit Day 9 gamma term to avoid double-counting the competition-and-venue asymmetry already encoded in Day 8
+- `reason`: this is the least contradictory interpretation of the current PDF-first stack because it preserves the closed Day 8 goals layer instead of silently rebuilding a second competing expected-goals model
+- `alternatives`: re-estimate a second goals model through explicit alpha/beta/gamma strengths, or inject an extra gamma shift on top of Day 8 intensities
+- `consequences`: Day 9 artifacts now expose an explicit interface policy, persist the final scoreline matrix as the single goals-based probability object for Day 10, and record that time decay was checked on the fixed `xi` grid but selected `xi=0.0` for every loaded competition
+- `status`: active
+
+## DEC-018
+
+- `date`: 2026-08-18
+- `context`: Day 9 historical rows contain useful evaluation fields such as realized goals, while Day 10 must derive fair prices from a frozen pre-match model object only
+- `decision`: build Day 10 from a strict sanitized pre-match pricing contract that contains only fixture identity, kickoff, `as_of`, model versions, the persisted Day 9 scoreline matrix and truncation metadata, and the Day 8 corner-distribution object with predicted home/away corners, selected family, and dispersion
+- `reason`: this preserves the blind-model boundary and prevents realized outcomes or bookmaker-era fields from leaking into deterministic market pricing
+- `alternatives`: pass full Day 9 historical rows straight into market derivation, or rebuild corner inputs ad hoc from other intermediate data
+- `consequences`: Day 10 now has deterministic scoreline-object and corner-object ids, sanitized pricing inputs, explicit source-object lineage on every fair-price row, and an invariant that changing realized outcomes cannot change any Day 10 price
+- `status`: active
+
+## DEC-019
+
+- `date`: 2026-08-18
+- `context`: Day 10 introduces integer and quarter-line goals totals, Asian handicap, and corner totals, which include push, half-win, and half-loss states that are not binary events
+- `decision`: price Day 10 settlement-aware markets by zero expected value using `fair_decimal_price = 1 + L/W`, where `W = P(full_win) + 0.5*P(half_win)` and `L = P(full_loss) + 0.5*P(half_loss)`, and preserve the full settlement-probability breakdown on every market row
+- `reason`: naive reciprocal win-probability pricing is only correct for no-push binary markets and would silently misprice integer and quarter-line products
+- `alternatives`: use `1 / P(win)` everywhere, or encode separate hand-written quarter-line formulas per market family
+- `consequences`: Day 10 now uses one generic settlement engine across goals totals, corner totals, and Asian handicap; strong AH-versus-1X2 invariants are enforceable; Day 11 must define how any `model_probability` or edge field represents push and quarter-line markets before thresholds are applied
+- `status`: active
+
+## DEC-020
+
+- `date`: 2026-08-18
+- `context`: the loaded Day 8 and Day 9 historical artifacts are valid for walk-forward evaluation, but their final holdout-season parameters are not automatically the same thing as a current forward-production snapshot for 2026-27 paper output
+- `decision`: record forward-production-fit readiness as a separate dependency from Day 10 completion and do not treat final historical holdout parameters as current live parameters by default
+- `reason`: conflating historical evaluation state with current production state would create a hidden time-travel violation once the system moves from historical replay to present-tense paper prediction
+- `alternatives`: reuse the latest holdout parameter values as if they were production-current, or defer the distinction until after Day 11
+- `consequences`: Day 10 can close honestly for historical fair-price derivation while the project still tracks a separate unresolved task to produce current as-of-valid Day 8 conversion coefficients, Day 8 corner distribution parameters, and Day 9 rho for live paper output
 - `status`: active

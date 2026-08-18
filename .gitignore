@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+tmp_pdf_extract/
+research/chatgpt_handoff/
+
+research/football_research/*_predictions.jsonl
+research/football_research/*_market_prices.jsonl
+research/football_research/*_pricing_inputs.jsonl
