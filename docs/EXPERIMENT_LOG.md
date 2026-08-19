@@ -1,6 +1,130 @@
 # Experiment Log
 
-Last updated: Tuesday, August 18, 2026
+Last updated: Wednesday, August 19, 2026
+
+## EXP-027 - Football Dashboard V1.2 football-data.org Watchlist Refresh
+
+- `date`: 2026-08-19
+- `scope`: switch the dashboard default fixture source to football-data.org, add a dedicated
+  system-status page, and harden the watchlist UI around the accepted frozen football outputs
+- `implementation`:
+  - `code/src/sports_ai/dashboard/app.py`
+  - `code/src/sports_ai/dashboard/services.py`
+  - `code/src/sports_ai/dashboard/fixture_provider.py`
+  - `code/src/sports_ai/dashboard/templates/`
+  - `code/src/sports_ai/dashboard/static/dashboard.css`
+  - `code/tests/test_football_dashboard.py`
+- `verified baseline before coding`:
+  - full suite: `202 passed in 56.00s`
+- `verified post-implementation baseline`:
+  - full suite: `203 passed in 35.13s`
+- `runtime verification`:
+  - dashboard app booted successfully under Uvicorn
+  - verified HTTP `200`:
+    - `/status`
+    - `/api/system/status`
+- `real provider result`:
+  - default provider is now `football-data.org`
+  - local verification environment on Wednesday, August 19, 2026 did not have
+    `SPORTS_AI_FOOTBALL_DATA_TOKEN` set
+  - dashboard therefore reported:
+    - `fixture_feed.state = NOT_CONFIGURED`
+    - `prediction_engine.state = READY`
+- `important hardening closed`:
+  - football-data.org provider adapter added around `/v4/matches`
+  - lightweight provider caching added
+  - status page added at `/status`
+  - matches/predictions/candidates/detail pages upgraded into a denser watchlist surface
+  - next-match queue broadened to the nearest future fixtures
+- `conclusion`: Dashboard V1.2 closes the requested football-data.org/UI refresh build honestly,
+  but the first real current football-data.org fixture still depends on configuring the token
+
+## EXP-026 - Football Dashboard V1.1 Current Runtime Validation
+
+- `date`: 2026-08-19
+- `scope`: harden the operational football dashboard around real current-fixture provider truth,
+  fixture-sync diagnostics, refresh control, and pre-match prediction locking
+- `implementation`:
+  - `code/src/sports_ai/dashboard/app.py`
+  - `code/src/sports_ai/dashboard/services.py`
+  - `code/src/sports_ai/dashboard/fixture_provider.py`
+  - `code/src/sports_ai/dashboard/prediction_service.py`
+  - `code/src/sports_ai/dashboard/templates/`
+  - `code/tests/test_football_dashboard.py`
+- `verified baseline before coding`:
+  - full suite: `200 passed in 37.43s`
+- `verified post-implementation baseline`:
+  - full suite: `202 passed in 29.50s`
+- `runtime verification`:
+  - local server booted on `http://127.0.0.1:8008`
+  - verified HTTP `200`:
+    - `/`
+    - `/matches`
+    - `/predictions`
+    - `/candidates`
+    - `/api/system/status`
+    - `/api/fixtures/today`
+    - `/api/fixtures/upcoming`
+    - `/api/fixtures/next`
+- `real provider result`:
+  - API-Football authentication succeeded
+  - current season for the August 2026 fixture window is correctly `2026`
+  - the configured plan blocked scoped current-season fixture rows with:
+    - `Free plans do not have access to this season, try from 2022 to 2024.`
+  - the dashboard now reports that state as `fixture_feed.state = DEGRADED`
+  - in-scope current dashboard counts remained:
+    - `live = 0`
+    - `today = 0`
+    - `upcoming = 0`
+    - `next = 0`
+- `prediction/runtime result`:
+  - `current_prediction_pipeline_ready = YES`
+  - `current_market_decision_ready = NO`
+  - `live_paper_pipeline_ready = NO`
+  - first real current supported fixture validated through the live provider path: `NO`
+- `important hardening closed`:
+  - provider query diagnostics persisted and exposed
+  - degraded provider state separated from a genuine empty slate
+  - `GET /api/fixtures/next` added
+  - `GET /api/predictions` added
+  - `POST /api/fixtures/refresh` added
+  - manual refresh cooldown added
+  - first-time post-kickoff prediction generation blocked
+  - prediction lock metadata surfaced
+- `conclusion`: Dashboard V1.1 closes the bounded runtime-validation hardening pass honestly, but
+  the live provider plan restriction still blocks validation of a real current supported fixture
+  flowing all the way into a persisted current prediction
+
+## EXP-025 - Operational Football Dashboard V1
+
+- `date`: 2026-08-19
+- `scope`: first operational football dashboard for current fixtures and frozen pre-match predictions
+- `implementation`:
+  - `code/src/sports_ai/dashboard/app.py`
+  - `code/src/sports_ai/dashboard/services.py`
+  - `code/src/sports_ai/dashboard/fixture_provider.py`
+  - `code/src/sports_ai/dashboard/snapshot_service.py`
+  - `code/src/sports_ai/dashboard/prediction_service.py`
+  - `code/src/sports_ai/dashboard/storage.py`
+- `runtime verification`:
+  - local FastAPI server booted successfully on `http://127.0.0.1:8008`
+  - real `GET /` returned `200`
+  - real `GET /api/system/status` reported:
+    - `fixture_feed.state = CONNECTED`
+    - `prediction_engine.state = READY`
+    - `current_model_snapshot.state = READY`
+    - `dashboard_ui_ready = YES`
+    - `current_fixture_feed_ready = YES`
+    - `current_prediction_pipeline_ready = YES`
+    - `current_market_decision_ready = NO`
+    - `live_paper_pipeline_ready = NO`
+- `real provider result`:
+  - configured API-Football feed was connected but returned `0` in-scope live fixtures, `0` today fixtures, and `0` upcoming fixtures during the Wednesday, August 19, 2026 verification window
+- `classification`: operational product surface, not a historical backtest artifact
+- `important limitations`:
+  - no live odds-market provider connected yet
+  - no point-in-time-valid xG feed connected yet
+  - no supported real current fixture was available at verification time to display a generated live example
 
 ## EXP-000 - Historical Football Close Discrepancy Lane
 
@@ -566,6 +690,119 @@ Last updated: Tuesday, August 18, 2026
   - `research/football_research/football_day10_market_pricing_2026-08-18.md`
 - `conclusion`: Day 10 is now closed for the currently loaded football scope because the system can derive reproducible fair prices for the bounded goals and corner market families directly from frozen pre-match model objects without seeing bookmaker prices or realized outcomes
 - `interpretation`: this completes the bounded Day 10 fair-price layer only. It does not yet resolve Day 11 edge semantics, live odds/sharp-reference integration, forward-production-fit readiness, or later football market families such as shots and shots on target
+
+## EXP-014 - Day 10 Football Product Outputs
+
+- `date`: 2026-08-18
+- `scope`: package the closed Day 10 fair-pricing artifacts into manager-facing and software-facing product outputs without reopening the underlying model layer
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_day10_product_outputs.py`
+  - `code/tests/test_football_day10_product_outputs.py`
+  - `code/src/sports_ai/tools/chatgpt_handoff_bundle.py`
+- `product-output requirement`:
+  - machine-readable artifact
+  - reproducibility / lineage manifest
+  - human-readable product/output report
+  - compact `current/latest` artifact
+- `verified outputs`:
+  - `research/product_outputs/football/day10/FOOTBALL_DAY10_MODEL_PRICING_REPORT.md`
+  - `research/product_outputs/football/day10/football_day10_model_prices.csv`
+  - `research/product_outputs/football/day10/football_day10_model_prices.jsonl`
+  - `research/product_outputs/football/day10/football_day10_product_manifest.json`
+  - `research/product_outputs/football/latest/FOOTBALL_MODEL_PRICES.md`
+  - `research/product_outputs/football/latest/football_model_prices.csv`
+  - `research/product_outputs/football/latest/football_model_prices.jsonl`
+  - `research/product_outputs/football/latest/football_pipeline_manifest.json`
+- `real-output state`:
+  - pricing-input count carried through: `9664`
+  - market-price count carried through: `473536`
+  - representative fixtures surfaced in the report: `Villarreal vs Ath Madrid`, `West Ham vs Leeds`, `Wycombe vs Rotherham`, `Tranmere vs Grimsby`, and `Wrexham vs Middlesbrough`
+- `determinism / verification`:
+  - focused export and bundle coverage passed
+  - root `pytest -q` passed at `178 passed in 27.17s`
+- `conclusion`: Day 10 now has both the required reproducible technical archive and the required current product-facing outputs
+- `interpretation`: this closes the Day 10 presentation gap only. It does not begin Day 11A manager logic or change any Day 7 through Day 10 model assumptions
+
+## EXP-015 - Day 11A Football Manager Core
+
+- `date`: 2026-08-18
+- `scope`: implement the provider-independent Day 11A football manager core on top of frozen Day 10
+  fair-price rows plus supplied normalized historical/demo market snapshots
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_day11_manager_core.py`
+  - `code/src/sports_ai/experiments/football_day11_product_outputs.py`
+- `key requirements closed`:
+  - normalize supplied market snapshots without consuming bookmaker data inside Day 10
+  - validate complete reference-market booksum per normalized market identity
+  - persist detailed `power` and `shin` de-vig outputs while using `shin` as the configured final
+    method
+  - select `best_available_price` from supplied non-reference offers only
+  - compute settlement-aware edge as `W * (o - 1) - L`
+  - compute `minimum_acceptable_price = 1 + (L + T) / W`
+  - apply competition-threshold mapping and bounded cup-rule scaffolding
+  - emit full-slate `PRELIMINARY_CANDIDATE / NO_BET / REJECTED_RULE / MISSING_REQUIRED_MARKET_DATA / STALE_MARKET`
+    decision records
+  - finish with manager-facing Day 11 markdown/CSV/JSONL/latest artifacts
+- `real run state`:
+  - input label: `HISTORICAL / DEMONSTRATION MARKET INPUT`
+  - current supplied in-repo market family coverage for the real run: `1X2`
+  - matched decision rows: `28992`
+  - normalized matched market snapshots: `37240`
+  - reference markets de-vigged: `9664`
+  - final de-vig method: `shin`
+  - decision mix:
+    - `PRELIMINARY_CANDIDATE`: `10299`
+    - `NO_BET`: `18693`
+    - `REJECTED_RULE`: `0`
+    - `MISSING_REQUIRED_MARKET_DATA`: `0`
+    - `STALE_MARKET`: `0`
+- `important interpretation`:
+  - `DAY11_MANAGER_CORE_READY = YES`
+  - `LIVE_PAPER_PIPELINE_READY = NO`
+- `product outputs`:
+  - `research/product_outputs/football/day11/FOOTBALL_DAY11_MANAGER_REPORT.md`
+  - `research/product_outputs/football/day11/football_day11_decisions.csv`
+  - `research/product_outputs/football/day11/football_day11_decisions.jsonl`
+  - `research/product_outputs/football/day11/football_day11_product_manifest.json`
+  - `research/product_outputs/football/latest/FOOTBALL_DECISIONS.md`
+  - `research/product_outputs/football/latest/football_decisions.csv`
+  - `research/product_outputs/football/latest/football_decisions_sample.csv`
+  - `research/product_outputs/football/latest/FOOTBALL_CURRENT_STATUS.md`
+- `conclusion`: Day 11A is now closed for the currently loaded football scope because the system can
+  derive deterministic, settlement-aware preliminary manager decisions from frozen Day 10 model
+  prices and supplied market snapshots without seeing realized outcomes
+- `interpretation`: this closes the bounded manager-core layer only. It does not claim live paper
+  readiness, current-forward-fit readiness, Day 12 safeguards, or full later-market coverage
+
+## Experiment: Football Day 12 safeguards - 2026-08-19
+
+- `experiment_id`: `EXP-015`
+- `date`: `2026-08-19`
+- `hypothesis`: the frozen Day 11A preliminary candidates can be reconciled deterministically into
+  a truthful Day 12 safeguard disposition set without reopening Day 10 or Day 11A arithmetic
+- `data_version`: accepted Day 11A decisions plus Day 10 model-price archive and current in-repo
+  archived closing `1X2` provenance
+- `feature_version`: `football_day12_safeguards_v1`
+- `model_version`: downstream safeguard layer only
+- `sample_size`: `10299` incoming Day 11 preliminary candidates
+- `metrics`:
+  - baseline before coding: `187 passed in 40.06s`
+  - post-implementation root suite: `195 passed in 33.22s`
+  - final dispositions:
+    - `4317` `EXPERIMENTAL_CANDIDATE`
+    - `5982` `BLOCKED_MISSING_XG_DATA`
+  - AH status:
+    - `10299` `AH_NOT_APPLICABLE`
+  - xG status:
+    - `4317` `XG_NOT_APPLICABLE`
+    - `5982` `XG_MISSING`
+  - derivation status:
+    - `10299` `DERIVATION_PASS`
+  - survival percentage: `41.92%`
+- `result`: bounded Day 12 safeguard logic is now implemented end to end, with real markdown/CSV/
+  JSONL/latest outputs plus acceptance audit evidence
+- `conclusion`: Day 12 is `PARTIAL`, not `COMPLETE`, because the code path exists but the required
+  point-in-time-valid xG data path does not
 
 ## Experiment Template
 

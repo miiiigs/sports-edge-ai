@@ -1,0 +1,98 @@
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Watchlist</p>
+      <h2>Matches</h2>
+    </div>
+    <span>{{ payload.rows|length }} fixtures</span>
+  </div>
+  <form class="filters-bar" method="get" action="/matches">
+    <div class="filter-group">
+      <label for="status_bucket">Window</label>
+      <select id="status_bucket" name="status_bucket">
+        <option value="">All</option>
+        <option value="live" {% if payload.filters.status_bucket == 'live' %}selected{% endif %}>Live</option>
+        <option value="today" {% if payload.filters.status_bucket == 'today' %}selected{% endif %}>Today</option>
+        <option value="upcoming" {% if payload.filters.status_bucket == 'upcoming' %}selected{% endif %}>Upcoming</option>
+        <option value="next" {% if payload.filters.status_bucket == 'next' %}selected{% endif %}>Next</option>
+        <option value="finished" {% if payload.filters.status_bucket == 'finished' %}selected{% endif %}>Finished</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="competition">Competition</label>
+      <input id="competition" name="competition" type="text" value="{{ payload.filters.competition or '' }}" placeholder="ENG1 / ENG2 / ESP1">
+    </div>
+    <div class="filter-group">
+      <label for="team">Team search</label>
+      <input id="team" name="team" type="text" value="{{ payload.filters.team or '' }}" placeholder="Arsenal">
+    </div>
+    <div class="filter-group">
+      <label for="prediction_status">Prediction status</label>
+      <select id="prediction_status" name="prediction_status">
+        <option value="">All</option>
+        <option value="PREDICTION_READY" {% if payload.filters.prediction_status == 'PREDICTION_READY' %}selected{% endif %}>Ready</option>
+        <option value="MODEL_NOT_AVAILABLE" {% if payload.filters.prediction_status == 'MODEL_NOT_AVAILABLE' %}selected{% endif %}>Model Not Available</option>
+        <option value="TEAM_IDENTITY_UNRESOLVED" {% if payload.filters.prediction_status == 'TEAM_IDENTITY_UNRESOLVED' %}selected{% endif %}>Team Unresolved</option>
+        <option value="CURRENT_MODEL_STATE_UNAVAILABLE" {% if payload.filters.prediction_status == 'CURRENT_MODEL_STATE_UNAVAILABLE' %}selected{% endif %}>Current State Unavailable</option>
+        <option value="PREDICTION_PENDING" {% if payload.filters.prediction_status == 'PREDICTION_PENDING' %}selected{% endif %}>Pending</option>
+      </select>
+    </div>
+    <button class="refresh-button" type="submit">Apply Filters</button>
+  </form>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Kickoff</th>
+          <th>Competition</th>
+          <th>Fixture</th>
+          <th>Status</th>
+          <th>Eligibility</th>
+          <th>xG</th>
+          <th>Top Score</th>
+          <th>1X2 Fair</th>
+          <th>Decision</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payload.rows %}
+          <tr>
+            <td>{{ row.kickoff_local }}</td>
+            <td>{{ row.competition_name }}</td>
+            <td><a href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
+            <td>{{ row.status }}{% if row.elapsed_minute %} {{ row.elapsed_minute }}'{% endif %}</td>
+            <td>{{ row.prediction_eligibility_status }}</td>
+            <td>
+              {% if row.prediction and row.prediction.prediction_status == 'READY' %}
+                {{ "%.2f"|format(row.prediction.expected_home_goals) }} - {{ "%.2f"|format(row.prediction.expected_away_goals) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>
+              {% if row.prediction and row.prediction.prediction_status == 'READY' and row.prediction.top_scorelines %}
+                {{ row.prediction.top_scorelines[0].home_goals }}-{{ row.prediction.top_scorelines[0].away_goals }}
+              {% else %}
+                {{ row.prediction.blockers|join(', ') if row.prediction and row.prediction.blockers else 'N/A' }}
+              {% endif %}
+            </td>
+            <td>
+              {% if row.prediction and row.prediction.prediction_status == 'READY' %}
+                H {{ "%.2f"|format(row.prediction.fair_prices['1x2'].HOME.fair_decimal_price) }}
+                | D {{ "%.2f"|format(row.prediction.fair_prices['1x2'].DRAW.fair_decimal_price) }}
+                | A {{ "%.2f"|format(row.prediction.fair_prices['1x2'].AWAY.fair_decimal_price) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>{{ row.prediction.manager_decision_status if row.prediction else 'N/A' }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="9">No fixtures match the current filters.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

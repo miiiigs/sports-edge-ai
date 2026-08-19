@@ -1,0 +1,44 @@
+{
+  "generated_at": "2026-08-18T18:38:34+00:00",
+  "product_output_requirement_version": "product_output_requirement_v1",
+  "product_output_manifest_version": "football_day10_product_output_manifest_v1",
+  "product_output_version": "football_day10_product_outputs_v1",
+  "source_research_db_path": "research\\football_research\\store\\football_research.sqlite",
+  "source_day10_manifest_path": "research\\football_research\\football_day10_market_pricing_2026-08-18_manifest.json",
+  "source_pricing_inputs_path": "research\\football_research\\football_day10_market_pricing_2026-08-18_pricing_inputs.jsonl",
+  "source_market_prices_path": "research\\football_research\\football_day10_market_pricing_2026-08-18_market_prices.jsonl",
+  "source_day10_pricing_model_version": "football_day10_market_pricing_v1",
+  "source_day10_settlement_engine_version": "football_day10_settlement_engine_v1",
+  "source_day10_output_schema_version": "football_day10_market_price_record_v1",
+  "pricing_input_count": 9664,
+  "market_price_count": 473536,
+  "competitions": [
+    "Championship",
+    "La Liga",
+    "League One",
+    "League Two",
+    "Premier League"
+  ],
+  "representative_fixture_ids": [
+    "evt_football_20260524_villarreal_ath_madrid",
+    "evt_football_20260524_west_ham_leeds",
+    "evt_football_20260502_wycombe_rotherham",
+    "evt_football_20260502_tranmere_grimsby",
+    "evt_football_20260502_wrexham_middlesbrough"
+  ],
+  "latest_outputs": {
+    "markdown_path": "research\\product_outputs\\football\\latest\\FOOTBALL_MODEL_PRICES.md",
+    "csv_path": "research\\product_outputs\\football\\latest\\football_model_prices.csv",
+    "sample_csv_path": "research\\product_outputs\\football\\latest\\football_model_prices_sample.csv",
+    "jsonl_path": "research\\product_outputs\\football\\latest\\football_model_prices.jsonl",
+    "manifest_path": "research\\product_outputs\\football\\latest\\football_pipeline_manifest.json"
+  },
+  "day10_outputs": {
+    "markdown_path": "research\\product_outputs\\football\\day10\\FOOTBALL_DAY10_MODEL_PRICING_REPORT.md",
+    "csv_path": "research\\product_outputs\\football\\day10\\football_day10_model_prices.csv",
+    "sample_csv_path": "research\\product_outputs\\football\\day10\\football_day10_model_prices_sample.csv",
+    "jsonl_path": "research\\product_outputs\\football\\day10\\football_day10_model_prices.jsonl",
+    "manifest_path": "research\\product_outputs\\football\\day10\\football_day10_product_manifest.json"
+  },
+  "statement": "These are model fair prices generated from frozen pre-match football model objects only. They are not bookmaker prices and they are not betting recommendations."
+}

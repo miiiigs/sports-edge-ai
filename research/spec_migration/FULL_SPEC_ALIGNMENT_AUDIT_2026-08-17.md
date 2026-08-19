@@ -39,7 +39,10 @@ However, the repo is still structurally non-compliant with the primary brief:
 
 The honest current position is:
 
-- football mechanics are now at `Day 10 COMPLETE` for the currently loaded football scope
+- football mechanics are now at `Day 11A COMPLETE` for the currently loaded football scope
+- the Day 10 model layer remains the frozen fair-price authority, and Day 11A now consumes it through a verified manager-core layer
+- the football product-output surface now includes verified Day 10 and Day 11 packages under `research/product_outputs/football/`
+- the locked next football path is Day 12 safeguards/veto foundation, then a football logical-pipeline freeze, before tennis implementation begins
 - Week 1 foundations are still incomplete
 - Week 3 tennis work is largely not started
 - Week 4 measurement/paper layers exist in partial form but are not yet spec-compliant
@@ -367,7 +370,7 @@ Bottom line for tennis:
 | 9 | Scoreline model | fitted Dixon-Coles downstream of GAP | `COMPLETE` for loaded football scope |
 | 10 | Matrix to market prices | all in-scope football markets priced | `COMPLETE` for loaded football scope |
 | 11 | Football manager and thresholds | slate generator, thresholds, cup rules, reason-coded decisions | `PARTIAL` |
-| 12 | AH line-type rule and xG check | line-type rule, xG veto path | `NOT STARTED` |
+| 12 | AH line-type rule and xG check | line-type rule, xG veto path | `PARTIAL` |
 | 13 | Surface Elo | four-rating surface Elo with fitted K | `PARTIAL` |
 | 14 | Serve/return adjustment | adjusted serve probabilities | `NOT STARTED` |
 | 15 | Hierarchical Markov propagation | exact recursion, event/year format rules | `PARTIAL` |

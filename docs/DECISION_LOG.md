@@ -1,5 +1,21 @@
 # Decision Log
 
+## DEC-038
+
+- `date`: 2026-08-19
+- `context`: the next dashboard build was explicitly redirected to a real football-data.org-based
+  operational watchlist refresh rather than more handoff or documentation work
+- `decision`: make `football-data.org` the default dashboard fixture provider, keep the accepted
+  Day 7 through Day 12 football math stack unchanged, and add the missing `Status` product surface
+- `reason`: this matches the new bounded dashboard milestone and removes dependence on the older
+  API-Football dashboard path for the active UI
+- `alternatives`: keep API-Football as the default dashboard provider, or do a UI-only pass without
+  changing the runtime source
+- `consequences`: the dashboard now honestly reports `NOT_CONFIGURED` until
+  `SPORTS_AI_FOOTBALL_DATA_TOKEN` is set, and the active next-step dependency becomes token-backed
+  current-fixture validation rather than more provider experimentation
+- `status`: active
+
 ## DEC-001
 
 - `date`: 2026-08-13
@@ -198,4 +214,132 @@
 - `reason`: conflating historical evaluation state with current production state would create a hidden time-travel violation once the system moves from historical replay to present-tense paper prediction
 - `alternatives`: reuse the latest holdout parameter values as if they were production-current, or defer the distinction until after Day 11
 - `consequences`: Day 10 can close honestly for historical fair-price derivation while the project still tracks a separate unresolved task to produce current as-of-valid Day 8 conversion coefficients, Day 8 corner distribution parameters, and Day 9 rho for live paper output
+- `status`: active
+
+## DEC-021
+
+- `date`: 2026-08-18
+- `context`: the Day 10 fair-pricing work is technically correct, but useful current outputs were still buried inside large JSONL artifacts rather than presented as directly consumable manager-facing deliverables
+- `decision`: make product-output packaging a formal completion requirement for every milestone, requiring machine-readable artifacts, reproducibility manifests, a human-readable product/output report, and a compact `current/latest` artifact
+- `reason`: milestone completion should now represent both reproducible software state and immediately reviewable product state
+- `alternatives`: continue treating technical experiment artifacts as sufficient on their own, or defer presentation artifacts until much later in the build
+- `consequences`: Day 10 now includes a product-output generator and manager-facing football report under `research/product_outputs/`; all future Day 11A, Day 12, tennis, and combined milestones must ship both technical and presentation outputs
+- `status`: active
+
+## DEC-022
+
+- `date`: 2026-08-18
+- `context`: the project had started to accumulate valid completed football slices, but the next-task order still risked bouncing between football, tennis, and broader architecture work
+- `decision`: lock the post-Day-10 build order to football Day 11A Manager Core, then football Day 12 safeguards/veto foundation, then a football logical-pipeline freeze before beginning tennis Days 13 through 19 and shared Days 20 through 23
+- `reason`: a fixed build order reduces scope drift and keeps the implementation aligned with the latest explicit client direction
+- `alternatives`: continue selecting the next slice opportunistically, or begin tennis implementation before football Day 11A and Day 12 close
+- `consequences`: Days 7 through 10 stay closed unless a correctness issue is found, football work remains first until Day 12 closes, and the handoff/docs must treat the new sequence as operationally binding
+- `status`: active
+
+## DEC-023
+
+- `date`: 2026-08-18
+- `context`: after Day 10 closure, the next step needs to advance the football logic path without quietly widening into Day 12 vetoes, tennis work, staking, or live-provider integration
+- `decision`: define the next bounded implementation iteration as Day 11A only: a provider-independent football manager core that consumes accepted Day 10 fair prices plus a supplied immutable market/reference snapshot, applies compliant de-vig, settlement-aware edge arithmetic, competition thresholds, and cup restrictions, and emits a full decision log plus Day 11 product outputs
+- `reason`: this preserves the closed Day 7 through Day 10 model baseline while completing the next real decision-layer boundary in a way that is auditable and showable
+- `alternatives`: start Day 12 safeguards immediately, begin tennis before the football manager path closes, or connect live odds providers during the same iteration
+- `consequences`: Day 11A outputs must be explicitly labeled as manager-core or historical/demo when live provider dependencies are not present; Day 12, tennis, staking, and production polling remain intentionally out of scope for the next prompt
+- `status`: active
+
+## DEC-024
+
+- `date`: 2026-08-18
+- `context`: the Day 11A prompt is now fully specified and needs to avoid drifting back into an internal-only artifact or a provider-coupled implementation
+- `decision`: Day 11A will use frozen Day 10 fair-price rows as immutable model authority, consume a provider-independent supplied normalized market snapshot, calculate booksum plus compliant `Power` and/or `Shin` de-vig, compute settlement-aware edge and minimum acceptable price, apply threshold and cup rules, and emit preliminary candidate / no-bet / rejected outcomes together with manager-facing Day 11 product outputs
+- `reason`: this creates the first honest football manager boundary without overstating live readiness or reopening accepted Day 7 through Day 10 model layers
+- `alternatives`: recompute fair prices inside Day 11, tie the manager to one odds-provider shape, skip no-bet logging, or postpone manager-facing outputs until later
+- `consequences`: Day 11A must remain provider-independent, full-slate, deterministic, and explicitly historical/demo when live inputs are not present; `DAY11_MANAGER_CORE_READY` and `LIVE_PAPER_PIPELINE_READY` must remain separate statuses
+
+## DEC-025
+
+- `date`: 2026-08-19
+- `context`: the user explicitly changed the next product surface from more research/report packaging into an operational football dashboard for current fixtures and frozen pre-match predictions
+- `decision`: pause tennis, preserve the accepted football Day 7 through Day 12 math stack, and make the active milestone `OPERATIONAL FOOTBALL DASHBOARD V1` built around a real current-fixture provider, a current forward football snapshot, server-side frozen prediction generation, and a local FastAPI dashboard/API
+- `reason`: the product question has shifted from "what historical research outputs do we have?" to "what football matches are happening now or next, and what is Sports Edge AI currently predicting?"
+- `alternatives`: continue extending report-only handoff artifacts, or fake current fixtures from historical rows
+- `consequences`: the dashboard must show real live/today/upcoming fixtures when available, must not fabricate matches, must not reinterpret the pre-match model as an in-play model, and must keep current odds/xG/runtime blockers explicit rather than hidden
+- `status`: active
+- `status`: active
+
+## DEC-025
+
+- `date`: 2026-08-18
+- `context`: the Day 11A scope, constraints, and handoff preparation are now complete, and the next prompt is intended to trigger the actual build rather than another round of planning
+- `decision`: treat the next Codex run as the Day 11A implementation run itself, requiring end-to-end manager construction, real decision artifacts from supplied market snapshots, manager-facing outputs, acceptance audit updates, and an explicit stop before Day 12
+- `reason`: the project now has enough locked scope and baseline evidence to move directly into implementation without another preparatory cycle
+- `alternatives`: continue refining handoff language, re-plan the roadmap again, or treat the next pass as documentation-only work
+- `consequences`: the next run should prioritize code, tests, product artifacts, and acceptance evidence over restating the plan; documentation updates should follow the implementation rather than replace it
+- `status`: active
+
+## DEC-026
+
+- `date`: 2026-08-18
+- `context`: the Day 11A implementation run has now completed from the frozen Day 10 archive and the in-repo supplied historical/demo market snapshots
+- `decision`: mark Day 11A complete for the currently loaded football scope, freeze its manager-core arithmetic and normalized market contract as the new upstream baseline, and track `DAY11_MANAGER_CORE_READY` separately from `LIVE_PAPER_PIPELINE_READY`
+- `reason`: the repo now has implemented normalization, booksum validation, Shin devig, settlement-aware edge/minimum-price arithmetic, threshold handling, full-slate decision logging, and manager-facing Day 11 outputs without claiming live/provider readiness that has not been proven
+- `alternatives`: leave Day 11A as "in progress" despite implemented outputs, or silently treat the manager-core completion as proof that live paper betting is ready
+- `consequences`: the next bounded football task is Day 12 safeguards only; Day 10 and Day 11A should not be reopened casually; live-provider integration and current forward-production-fit football parameters remain explicit parallel dependencies
+- `status`: active
+
+## DEC-027
+
+- `date`: 2026-08-19
+- `context`: the accepted next prompt is now the full Day 12 build prompt, and it adds explicit guardrails around football-specific safeguards, xG-data truthfulness, and the historical closing-`1X2` feed limitation
+- `decision`: treat the next bounded implementation iteration as Day 12 only, preserve Day 11A as a frozen downstream input, preserve the archived closing-`1X2` run as historical/demo rather than point-in-time-live evidence, and allow Day 12 to remain `PARTIAL` if required point-in-time-valid xG input is genuinely unavailable
+- `reason`: this keeps the repo aligned with the latest explicit client instruction while preventing Day 12 from being falsely marked complete through invented xG or by overstating what the archived `1X2` input proves
+- `alternatives`: widen the next run into tennis or live-provider work, reopen Day 11A arithmetic, or silently pass xG-veto requirements without a valid upstream xG source
+- `consequences`: the next run should implement only football safeguards/veto logic, preserve the distinction between real historical market coverage and architecture-only coverage, and stop again for review before tennis begins
+- `status`: active
+
+## DEC-028
+
+- `date`: 2026-08-19
+- `context`: the accepted Day 12 prompt has now been tightened further to prevent another preparation-only pass and to require a fresh verified full-suite baseline before implementation begins
+- `decision`: treat the next Day 12 run as the actual implementation pass, require a full root `pytest -q` verification before coding, require real Day 12 deliverables plus acceptance evidence, and explicitly allow `DAY12 STATUS = PARTIAL` if mandatory point-in-time-valid xG is genuinely unavailable
+- `reason`: this protects the repository from starting Day 12 on top of a broken baseline, prevents another handoff-only cycle, and keeps the xG dependency honest instead of rewarding fabricated evidence
+- `alternatives`: rely on only the handoff-bundle test as the pre-run baseline, soften the Day 12 deliverable requirement to docs-only work, or force a `COMPLETE` label even if mandatory xG is blocked
+- `consequences`: the next run must report the actual green pre-Day-12 full-suite count, preserve Day 11A as frozen input, generate the Day 12 report/CSV/JSONL/manifest/audit, and stop again before tennis whether Day 12 ends `COMPLETE` or `PARTIAL`
+
+## Wednesday, August 19, 2026 - Day 12 implemented honestly as partial
+
+- `context`: the repo has now completed the actual Day 12 implementation pass, including real code,
+  tests, product outputs, and a root-suite verification after execution
+- `decision`: accept the Day 12 safeguard layer as implemented but mark the milestone `PARTIAL`
+  because the current repository still lacks a connected point-in-time-valid xG source for the
+  competitions where the football spec requires that check
+- `reason`: this preserves truthful status reporting while still closing the bounded engineering work
+  that could be completed without fabricating upstream data
+- `evidence`: root-suite baseline before coding `187 passed in 40.06s`; root-suite after
+  implementation `195 passed in 33.22s`; real Day 12 run consumed `10299` Day 11 preliminary
+  candidates and produced `4317` `EXPERIMENTAL_CANDIDATE` plus `5982`
+  `BLOCKED_MISSING_XG_DATA`
+- `consequences`: tennis remains unauthorized, `FOOTBALL_LOGICAL_PIPELINE_READY` remains `NO`,
+  live paper readiness remains `NO`, and the next football dependency to resolve is the truthful xG
+  data path rather than another arithmetic rewrite
+- `status`: active
+
+## DEC-029
+
+- `date`: 2026-08-19
+- `context`: Operational Football Dashboard V1 was running locally, but the verified August 19-26
+  empty slate needed to be distinguished between a genuine no-fixture window and a provider/runtime
+  issue before current-football runtime claims could be trusted
+- `decision`: harden the active dashboard into `Football Dashboard V1.1 Current Runtime Validation`
+  by surfacing provider query diagnostics, degraded-state reporting, manual refresh control,
+  `next`/`predictions` APIs, and strict pre-match lock enforcement without changing the accepted
+  Day 7 through Day 12 model mathematics
+- `reason`: the real API-Football path is authenticated, but the configured plan blocks current
+  season fixture rows for the scoped leagues, so the product must report that truth explicitly
+  rather than implying that the slate was simply empty
+- `alternatives`: leave the V1 empty state as-is, switch providers mid-iteration, or reopen the
+  accepted football model layers
+- `consequences`: Dashboard V1.1 now reports `fixture_feed.state = DEGRADED` with the actual
+  provider-plan error, current prediction generation remains frozen pre-match only, and the next
+  football runtime dependency is a provider path that can expose at least one real supported current
+  fixture
 - `status`: active

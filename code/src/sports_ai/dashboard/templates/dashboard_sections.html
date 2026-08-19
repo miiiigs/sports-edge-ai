@@ -1,0 +1,327 @@
+{% set counts = payload.system_status.fixture_feed.counts %}
+{% set snapshot = payload.system_status.current_model_snapshot %}
+{% set nearest = payload.system_status.fixture_feed.nearest_supported_fixture %}
+{% set live_fixture = payload.live[0] if payload.live else none %}
+{% set next_fixture = payload.next_matches[0] if payload.next_matches else none %}
+{% set live_home_price = live_fixture.prediction.fair_prices['1x2'].HOME.fair_decimal_price if live_fixture and live_fixture.prediction and live_fixture.prediction.prediction_status == 'READY' else none %}
+
+<section class="page-heading">
+  <div>
+    <p class="eyebrow cyan-text">{{ payload.system_status.current_time_local }}</p>
+    <h1>Football command center.</h1>
+    <p class="subhead">Current fixtures, frozen model output, and honest operational state in one watchlist surface.</p>
+  </div>
+  <button
+    class="refresh-button"
+    type="button"
+    data-manual-refresh="true"
+    data-refresh-endpoint="/api/fixtures/refresh"
+    data-cooldown-seconds="30"
+  >
+    Refresh data
+  </button>
+</section>
+
+<section class="kpi-grid">
+  <article class="kpi">
+    <span class="kpi-label">LIVE MATCHES</span>
+    <strong>{{ counts.live }}</strong>
+    <small>{{ payload.system_status.fixture_feed.provider }} feed window</small>
+  </article>
+  <article class="kpi">
+    <span class="kpi-label">TODAY'S BOARD</span>
+    <strong>{{ counts.today }}</strong>
+    <small>{{ counts.predictions_ready }} prediction-ready rows</small>
+  </article>
+  <article class="kpi">
+    <span class="kpi-label">UPCOMING</span>
+    <strong>{{ counts.upcoming }}</strong>
+    <small>{{ counts.supported }} supported fixtures in scope</small>
+  </article>
+  <article class="kpi kpi-muted">
+    <span class="kpi-label">PROVIDER STATE</span>
+    <strong>{{ payload.system_status.fixture_feed.state }}</strong>
+    <small>{{ payload.system_status.prediction_engine.state }} prediction engine</small>
+  </article>
+</section>
+
+<div class="section-row">
+  <div>
+    <p class="eyebrow cyan-text">Real-time feed</p>
+    <h2>Live now</h2>
+  </div>
+  <span class="live-badge">
+    <i class="status-dot {% if counts.live > 0 %}status-dot-live{% endif %}"></i>
+    {{ counts.live }} match{% if counts.live != 1 %}es{% endif %} in progress
+  </span>
+</div>
+
+{% if live_fixture %}
+  <section class="live-card">
+    <div class="live-card-top">
+      <div class="league-label">
+        <span class="league-icon">{{ live_fixture.competition_name[:2]|upper }}</span>
+        <span>
+          <b>{{ live_fixture.competition_name }}</b>
+          <small>{{ live_fixture.kickoff_local }} | {{ live_fixture.status }}</small>
+        </span>
+      </div>
+      <span class="live-clock">
+        <i class="status-dot status-dot-live"></i>
+        {{ live_fixture.status }}{% if live_fixture.elapsed_minute %} {{ live_fixture.elapsed_minute }}'{% endif %}
+      </span>
+    </div>
+
+    <div class="score-row">
+      <div class="team">
+        <span class="team-crest">{{ live_fixture.home_team_name[:1]|upper }}</span>
+        <strong>{{ live_fixture.home_team_name }}</strong>
+        <small>Home</small>
+      </div>
+      <div class="score">
+        <strong>{{ live_fixture.home_score if live_fixture.home_score is not none else 0 }} <span>-</span> {{ live_fixture.away_score if live_fixture.away_score is not none else 0 }}</strong>
+        <small>Pre-match prediction remains locked</small>
+      </div>
+      <div class="team team-away">
+        <span class="team-crest crest-blue">{{ live_fixture.away_team_name[:1]|upper }}</span>
+        <strong>{{ live_fixture.away_team_name }}</strong>
+        <small>Away</small>
+      </div>
+    </div>
+
+    <div class="live-insights">
+      <div>
+        <span>PREDICTION STATUS</span>
+        {% if live_fixture.prediction and live_fixture.prediction.prediction_status == 'READY' %}
+          <div class="probability">
+            <b>{{ "%.0f"|format((100 / live_home_price) if live_home_price else 0) }}%</b>
+            <div class="bar"><i style="width: {{ "%.0f"|format((100 / live_home_price) if live_home_price else 0) }}%"></i></div>
+            <b>{{ "%.0f"|format(100 - ((100 / live_home_price) if live_home_price else 0)) }}%</b>
+          </div>
+          <small>Model fair prices remain frozen from pre-match lock.</small>
+        {% else %}
+          <small>{{ live_fixture.prediction_eligibility_status }}</small>
+        {% endif %}
+      </div>
+
+      <div>
+        <span>MODEL SUMMARY</span>
+        {% if live_fixture.prediction and live_fixture.prediction.prediction_status == 'READY' %}
+          <div class="momentum">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <small>
+            xG {{ "%.2f"|format(live_fixture.prediction.expected_home_goals) }} - {{ "%.2f"|format(live_fixture.prediction.expected_away_goals) }}
+            {% if live_fixture.prediction.top_scorelines %}
+              | top {{ live_fixture.prediction.top_scorelines[0].home_goals }}-{{ live_fixture.prediction.top_scorelines[0].away_goals }}
+            {% endif %}
+          </small>
+        {% else %}
+          <small>{{ live_fixture.prediction.blockers|join(', ') if live_fixture.prediction and live_fixture.prediction.blockers else 'Prediction pending.' }}</small>
+        {% endif %}
+      </div>
+
+      <a class="details-button" href="/matches/{{ live_fixture.fixture_id }}">
+        View match <span>-></span>
+      </a>
+    </div>
+  </section>
+{% else %}
+  <section class="live-card empty-state">
+    <strong>No live fixture is currently staged.</strong>
+    <p>
+      {% if payload.system_status.fixture_feed.live_status_note %}
+        {{ payload.system_status.fixture_feed.live_status_note }}
+      {% elif payload.system_status.fixture_feed.last_error %}
+        {{ payload.system_status.fixture_feed.last_error }}
+      {% else %}
+        The board is waiting for the next in-play match from the configured fixture provider.
+      {% endif %}
+    </p>
+  </section>
+{% endif %}
+
+<section class="workspace-grid">
+  <section class="watchlist-panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Your slate</p>
+        <h2>Watchlist <span>{{ payload.next_matches|length }}</span></h2>
+      </div>
+      <a class="filter-button" href="/matches?status_bucket=next">Open full board</a>
+    </div>
+
+    <div class="table-toolbar">
+      <div class="segmented">
+        <span class="segment-active">Next matches</span>
+        <span>Today</span>
+        <span>Upcoming</span>
+      </div>
+      <span class="search-box search-box-static">Frozen Sports Edge watchlist</span>
+    </div>
+
+    <div class="match-table">
+      <div class="table-head">
+        <span>MATCH</span>
+        <span>MODEL EDGE</span>
+        <span>PROBABILITY</span>
+        <span></span>
+      </div>
+      {% for fixture in payload.next_matches %}
+        <a class="match-row" href="/matches/{{ fixture.fixture_id }}">
+          <span class="match-info">
+            <span class="club-dot {% if fixture.competition_id == 'ESP1' %}purple{% elif fixture.status in ['LIVE', 'HALFTIME'] %}blue{% endif %}"></span>
+            <span>
+              <b>{{ fixture.home_team_name }} <small>vs</small> {{ fixture.away_team_name }}</b>
+              <em>{{ fixture.competition_name }} | {{ fixture.kickoff_local }}</em>
+            </span>
+          </span>
+          <span class="edge-cell">
+            <b>{{ fixture.prediction_eligibility_status }}</b>
+            <small class="{% if fixture.prediction and fixture.prediction.prediction_status == 'READY' %}positive{% else %}negative{% endif %}">
+              {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
+            </small>
+          </span>
+          <span class="prob-cell">
+            {% if fixture.prediction and fixture.prediction.prediction_status == 'READY' %}
+              {% set home_price = fixture.prediction.fair_prices['1x2'].HOME.fair_decimal_price %}
+              <b>{{ "%.0f"|format((100 / home_price) if home_price else 0) }}%</b>
+              <span class="mini-bar"><i style="width: {{ "%.0f"|format((100 / home_price) if home_price else 0) }}%"></i></span>
+            {% else %}
+              <b>--</b>
+              <span class="mini-bar"><i style="width: 0%"></i></span>
+            {% endif %}
+          </span>
+          <span class="row-arrow">→</span>
+        </a>
+      {% else %}
+        <div class="match-row">
+          <span class="match-info">
+            <span class="club-dot"></span>
+            <span>
+              <b>No current next-match rows</b>
+              <em>{% if nearest %}Nearest supported fixture: {{ nearest.home_team_name }} vs {{ nearest.away_team_name }}{% else %}Waiting for fixture feed{% endif %}</em>
+            </span>
+          </span>
+          <span class="edge-cell"><b>{{ payload.system_status.fixture_feed.state }}</b></span>
+          <span class="prob-cell"><b>--</b><span class="mini-bar"><i style="width: 0%"></i></span></span>
+          <span class="row-arrow">·</span>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <aside class="right-rail">
+    <section class="rail-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Model intelligence</p>
+          <h2>Signal health</h2>
+        </div>
+        <span class="cyan-text">LIVE</span>
+      </div>
+      <div class="health-score">
+        <strong>{{ counts.predictions_ready }}</strong>
+        <span>ready</span>
+        <div class="health-ring"><span>{{ payload.system_status.prediction_engine.state }}</span></div>
+      </div>
+      <div class="health-list">
+        <div><span><i class="status-dot"></i> Fixture feed</span><b>{{ payload.system_status.fixture_feed.state }}</b></div>
+        <div><span><i class="status-dot"></i> Prediction engine</span><b>{{ payload.system_status.prediction_engine.state }}</b></div>
+        <div><span><i class="status-dot"></i> xG safeguards</span><b>{{ payload.system_status.safeguards.state }}</b></div>
+      </div>
+    </section>
+
+    <section class="rail-panel next-match">
+      <p class="eyebrow cyan-text">Up next</p>
+      <div class="next-time">{{ next_fixture.kickoff_local if next_fixture else 'Waiting for fixture feed' }}</div>
+      <h3>
+        {% if next_fixture %}
+          {{ next_fixture.home_team_name }} <span>vs</span> {{ next_fixture.away_team_name }}
+        {% elif nearest %}
+          {{ nearest.home_team_name }} <span>vs</span> {{ nearest.away_team_name }}
+        {% else %}
+          No next fixture
+        {% endif %}
+      </h3>
+      <p>
+        {% if next_fixture %}
+          {{ next_fixture.competition_name }} | {{ next_fixture.prediction_eligibility_status }}
+        {% elif nearest %}
+          {{ nearest.competition_name }} | {{ nearest.prediction_status }}
+        {% else %}
+          {{ payload.system_status.fixture_feed.provider }}
+        {% endif %}
+      </p>
+      <div class="next-prediction">
+        <span>MODEL PREDICTION</span>
+        {% if next_fixture and next_fixture.prediction and next_fixture.prediction.prediction_status == 'READY' %}
+          <strong>
+            Home fair <b>{{ "%.2f"|format(next_fixture.prediction.fair_prices['1x2'].HOME.fair_decimal_price) }}</b>
+          </strong>
+          <small>
+            xG {{ "%.2f"|format(next_fixture.prediction.expected_home_goals) }} - {{ "%.2f"|format(next_fixture.prediction.expected_away_goals) }}
+          </small>
+        {% else %}
+          <strong>{{ payload.system_status.current_market_decision_ready }}</strong>
+          <small>{{ payload.system_status.fixture_feed.last_error or 'Prediction not ready yet.' }}</small>
+        {% endif %}
+      </div>
+      <a class="rail-link" href="{% if next_fixture %}/matches/{{ next_fixture.fixture_id }}{% else %}/status{% endif %}">
+        Open {% if next_fixture %}fixture{% else %}status{% endif %} <span>-></span>
+      </a>
+    </section>
+  </aside>
+</section>
+
+<section class="schedule-layout">
+  <section class="section-block">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Same-day board</p>
+        <h2>Today</h2>
+      </div>
+      <span>{{ payload.today|length }} matches</span>
+    </div>
+    <div class="card-grid">
+      {% if payload.today %}
+        {% for fixture in payload.today %}
+          {% include "_match_card.html" %}
+        {% endfor %}
+      {% else %}
+        <article class="empty-state">
+          {% if payload.system_status.fixture_feed.last_error %}
+            {{ payload.system_status.fixture_feed.last_error }}
+          {% else %}
+            No supported same-day fixtures are currently staged.
+          {% endif %}
+        </article>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="section-block">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Forward horizon</p>
+        <h2>Upcoming</h2>
+      </div>
+      <span>{{ payload.upcoming|length }} matches</span>
+    </div>
+    <div class="card-grid">
+      {% if payload.upcoming %}
+        {% for fixture in payload.upcoming %}
+          {% include "_match_card.html" %}
+        {% endfor %}
+      {% else %}
+        <article class="empty-state">
+          {% if nearest %}
+            Next supported fixture: {{ nearest.home_team_name }} vs {{ nearest.away_team_name }} on {{ nearest.kickoff_local }}
+          {% else %}
+            No upcoming supported fixtures are currently available.
+          {% endif %}
+        </article>
+      {% endif %}
+    </div>
+  </section>
+</section>

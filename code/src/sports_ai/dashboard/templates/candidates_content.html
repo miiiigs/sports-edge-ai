@@ -1,0 +1,52 @@
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Decision Layer</p>
+      <h2>Candidates</h2>
+    </div>
+    <span>{{ payload.system_status.odds_feed.state }}</span>
+  </div>
+  <article class="empty-state">
+    <strong>Current market decision service not connected.</strong>
+    <p>{{ payload.reason }}</p>
+  </article>
+
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Fixture</th>
+          <th>Kickoff</th>
+          <th>Prediction</th>
+          <th>1X2 Fair</th>
+          <th>Decision Layer</th>
+          <th>Day 12</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payload.rows %}
+          <tr>
+            <td><a href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
+            <td>{{ row.kickoff_local }}</td>
+            <td>{{ row.prediction.prediction_status if row.prediction else row.prediction_eligibility_status }}</td>
+            <td>
+              {% if row.prediction and row.prediction.prediction_status == 'READY' %}
+                H {{ "%.2f"|format(row.prediction.fair_prices['1x2'].HOME.fair_decimal_price) }}
+                | D {{ "%.2f"|format(row.prediction.fair_prices['1x2'].DRAW.fair_decimal_price) }}
+                | A {{ "%.2f"|format(row.prediction.fair_prices['1x2'].AWAY.fair_decimal_price) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>{{ row.prediction.manager_decision_status if row.prediction else 'MARKET_DATA_NOT_CONNECTED' }}</td>
+            <td>{{ row.prediction.safeguard_reason if row.prediction else 'POINT-IN-TIME XG NOT AVAILABLE' }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6">No current operational fixtures are queued yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

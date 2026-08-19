@@ -32,6 +32,46 @@ This document is intentionally redundant. Redundancy is preferred here because l
 
 ---
 
+# CURRENT EXECUTION ADDENDUM — WEDNESDAY, AUGUST 19, 2026
+
+Current active build state:
+
+- football Day 7 through Day 11A remain accepted for the currently loaded scope
+- football Day 12 remains honestly `PARTIAL`
+- `CURRENT PRODUCT MILESTONE = FOOTBALL DASHBOARD V1.1 CURRENT RUNTIME VALIDATION`
+- `TENNIS DEVELOPMENT = PAUSED`
+- current suite baseline: `202 passed`
+
+Current operational dashboard status verified locally on Wednesday, August 19, 2026:
+
+- dashboard route booted successfully
+- current fixture feed state: `DEGRADED`
+- current prediction engine state: `READY`
+- current model snapshot state: `READY`
+- current market decision state: `NO`
+- `CURRENT_FIXTURE_FEED_READY = NO`
+- `CURRENT_PREDICTION_PIPELINE_READY = YES`
+- `LIVE_PAPER_PIPELINE_READY = NO`
+
+Important product boundary:
+
+- live/current fixture data may update continuously
+- the football model shown on live fixtures remains a frozen pre-match prediction
+- the dashboard must not reinterpret the current pre-match model as an in-play model
+- the dashboard must not fabricate current or upcoming fixtures if the provider returns none
+
+Real provider verification note:
+
+- during the Wednesday, August 19, 2026 verification window, the configured in-scope API-Football
+  season identifier for the current football window was correctly validated as `2026`
+- the provider authenticated successfully, but the configured plan blocked current-season fixture
+  rows for the scoped leagues with:
+  - `Free plans do not have access to this season, try from 2022 to 2024.`
+- Dashboard V1.1 therefore now reports the fixture feed as degraded rather than treating the Aug
+  19-26 empty slate as a clean "no fixtures exist" result
+
+---
+
 # 0. CODEX OPERATING INSTRUCTIONS
 
 Codex should operate as a senior Python/backend/data/ML systems engineer and technical research assistant on this repository.
@@ -60,12 +100,17 @@ Do not rewrite functioning modules only for stylistic preference.
 
 When requirements conflict, use:
 
-1. newest explicit client requirement;
-2. August 11, 2026 V1 Developer Pack;
-3. this master handoff / current README / progress checklist;
-4. older proposal documents.
+1. latest explicit user/client instruction;
+2. August 15, 2026 authoritative PDF specification set:
+   - `00-developer-brief`
+   - the sport-specific build specification
+   - `03-thirty-day-plan`;
+3. explicit migration decisions interpreting those PDFs;
+4. companion Markdown only where it does not conflict with the PDFs;
+5. this master handoff / current README / progress checklist / implementation documentation;
+6. older Developer Pack / proposal / legacy research materials.
 
-If a new instruction conflicts with the Pack, do not silently choose one. Record the conflict as a scope or architecture change.
+Any material conflict must be documented rather than silently blended.
 
 ## 0.3 Do not confuse an agent with an LLM
 
@@ -788,6 +833,8 @@ Do not allow MLB research to compromise the blind-data architecture.
 
 # 14. HANDOFF STATUS
 
+Current repo-backed status as of Tuesday, August 18, 2026:
+
 Known/complete:
 
 - project background captured;
@@ -796,20 +843,107 @@ Known/complete:
 - voice-note transcript present;
 - architectural intent interpreted;
 - README created;
-- progress checklist created.
+- progress checklist created;
+- repository is runnable locally;
+- root `pytest -q` now passes at `187 passed in 29.79s`;
+- the currently loaded football migration slice is closed through:
+  - Day 7 GAP statistics and lambda fitting;
+  - Day 8 expected-goals conversion and corner-distribution evidence;
+  - Day 9 Dixon-Coles scoreline layer;
+  - Day 10 fair-price derivation;
+-  - Day 11A manager core;
+- the current repo shape is:
+  - `58` Python modules under `code/src/sports_ai`;
+  - `28` test files under `code/tests`;
+  - `177` explicit `test_...` functions;
+- the Day 10 football layer now derives:
+  - `1X2`;
+  - `BTTS`;
+  - goals totals;
+  - Asian handicap;
+  - corner totals;
+- Day 10 uses:
+  - a strict sanitized pre-match pricing input;
+  - the frozen Day 9 scoreline matrix as the single canonical goals object;
+  - the frozen Day 8 corner object as the single canonical corners object;
+  - settlement-aware fair-price arithmetic for push and quarter-line markets;
+- the current repo-backed football archive artifacts include:
+  - `9664` Day 10 sanitized pricing inputs;
+  - `473536` Day 10 market-price rows;
+  - `28992` Day 11A decision rows from the real historical/demo manager pass;
+  - deterministic object lineage and acceptance audits for Day 7 through Day 11A.
+- Day 10 now also has product-facing outputs under:
+  - `research/product_outputs/football/day10/`;
+  - `research/product_outputs/football/latest/`;
+- Day 11A now also has manager-facing outputs under:
+  - `research/product_outputs/football/day11/`;
+  - `research/product_outputs/football/latest/`;
+- the real Day 11A manager run currently reports:
+  - `10299` `PRELIMINARY_CANDIDATE`;
+  - `18693` `NO_BET`;
+  - `DAY11_MANAGER_CORE_READY = YES`;
+  - `LIVE_PAPER_PIPELINE_READY = NO`;
+- the two pre-Day-11A handoff housekeeping fixes are now resolved:
+  - the master handoff authority wording matches the August 15, 2026 PDF-first rule;
+  - `pytest.ini` is physically included in generated handoff bundles;
+- every completed milestone must now produce:
+  - machine-readable artifacts;
+  - reproducibility/version manifests;
+  - a human-readable product/output report;
+  - a compact `current/latest` artifact;
+- the locked build order after Day 12 is now:
+  - resolve the truthful xG/data-path blocker for the competitions where the football spec requires it;
+  - then freeze the football logical pipeline;
+  - then tennis Days 13 through 19;
+  - then shared Days 20 through 23+.
+- the actual Day 12 implementation run is now complete as an honest `PARTIAL`:
+  - baseline before coding: `187 passed in 40.06s`;
+  - full suite after implementation: `195 passed in 33.22s`;
+  - real Day 12 input candidates: `10299`;
+  - final Day 12 dispositions: `4317` `EXPERIMENTAL_CANDIDATE`, `5982` `BLOCKED_MISSING_XG_DATA`;
+  - `DAY12 STATUS = PARTIAL`;
+  - `FOOTBALL_LOGICAL_PIPELINE_READY = NO`;
+  - `LIVE_PAPER_PIPELINE_READY = NO`;
+  - `TENNIS AUTHORIZED = NO`.
+- Day 11A has already ended with a manager-facing deliverable that can be opened directly and that shows preliminary candidate and no-bet outputs from supplied market snapshots.
+- Day 11A does not claim live-paper readiness because live/current dependencies are still unresolved and explicitly tracked as such.
+- the next run should be treated as the Day 12 implementation build, not as another Day 11A planning or handoff-preparation pass.
+- the expected Day 12 deliverables now explicitly include:
+  - `research/product_outputs/football/day12/FOOTBALL_DAY12_EXPERIMENTAL_CANDIDATE_REPORT.md`;
+  - `research/product_outputs/football/day12/football_day12_candidates.csv`;
+  - `research/product_outputs/football/day12/football_day12_candidates.jsonl`;
+  - `research/product_outputs/football/day12/football_day12_product_manifest.json`;
+  - `research/spec_migration/FOOTBALL_DAY12_ACCEPTANCE_AUDIT_2026-08-19.md`.
 
-Not yet proven from this conversation:
+Still unresolved / not yet proven:
 
-- repository actually runs;
-- tests pass;
-- PostgreSQL is configured;
-- data providers are connected;
-- 22 MLB dates are reconstructed;
-- bookmaker hypotheses work;
-- minimum honest loop is operational;
+- PostgreSQL production architecture is configured and verified end to end;
+- football and tennis are split into separate repos/runtimes/databases;
+- the full football-spec historical archive is loaded;
+- a resolved live sharp-reference and odds-snapshot stack is connected;
+- the 22 MLB dates are reconstructed;
+- bookmaker hypotheses work out of sample;
+- Day 12 safeguards / veto foundation is fully complete;
+- point-in-time-valid xG coverage for the Day 12 safeguard is confirmed for the current repo;
+- football logical pipeline is frozen and ready to authorize tennis;
+- Day 11 has a shared later-layer semantics for any generic `model_probability` field beyond the current settlement-aware manager arithmetic;
+- current 2026-27 football paper predictions have an as-of-current forward-production fit for Day 8 and Day 9 parameters;
 - any statistical edge exists.
 
-Codex should treat all unchecked work as genuinely pending.
+Codex should treat all unchecked work as genuinely pending, and should use the newer repo-backed
+status documents and acceptance audits as the operational truth:
+
+- `docs/PROJECT_STATUS.md`
+- `docs/BLOCKERS.md`
+- `docs/DECISION_LOG.md`
+- `docs/EXPERIMENT_LOG.md`
+- `docs/REQUIREMENTS_TRACEABILITY.md`
+- `research/spec_migration/FOOTBALL_DAY7_ACCEPTANCE_AUDIT_2026-08-17.md`
+- `research/spec_migration/FOOTBALL_DAY8_ACCEPTANCE_AUDIT_2026-08-17.md`
+- `research/spec_migration/FOOTBALL_DAY9_ACCEPTANCE_AUDIT_2026-08-17.md`
+- `research/spec_migration/FOOTBALL_DAY10_ACCEPTANCE_AUDIT_2026-08-18.md`
+- `research/spec_migration/FOOTBALL_DAY11A_ACCEPTANCE_AUDIT_2026-08-19.md`
+- `research/spec_migration/FULL_SPEC_ALIGNMENT_AUDIT_2026-08-17.md`
 
 ---
 
@@ -2532,7 +2666,7 @@ Track these as open issues.
 
 ## Product
 
-- Is the first deliverable CLI/research output or dashboard?
+- The active milestone deliverable format is now a human-readable Markdown report plus CSV, JSONL, and manifest artifacts, with a compact `current/latest` copy under `research/product_outputs/`.
 - Is there an existing repository?
 - Is deployment expected immediately?
 - Is user authentication required in early MVP?
@@ -2957,7 +3091,7 @@ The following is the current operational progress checklist. Update status only 
 - [?] Is exchange/Betfair data available/desired?
 - [?] Is public money/ticket data available?
 - [?] Which jurisdiction/operator constraints matter?
-- [?] First user-facing deliverable: CLI, report, API, or dashboard?
+- [x] Milestone product-output standard defined: Markdown report plus CSV/JSONL/manifest and a compact `current/latest` copy
 
 # C. Source / Requirements Review
 

@@ -13,6 +13,7 @@ def test_build_chatgpt_handoff_bundle_creates_summary_and_manifest(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    (repo / "pytest.ini").write_text("[pytest]\ntestpaths = code/tests\n", encoding="utf-8")
     (repo / "SPORTS_EDGE_AI_MASTER_README.md").write_text("# Readme\n", encoding="utf-8")
     (repo / "docs").mkdir()
     (repo / "docs" / "PROJECT_STATUS.md").write_text("status\n", encoding="utf-8")
@@ -52,3 +53,9 @@ def test_build_chatgpt_handoff_bundle_creates_summary_and_manifest(tmp_path):
     assert (bundle_root / "git_diff.patch").exists()
     assert any(item["path"] == "code/file.py" for item in manifest["included_files"])
     assert any(item["path"] == "docs/BLOCKERS.md" for item in manifest["included_files"])
+    assert any(item["path"] == "pytest.ini" for item in manifest["included_files"])
+    assert (bundle_root / "files" / "pytest.ini").exists()
+    summary_text = (bundle_root / "CHATGPT_HANDOFF_SUMMARY.md").read_text(encoding="utf-8")
+    assert "implemented through Day 12" in summary_text
+    assert "Day 12" in summary_text
+    assert "Every completed milestone must now ship" in summary_text

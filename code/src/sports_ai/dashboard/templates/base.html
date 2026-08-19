@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sports Edge AI Football Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ request.url_for('static', path='dashboard.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">SE</span>
+        <span>SPORTS EDGE <em>AI</em></span>
+      </div>
+
+      <div class="workspace">
+        <span class="avatar">SE</span>
+        <span>
+          <b>Edge workspace</b>
+          <small>Football analyst terminal</small>
+        </span>
+        <span class="workspace-caret">+</span>
+      </div>
+
+      <nav aria-label="Primary navigation">
+        <p class="eyebrow">Workspace</p>
+        <a href="/" class="nav-item {% if page == 'dashboard' %}nav-active{% endif %}">
+          <span>Overview</span>
+          {% if page == 'dashboard' %}<i class="status-dot"></i>{% endif %}
+        </a>
+        <a href="/matches" class="nav-item {% if page == 'matches' or page == 'match_detail' %}nav-active{% endif %}">
+          <span>Live Monitor</span>
+          {% if payload.system_status.fixture_feed.counts.live > 0 %}<i class="status-dot status-dot-live"></i>{% endif %}
+        </a>
+        <a href="/predictions" class="nav-item {% if page == 'predictions' %}nav-active{% endif %}">
+          <span>Predictions</span>
+        </a>
+        <a href="/candidates" class="nav-item {% if page == 'candidates' %}nav-active{% endif %}">
+          <span>Watchlist</span>
+        </a>
+
+        <p class="eyebrow nav-gap">Tools</p>
+        <a href="/status" class="nav-item {% if page == 'status' %}nav-active{% endif %}">
+          <span>Status</span>
+        </a>
+        <a href="/api/system/status" class="nav-item">
+          <span>Read API</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="pro-card">
+          <div>
+            <span class="pulse-line"></span>
+            <small>MODEL STATUS</small>
+          </div>
+          <strong>{{ payload.system_status.prediction_engine.state }}</strong>
+          <span class="pro-version">
+            {{ payload.system_status.current_model_snapshot.snapshot_id or 'snapshot unavailable' }}
+          </span>
+        </div>
+      </div>
+    </aside>
+
+    <section class="content-shell">
+      <header class="topbar">
+        <div class="crumb">
+          <span>Workspace</span>
+          <span>/</span>
+          {% if page == 'dashboard' %}
+            <b>Overview</b>
+          {% elif page == 'matches' or page == 'match_detail' %}
+            <b>Live Monitor</b>
+          {% elif page == 'predictions' %}
+            <b>Predictions</b>
+          {% elif page == 'status' %}
+            <b>Status</b>
+          {% else %}
+            <b>Watchlist</b>
+          {% endif %}
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" type="button" aria-label="Provider state">
+            <span class="status-dot {% if payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] %}{% else %}status-dot-live{% endif %}"></span>
+          </button>
+          <div class="profile-button">
+            <span class="avatar avatar-small">SE</span>
+            <span>Sports Edge</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="page-wrap">
+        {% block content %}{% endblock %}
+        <footer class="page-footer">
+          <span><i class="status-dot"></i> Data updated {{ payload.system_status.fixture_feed.last_sync_at or 'not yet synced' }}</span>
+          <span>Sports Edge AI · Frozen pre-match football dashboard</span>
+        </footer>
+      </main>
+    </section>
+  </div>
+  <script src="{{ request.url_for('static', path='dashboard.js') }}"></script>
+</body>
+</html>

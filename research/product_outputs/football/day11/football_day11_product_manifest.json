@@ -1,0 +1,15 @@
+{
+  "decision_record_count": 28992,
+  "manager_version": "football_day11_manager_core_v1",
+  "output_paths": {
+    "csv_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day11\\football_day11_decisions.csv",
+    "jsonl_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day11\\football_day11_decisions.jsonl",
+    "latest_csv_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\football_decisions.csv",
+    "latest_report_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\FOOTBALL_DECISIONS.md",
+    "latest_sample_csv_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\football_decisions_sample.csv",
+    "latest_status_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\FOOTBALL_CURRENT_STATUS.md",
+    "report_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day11\\FOOTBALL_DAY11_MANAGER_REPORT.md"
+  },
+  "product_output_manifest_version": "football_day11_product_output_manifest_v1",
+  "product_output_version": "football_day11_product_outputs_v1"
+}

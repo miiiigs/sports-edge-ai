@@ -1,0 +1,71 @@
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Operational Output</p>
+      <h2>Predictions</h2>
+    </div>
+    <span>{{ payload.rows|length }} rows</span>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Fixture</th>
+          <th>Kickoff</th>
+          <th>Competition</th>
+          <th>Generated</th>
+          <th>Model As Of</th>
+          <th>xG</th>
+          <th>Corners</th>
+          <th>Most Likely Score</th>
+          <th>Status</th>
+          <th>Lock</th>
+          <th>Decision</th>
+          <th>Safeguard</th>
+          <th>Open</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payload.rows %}
+          <tr>
+            <td><a href="/matches/{{ row.fixture.fixture_id }}">{{ row.fixture.home_team_name }} vs {{ row.fixture.away_team_name }}</a></td>
+            <td>{{ row.fixture.kickoff_local }}</td>
+            <td>{{ row.fixture.competition_name }}</td>
+            <td>{{ row.prediction.generated_at }}</td>
+            <td>{{ row.prediction.model_as_of or 'N/A' }}</td>
+            <td>
+              {% if row.prediction.prediction_status == 'READY' %}
+                {{ "%.2f"|format(row.prediction.expected_home_goals) }} - {{ "%.2f"|format(row.prediction.expected_away_goals) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>
+              {% if row.prediction.prediction_status == 'READY' %}
+                {{ "%.2f"|format(row.prediction.expected_home_corners + row.prediction.expected_away_corners) }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>
+              {% if row.prediction.prediction_status == 'READY' and row.prediction.top_scorelines %}
+                {{ row.prediction.top_scorelines[0].home_goals }}-{{ row.prediction.top_scorelines[0].away_goals }}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>{{ row.prediction.prediction_status }}</td>
+            <td>{{ row.prediction.lock_state or 'PRE_MATCH_OPEN' }}</td>
+            <td>{{ row.prediction.manager_decision_status }}</td>
+            <td>{{ row.prediction.safeguard_status }}</td>
+            <td><a href="/matches/{{ row.fixture.fixture_id }}">Detail</a></td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="13">No predictions have been stored yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

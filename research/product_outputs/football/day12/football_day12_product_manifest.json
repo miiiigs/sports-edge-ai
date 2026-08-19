@@ -1,0 +1,15 @@
+{
+  "candidate_record_count": 10299,
+  "day12_version": "football_day12_safeguards_v1",
+  "output_paths": {
+    "csv_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day12\\football_day12_candidates.csv",
+    "jsonl_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day12\\football_day12_candidates.jsonl",
+    "latest_csv_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\football_experimental_candidates.csv",
+    "latest_report_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\FOOTBALL_EXPERIMENTAL_CANDIDATES.md",
+    "latest_sample_csv_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\football_experimental_candidates_sample.csv",
+    "latest_status_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\latest\\FOOTBALL_CURRENT_STATUS.md",
+    "report_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day12\\FOOTBALL_DAY12_EXPERIMENTAL_CANDIDATE_REPORT.md"
+  },
+  "product_output_manifest_version": "football_day12_product_output_manifest_v1",
+  "product_output_version": "football_day12_product_outputs_v1"
+}

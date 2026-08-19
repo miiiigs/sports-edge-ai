@@ -141,6 +141,30 @@ The two workstreams eventually converge:
 **Developer Pack architecture provides the controls and infrastructure.  
 Strategy research influences which modules and rules deserve priority.**
 
+## 3.1 Locked implementation sequence as of Tuesday, August 18, 2026
+
+The active build order is now:
+
+- Football: Day 11A complete -> Day 12 safeguards implemented as `PARTIAL` -> resolve xG/data-truth blocker -> freeze football logical pipeline
+- Tennis: historical data foundation -> Day 13 Surface Elo -> Day 14 Serve/Return -> Day 15 Markov -> Day 16 Common Opponent -> Day 17-18 Intransitivity -> Day 19 Tennis Manager
+- Both sports: Day 20 live multi-book scanning -> Day 21 veto agents -> Day 22 freshness/kill switch -> Day 23 calibration/CLV -> later paper tracking / production work
+
+Do not reopen closed football Days 7 through 10 unless a genuine correctness issue is discovered.
+
+## 3.2 Milestone product-output standard
+
+Every completed milestone must now ship:
+
+- machine-readable artifacts for downstream software
+- reproducibility/version manifests
+- a human-readable product/output report suitable for a manager or client
+- a compact `current/latest` artifact that does not require searching through experiment folders
+
+For football Day 10, those outputs now live under:
+
+- `research/product_outputs/football/day10/`
+- `research/product_outputs/football/latest/`
+
 ---
 
 # 4. Non-Negotiable Engineering Principles
@@ -1711,7 +1735,7 @@ Track these as open issues.
 
 ## Product
 
-- Is the first deliverable CLI/research output or dashboard?
+- The active milestone deliverable format is now a human-readable Markdown report plus CSV, JSONL, and manifest artifacts, with a compact `current/latest` copy under `research/product_outputs/`.
 - Is there an existing repository?
 - Is deployment expected immediately?
 - Is user authentication required in early MVP?
@@ -2087,4 +2111,3 @@ Keep this statement at the top of technical decision-making:
 > Build the smallest auditable system capable of independently pricing an event, separately understanding the market, identifying a statistically defensible discrepancy, and proving that the discrepancy is repeatable without leakage or hindsight.
 
 Everything else is secondary until that loop works.
-

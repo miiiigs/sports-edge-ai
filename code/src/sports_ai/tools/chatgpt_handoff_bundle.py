@@ -15,6 +15,7 @@ from typing import Any, Iterable
 MAX_COPY_BYTES = 2_000_000
 HEAD_TAIL_LINES = 40
 TEXT_EXTENSIONS = {
+    ".ini",
     ".md",
     ".txt",
     ".json",
@@ -28,6 +29,7 @@ TEXT_EXTENSIONS = {
     ".sql",
 }
 PRIORITY_DOCS = (
+    "pytest.ini",
     "SPORTS_EDGE_AI_CODEX_MASTER_HANDOFF.md",
     "SPORTS_EDGE_AI_MASTER_README.md",
     "SPORTS_EDGE_AI_PROGRESS_CHECKLIST.md",
@@ -36,6 +38,34 @@ PRIORITY_DOCS = (
     "docs/DECISION_LOG.md",
     "docs/EXPERIMENT_LOG.md",
     "docs/REQUIREMENTS_TRACEABILITY.md",
+)
+PRIORITY_CODE = (
+    "code/src/sports_ai/agents/football/gap_ratings.py",
+    "code/src/sports_ai/experiments/football_gap_shots_walkforward.py",
+    "code/src/sports_ai/experiments/football_gap_shots_on_target_walkforward.py",
+    "code/src/sports_ai/experiments/football_gap_corners_walkforward.py",
+    "code/src/sports_ai/experiments/football_gap_lambda_fitting.py",
+    "code/src/sports_ai/experiments/football_day8_goal_conversion.py",
+    "code/src/sports_ai/experiments/football_day9_scoreline_model.py",
+    "code/src/sports_ai/experiments/football_day10_market_pricing.py",
+    "code/src/sports_ai/experiments/football_day10_product_outputs.py",
+    "code/src/sports_ai/experiments/football_day11_manager_core.py",
+    "code/src/sports_ai/experiments/football_day11_product_outputs.py",
+    "code/src/sports_ai/experiments/football_day12_safeguards.py",
+    "code/src/sports_ai/experiments/football_day12_product_outputs.py",
+    "code/src/sports_ai/tools/chatgpt_handoff_bundle.py",
+    "code/tests/test_chatgpt_handoff_bundle.py",
+    "code/tests/test_football_gap_shots_walkforward.py",
+    "code/tests/test_football_gap_shots_on_target_walkforward.py",
+    "code/tests/test_football_gap_corners_walkforward.py",
+    "code/tests/test_football_gap_lambda_fitting.py",
+    "code/tests/test_football_day8_goal_conversion.py",
+    "code/tests/test_football_day9_scoreline_model.py",
+    "code/tests/test_football_day10_market_pricing.py",
+    "code/tests/test_football_day10_product_outputs.py",
+    "code/tests/test_football_day11_manager_core.py",
+    "code/tests/test_football_day11_product_outputs.py",
+    "code/tests/test_football_day12_safeguards.py",
 )
 PRIORITY_REPORTS = (
     "research/football_research/football_data_quality_audit_v3_2026-08-15.md",
@@ -46,7 +76,24 @@ PRIORITY_REPORTS = (
     "research/football_research/decision_policy_validation_v3_2026-08-16.json",
     "research/football_research/decision_layer_audit_v3_2026-08-16.json",
     "research/football_research/football_day10_market_pricing_2026-08-18.md",
+    "research/spec_migration/FOOTBALL_DAY12_ACCEPTANCE_AUDIT_2026-08-19.md",
     "research/spec_migration/FOOTBALL_DAY10_ACCEPTANCE_AUDIT_2026-08-18.md",
+    "research/spec_migration/FOOTBALL_DAY11A_ACCEPTANCE_AUDIT_2026-08-19.md",
+    "research/product_outputs/football/day10/FOOTBALL_DAY10_MODEL_PRICING_REPORT.md",
+    "research/product_outputs/football/day10/football_day10_model_prices_sample.csv",
+    "research/product_outputs/football/day10/football_day10_product_manifest.json",
+    "research/product_outputs/football/day11/FOOTBALL_DAY11_MANAGER_REPORT.md",
+    "research/product_outputs/football/day11/football_day11_product_manifest.json",
+    "research/product_outputs/football/day12/FOOTBALL_DAY12_EXPERIMENTAL_CANDIDATE_REPORT.md",
+    "research/product_outputs/football/day12/football_day12_product_manifest.json",
+    "research/product_outputs/football/latest/FOOTBALL_MODEL_PRICES.md",
+    "research/product_outputs/football/latest/football_model_prices_sample.csv",
+    "research/product_outputs/football/latest/football_pipeline_manifest.json",
+    "research/product_outputs/football/latest/FOOTBALL_DECISIONS.md",
+    "research/product_outputs/football/latest/football_decisions_sample.csv",
+    "research/product_outputs/football/latest/FOOTBALL_EXPERIMENTAL_CANDIDATES.md",
+    "research/product_outputs/football/latest/football_experimental_candidates_sample.csv",
+    "research/product_outputs/football/latest/FOOTBALL_CURRENT_STATUS.md",
 )
 
 
@@ -148,13 +195,19 @@ def _summarize_current_state() -> str:
     return "\n".join(
         [
             "Current high-signal state:",
-            "- Forecast model quality is improving.",
-            "- Decision-layer DQ semantics are much better than the original v3 proxy, but not yet conceptually approved.",
-            "- Historical DQ v2 now has useful spread, but 548 of 636 old-policy candidates still fall below 0.82.",
-            "- Dominant below-threshold reasons are model not converged, low recent match coverage, and high predictive uncertainty.",
-            "- The v3 optimizer issue is real. At 250 iterations many events still move materially; at 1000 iterations fits are much closer to tolerance.",
-            "- Policy-threshold tuning should remain blocked until DQ semantics and optimizer mechanics are resolved.",
-            "- v4 forecasting work should stay separate from this decision-layer investigation.",
+            "- The football migration slice is now implemented through Day 12 for the currently loaded scope, with Day 12 honestly marked `PARTIAL` because the required point-in-time-valid xG path is still missing.",
+            "- Day 7, Day 8, Day 9, Day 10, and Day 11A all have explicit acceptance evidence and reproducible repo-backed artifacts.",
+            "- Day 10 still provides the frozen fair-model pricing authority, and Day 11A now consumes that authority unchanged instead of rebuilding model prices.",
+            "- The real historical/demo Day 11A manager run produced `28992` decision records: `10299` `PRELIMINARY_CANDIDATE` and `18693` `NO_BET`.",
+            "- `DAY11_MANAGER_CORE_READY = YES` is now supported by implemented code, tests, technical artifacts, and manager-facing outputs.",
+            "- `LIVE_PAPER_PIPELINE_READY = NO` remains the honest status because live provider and current forward-fit dependencies are still unresolved.",
+            "- Day 10 derives `1X2`, `BTTS`, goals totals, Asian handicap, and corner totals from frozen pre-match model objects only.",
+            "- Day 11A uses settlement-aware edge and minimum-price arithmetic directly from Day 10 `W` and `L`, plus normalized market snapshots, booksum validation, and Shin de-vig.",
+            "- The currently supplied in-repo market snapshot path is a real historical/demo archived closing `1X2` slate, so the manager build is honest about its current input coverage and does not overstate point-in-time-live provenance.",
+            "- The real Day 12 run consumed `10299` Day 11 preliminary candidates and produced `4317` `EXPERIMENTAL_CANDIDATE` plus `5982` `BLOCKED_MISSING_XG_DATA`.",
+            "- `FOOTBALL_LOGICAL_PIPELINE_READY = NO`, `LIVE_PAPER_PIPELINE_READY = NO`, and `TENNIS AUTHORIZED = NO` remain the honest status after Day 12.",
+            "- The next football dependency is the truthful xG/data-path resolution needed to move Day 12 from `PARTIAL` to `COMPLETE`, followed by the football logical-pipeline freeze before tennis begins.",
+            "- Every completed milestone must now ship machine-readable artifacts, reproducibility manifests, a human-readable product/output report, and a compact latest/current artifact.",
         ]
     )
 
@@ -193,6 +246,7 @@ def build_chatgpt_handoff_bundle(config: HandoffBundleConfig) -> dict[str, Any]:
     selected_paths.extend(tracked_text_files)
     selected_paths.extend(untracked_text_files)
     selected_paths.extend(_select_existing(repo_root, PRIORITY_DOCS))
+    selected_paths.extend(_select_existing(repo_root, PRIORITY_CODE))
     selected_paths.extend(_select_existing(repo_root, PRIORITY_REPORTS))
 
     deduped: dict[str, Path] = {}
@@ -228,10 +282,14 @@ def build_chatgpt_handoff_bundle(config: HandoffBundleConfig) -> dict[str, Any]:
         "",
         "## Immediate next work",
         "",
-        "- validate the conceptual weights in historical DQ v2 without optimizing for candidate count",
-        "- investigate why early-season decision quality scores higher than mid/late season",
-        "- compare v3 forecasting behavior under 250, 500, and 1000 optimizer iterations",
-        "- keep decision-threshold tuning blocked until DQ and optimizer investigations are resolved",
+        "- keep the implemented Day 12 layer frozen unless a real correctness issue is found",
+        "- do not reopen closed Day 7 through Day 12 arithmetic layers casually",
+        "- keep Day 11A's product boundary intact: frozen Day 10 fair price plus supplied market snapshot yields preliminary manager decisions, not live betting readiness",
+        "- preserve the implemented Day 11A normalized market contract, Shin/reference booksum path, settlement-aware edge arithmetic, full decision logging, and Day 12 safeguard dispositions as the new frozen upstream baseline",
+        "- preserve the historical/demo archived closing `1X2` limitation explicitly and do not upgrade it into a genuine point-in-time-live market snapshot claim",
+        "- resolve the point-in-time-valid xG input dependency honestly before upgrading Day 12 beyond `PARTIAL`",
+        "- handle live provider integration and current forward-fit readiness as parallel dependencies, not as excuses to reopen the accepted Day 11A or Day 12 core logic",
+        "- stop short of tennis or shared later-day work until football is explicitly re-authorized",
         "",
         "## Files included",
         "",

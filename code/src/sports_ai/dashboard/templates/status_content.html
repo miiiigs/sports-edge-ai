@@ -1,0 +1,138 @@
+<section class="command-deck status-layout">
+  <article class="command-panel command-panel--primary">
+    <div class="section-heading section-heading--tight">
+      <div>
+        <p class="eyebrow">Runtime Status</p>
+        <h2>System Health</h2>
+        <p class="section-intro">Provider connectivity, prediction-runtime readiness, and current operational blockers as of {{ payload.system_status.current_time_local }}.</p>
+      </div>
+    </div>
+
+    <div class="hero-strip">
+      <div class="metric-tile">
+        <span class="status-label">Fixture Feed</span>
+        <strong>{{ payload.system_status.fixture_feed.state }}</strong>
+        <p>{{ payload.system_status.fixture_feed.provider }}</p>
+      </div>
+      <div class="metric-tile">
+        <span class="status-label">Prediction Engine</span>
+        <strong>{{ payload.system_status.prediction_engine.state }}</strong>
+        <p>{{ payload.system_status.prediction_engine.ready_fixture_count }} ready fixtures</p>
+      </div>
+      <div class="metric-tile">
+        <span class="status-label">Market State</span>
+        <strong>{{ payload.system_status.odds_feed.state }}</strong>
+        <p>Current market decisions remain disconnected.</p>
+      </div>
+      <div class="metric-tile">
+        <span class="status-label">Safeguards</span>
+        <strong>{{ payload.system_status.safeguards.state }}</strong>
+        <p>{{ payload.system_status.safeguards.blocked_reason or 'Ready' }}</p>
+      </div>
+    </div>
+  </article>
+
+  <div class="command-stack">
+    <article class="hero-card">
+      <span class="status-label">Last Successful Sync</span>
+      <strong>{{ payload.system_status.fixture_feed.last_successful_sync_at or 'N/A' }}</strong>
+      <p class="hero-meta">Last attempted: {{ payload.system_status.fixture_feed.last_attempted_sync_at or 'N/A' }}</p>
+    </article>
+    <article class="hero-card">
+      <span class="status-label">Refresh Policy</span>
+      <strong>{{ payload.system_status.fixture_feed.refresh_policy.live_refresh_seconds }}s / {{ payload.system_status.fixture_feed.refresh_policy.future_refresh_seconds }}s</strong>
+      <p class="hero-meta">Manual cooldown: {{ payload.system_status.fixture_feed.refresh_policy.manual_refresh_cooldown_seconds }}s</p>
+    </article>
+  </div>
+</section>
+
+<section class="ops-grid">
+  <article class="detail-card">
+    <p class="eyebrow">Provider</p>
+    <h3>football-data.org</h3>
+    <div class="data-list">
+      <div><span>Status</span><strong>{{ payload.system_status.fixture_feed.state }}</strong></div>
+      <div><span>Configured</span><strong>{{ 'YES' if payload.system_status.fixture_feed.configured else 'NO' }}</strong></div>
+      <div><span>Last Error</span><strong>{{ payload.system_status.fixture_feed.last_error or 'None' }}</strong></div>
+      <div><span>Query Count</span><strong>{{ payload.system_status.fixture_feed.query_count }}</strong></div>
+      <div><span>Cache Entries</span><strong>{{ payload.system_status.fixture_feed.cache_entries }}</strong></div>
+      <div><span>Plan Note</span><strong>{{ payload.system_status.fixture_feed.plan_note or 'None' }}</strong></div>
+      <div><span>Live Status Note</span><strong>{{ payload.system_status.fixture_feed.live_status_note or 'None' }}</strong></div>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Prediction Engine</p>
+    <h3>Current Snapshot</h3>
+    <div class="data-list">
+      <div><span>State</span><strong>{{ payload.system_status.prediction_engine.state }}</strong></div>
+      <div><span>Last Prediction</span><strong>{{ payload.system_status.prediction_engine.last_prediction_generated_at or 'N/A' }}</strong></div>
+      <div><span>Snapshot ID</span><strong>{{ payload.system_status.current_model_snapshot.snapshot_id or 'N/A' }}</strong></div>
+      <div><span>Model As Of</span><strong>{{ payload.system_status.current_model_snapshot.model_as_of or 'N/A' }}</strong></div>
+      <div><span>Pending Fixtures</span><strong>{{ payload.system_status.prediction_engine.pending_fixture_count }}</strong></div>
+      <div><span>Blocked Fixtures</span><strong>{{ payload.system_status.prediction_engine.blocked_fixture_count }}</strong></div>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Market State</p>
+    <h3>Decision Readiness</h3>
+    <div class="data-list">
+      <div><span>Odds Feed</span><strong>{{ payload.system_status.odds_feed.state }}</strong></div>
+      <div><span>Market Decision Ready</span><strong>{{ payload.system_status.current_market_decision_ready }}</strong></div>
+      <div><span>Fixture Feed Ready</span><strong>{{ payload.system_status.current_fixture_feed_ready }}</strong></div>
+      <div><span>Prediction Pipeline Ready</span><strong>{{ payload.system_status.current_prediction_pipeline_ready }}</strong></div>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Safeguards</p>
+    <h3>Day 12 Blockers</h3>
+    <div class="data-list">
+      <div><span>State</span><strong>{{ payload.system_status.safeguards.state }}</strong></div>
+      <div><span>xG Availability</span><strong>{{ payload.system_status.safeguards.xg_availability }}</strong></div>
+      <div><span>Blocked Reason</span><strong>{{ payload.system_status.safeguards.blocked_reason or 'None' }}</strong></div>
+      <div><span>Live Paper Pipeline</span><strong>{{ payload.system_status.live_paper_pipeline_ready }}</strong></div>
+    </div>
+  </article>
+</section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Diagnostics</p>
+      <h2>Recent Provider Queries</h2>
+    </div>
+    <span>{{ (payload.system_status.fixture_feed.sync_diagnostics.queries if payload.system_status.fixture_feed.sync_diagnostics else [])|length }} rows</span>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Kind</th>
+          <th>HTTP</th>
+          <th>Rows</th>
+          <th>Cache</th>
+          <th>Params</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payload.system_status.fixture_feed.sync_diagnostics.queries if payload.system_status.fixture_feed.sync_diagnostics %}
+          <tr>
+            <td>{{ row.query_timestamp }}</td>
+            <td>{{ row.query_kind or 'query' }}</td>
+            <td>{{ row.http_status }}</td>
+            <td>{{ row.raw_fixture_count }}</td>
+            <td>{{ 'HIT' if row.cache_hit else 'MISS' }}</td>
+            <td>{{ row.params }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6">No provider queries have been recorded in the current runtime yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

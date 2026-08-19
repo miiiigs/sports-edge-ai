@@ -1,0 +1,109 @@
+<section class="section-block detail-header">
+  <div>
+    <p class="eyebrow">{{ payload.fixture.competition_name }}</p>
+    <h2>{{ payload.fixture.home_team_name }} vs {{ payload.fixture.away_team_name }}</h2>
+    <p>{{ payload.fixture.kickoff_local }} | {{ payload.fixture.status }}{% if payload.fixture.elapsed_minute %} {{ payload.fixture.elapsed_minute }}'{% endif %}</p>
+  </div>
+  {% if payload.fixture.status in ['LIVE', 'HALFTIME', 'FINISHED'] %}
+    <div class="score-box">
+      <span>Score</span>
+      <strong>{{ payload.fixture.home_score if payload.fixture.home_score is not none else 0 }} - {{ payload.fixture.away_score if payload.fixture.away_score is not none else 0 }}</strong>
+    </div>
+  {% endif %}
+</section>
+
+{% if payload.prediction %}
+  <section class="detail-grid">
+    <article class="detail-card">
+      <p class="eyebrow">Fixture Info</p>
+      <h3>Pre-match Prediction</h3>
+      <div class="data-list">
+        <div><span>Season</span><strong>{{ payload.fixture.season }}</strong></div>
+        <div><span>Provider Fixture ID</span><strong>{{ payload.fixture.provider_fixture_id or 'Generated' }}</strong></div>
+        <div><span>Last Provider Update</span><strong>{{ payload.fixture.last_provider_update }}</strong></div>
+      </div>
+      {% if payload.prediction.prediction_status == 'READY' %}
+        <div class="data-list">
+          <div><span>Shots</span><strong>{{ "%.2f"|format(payload.prediction.expected_home_shots) }} - {{ "%.2f"|format(payload.prediction.expected_away_shots) }}</strong></div>
+          <div><span>Shots On Target</span><strong>{{ "%.2f"|format(payload.prediction.expected_home_sot) }} - {{ "%.2f"|format(payload.prediction.expected_away_sot) }}</strong></div>
+          <div><span>Corners</span><strong>{{ "%.2f"|format(payload.prediction.expected_home_corners) }} - {{ "%.2f"|format(payload.prediction.expected_away_corners) }}</strong></div>
+          <div><span>xG</span><strong>{{ "%.2f"|format(payload.prediction.expected_home_goals) }} - {{ "%.2f"|format(payload.prediction.expected_away_goals) }}</strong></div>
+          <div><span>Total Goals</span><strong>{{ "%.2f"|format(payload.prediction.expected_total_goals) }}</strong></div>
+        </div>
+      {% else %}
+        <p>Prediction eligibility: {{ payload.fixture.prediction_eligibility_status }}</p>
+        <p>Blockers: {{ payload.prediction.blockers|join(', ') if payload.prediction.blockers else 'N/A' }}</p>
+      {% endif %}
+      <div class="data-list">
+        <div><span>Status</span><strong>{{ payload.prediction.prediction_status }}</strong></div>
+        <div><span>Lock</span><strong>{{ payload.prediction.lock_state }}</strong></div>
+        <div><span>Generated At</span><strong>{{ payload.prediction.generated_at }}</strong></div>
+        <div><span>Model As Of</span><strong>{{ payload.prediction.model_as_of or 'N/A' }}</strong></div>
+        <div><span>Snapshot ID</span><strong>{{ payload.prediction.model_snapshot_id or 'N/A' }}</strong></div>
+        <div><span>Prediction Version</span><strong>{{ payload.prediction.prediction_version or payload.prediction.version_key }}</strong></div>
+      </div>
+    </article>
+
+    <article class="detail-card">
+      <p class="eyebrow">Scoreline View</p>
+      <h3>Top Scorelines</h3>
+      {% if payload.prediction.top_scorelines %}
+        <ul class="scoreline-list">
+          {% for row in payload.prediction.top_scorelines %}
+            <li>
+              <div class="scoreline-bar">
+                <span>{{ row.home_goals }}-{{ row.away_goals }}</span>
+                <div class="scoreline-bar-track">
+                  <div class="scoreline-bar-fill" style="width: {{ "%.2f"|format(row.probability * 100) }}%"></div>
+                </div>
+                <strong>{{ "%.2f"|format(row.probability * 100) }}%</strong>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No scoreline distribution is available for the current prediction state.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="detail-grid">
+    <article class="detail-card">
+      <p class="eyebrow">Model Fair Price</p>
+      <h3>Fair Prices</h3>
+      {% if payload.prediction.prediction_status == 'READY' %}
+        <div class="data-list">
+          <div><span>1X2 Home</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices['1x2'].HOME.fair_decimal_price) }}</strong></div>
+          <div><span>1X2 Draw</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices['1x2'].DRAW.fair_decimal_price) }}</strong></div>
+          <div><span>1X2 Away</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices['1x2'].AWAY.fair_decimal_price) }}</strong></div>
+          <div><span>BTTS Yes</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices.btts.YES.fair_decimal_price) }}</strong></div>
+          <div><span>BTTS No</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices.btts.NO.fair_decimal_price) }}</strong></div>
+          <div><span>Over 2.5</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices.goals_total_2_5.OVER.fair_decimal_price) }}</strong></div>
+          <div><span>Under 2.5</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices.goals_total_2_5.UNDER.fair_decimal_price) }}</strong></div>
+          {% if payload.prediction.fair_prices.asian_handicap_home_minus_0_5 %}
+            <div><span>AH Home -0.5</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices.asian_handicap_home_minus_0_5.fair_decimal_price) }}</strong></div>
+          {% endif %}
+          {% if payload.prediction.fair_prices.corner_total_9_5.OVER %}
+            <div><span>Corners Over 9.5</span><strong>{{ "%.2f"|format(payload.prediction.fair_prices.corner_total_9_5.OVER.fair_decimal_price) }}</strong></div>
+          {% endif %}
+        </div>
+      {% else %}
+        <p>Model fair prices are unavailable because the current pre-match prediction did not reach READY.</p>
+      {% endif %}
+    </article>
+
+    <article class="detail-card">
+      <p class="eyebrow">Decision Layer</p>
+      <h3>Manager / Day 12</h3>
+      <div class="data-list">
+        <div><span>Manager</span><strong>{{ payload.prediction.manager_decision_status }}</strong></div>
+        <div><span>Safeguard</span><strong>{{ payload.prediction.safeguard_status }}</strong></div>
+        <div><span>Safeguard Reason</span><strong>{{ payload.prediction.safeguard_reason }}</strong></div>
+        <div><span>Point-In-Time xG</span><strong>{{ payload.system_status.xg.state }}</strong></div>
+        <div><span>Odds Feed</span><strong>{{ payload.system_status.odds_feed.state }}</strong></div>
+      </div>
+    </article>
+  </section>
+{% else %}
+  <section class="empty-state">No prediction has been persisted for this fixture yet.</section>
+{% endif %}

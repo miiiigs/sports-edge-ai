@@ -1,0 +1,99 @@
+{
+  "ah_policy_version": "football_day12_ah_line_preference_v1",
+  "ah_status_counts": {
+    "AH_NOT_APPLICABLE": 10299
+  },
+  "candidate_record_count": 10299,
+  "code_unit_test_market_support": "1X2 plus generic AH safeguard logic and xG-contract coverage",
+  "competition_counts": {
+    "ENG1": 1910,
+    "ENG2": 2243,
+    "ENG3": 2218,
+    "ENG4": 2099,
+    "ESP1": 1829
+  },
+  "day11_decision_count": 28992,
+  "day11_preliminary_candidate_count": 10299,
+  "day12_candidate_record_schema_version": "football_day12_candidate_record_v1",
+  "day12_policy_version": "football_day12_safeguard_policy_v1",
+  "day12_status": "PARTIAL",
+  "day12_version": "football_day12_safeguards_v1",
+  "derivation_policy_version": "football_day12_ah_1x2_consistency_v1",
+  "derivation_status_counts": {
+    "DERIVATION_PASS": 10299
+  },
+  "disposition_counts": {
+    "BLOCKED_MISSING_XG_DATA": 5982,
+    "EXPERIMENTAL_CANDIDATE": 4317
+  },
+  "edge_bucket_counts": {
+    "10-25%": {
+      "blocked": 1945,
+      "input": 3583,
+      "rejected": 0,
+      "survived": 1638
+    },
+    "25-50%": {
+      "blocked": 1564,
+      "input": 2786,
+      "rejected": 0,
+      "survived": 1222
+    },
+    "50-100%": {
+      "blocked": 1108,
+      "input": 1743,
+      "rejected": 0,
+      "survived": 635
+    },
+    "<10%": {
+      "blocked": 833,
+      "input": 1536,
+      "rejected": 0,
+      "survived": 703
+    },
+    ">100%": {
+      "blocked": 532,
+      "input": 651,
+      "rejected": 0,
+      "survived": 119
+    }
+  },
+  "experiment_id": "EXP-015",
+  "football_logical_pipeline_ready": "NO",
+  "ignored_non_preliminary_count": 18693,
+  "input_label": "HISTORICAL / DEMONSTRATION MARKET INPUT",
+  "live_paper_pipeline_ready": "NO",
+  "manifest_version": "football_day12_safeguard_manifest_v1",
+  "not_live_betting_output": "NOT LIVE BETTING OUTPUT",
+  "not_real_money_recommendations": "NOT REAL-MONEY RECOMMENDATIONS",
+  "real_historical_market_coverage": "archived closing 1X2 only",
+  "run_date_stamp": "2026-08-19",
+  "run_timestamp_utc": "2026-08-19T11:28:14+00:00",
+  "source_paths": {
+    "day10_model_prices_csv_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day10\\football_day10_model_prices.csv",
+    "day11_decisions_path": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day11\\football_day11_decisions.jsonl",
+    "xg_data_path": null
+  },
+  "survival_percentage": 0.41916690940868045,
+  "technical_artifacts": {
+    "candidate_records_jsonl": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_day12_safeguards_2026-08-19_candidate_records.jsonl",
+    "manifest_json": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_day12_safeguards_2026-08-19_manifest.json"
+  },
+  "tennis_authorized": "NO",
+  "xg_input_inspection": {
+    "competitions_covered": [],
+    "exists": false,
+    "path": null,
+    "point_in_time_valid": false,
+    "reason": "XG_INPUT_PATH_UNCONFIGURED",
+    "seasons_covered": [],
+    "source_names": [],
+    "sufficient_for_day12_rule": false
+  },
+  "xg_input_schema_version": "football_day12_xg_input_v1",
+  "xg_policy_version": "football_day12_xg_sanity_check_v1",
+  "xg_status_counts": {
+    "XG_MISSING": 5982,
+    "XG_NOT_APPLICABLE": 4317
+  }
+}

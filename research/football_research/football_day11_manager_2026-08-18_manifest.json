@@ -1,0 +1,47 @@
+{
+  "competition_counts": {
+    "ENG1": 4560,
+    "ENG2": 6624,
+    "ENG3": 6624,
+    "ENG4": 6624,
+    "ESP1": 4560
+  },
+  "day11_manager_core_ready": "YES",
+  "decision_counts": {
+    "NO_BET": 18693,
+    "PRELIMINARY_CANDIDATE": 10299
+  },
+  "decision_record_count": 28992,
+  "decision_record_schema_version": "football_day11_decision_record_v1",
+  "devig_configuration_version": "football_day11_reference_devig_v1",
+  "domestic_cup_policy_version": "football_day11_domestic_cup_rules_v1",
+  "experiment_id": "EXP-014",
+  "final_devig_method": "shin",
+  "freshness_policy_version": "football_day11_freshness_contract_v1",
+  "historical_market_input_policy_version": "football_day11_historical_demo_market_input_v1",
+  "input_label": "HISTORICAL / DEMONSTRATION MARKET INPUT",
+  "live_paper_pipeline_ready": "NO",
+  "manager_policy_version": "football_day11_manager_policy_v1",
+  "manager_version": "football_day11_manager_core_v1",
+  "manifest_version": "football_day11_manager_manifest_v1",
+  "matched_selection_count": 28992,
+  "model_row_count": 473536,
+  "normalized_market_snapshot_count": 37240,
+  "normalized_market_snapshot_version": "football_day11_normalized_market_snapshot_v1",
+  "reference_market_count": 9664,
+  "reference_market_policy_version": "football_day11_reference_market_priority_v1",
+  "run_date_stamp": "2026-08-18",
+  "run_timestamp_utc": "2026-08-18T22:41:21+00:00",
+  "source_paths": {
+    "day10_market_prices_path": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_day10_market_pricing_2026-08-18_market_prices.jsonl",
+    "research_db_path": "C:\\dev\\sports-edge-ai\\research\\football_research\\store\\football_research.sqlite"
+  },
+  "technical_artifacts": {
+    "decision_records_jsonl": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\day11\\football_day11_decisions.jsonl",
+    "devig_outputs_jsonl": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_day11_manager_2026-08-18_devig_outputs.jsonl",
+    "joined_rows_jsonl": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_day11_manager_2026-08-18_joined_rows.jsonl",
+    "manifest_json": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_day11_manager_2026-08-18_manifest.json",
+    "normalized_market_snapshot_jsonl": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_day11_manager_2026-08-18_normalized_market_snapshots.jsonl"
+  },
+  "threshold_config_version": "football_day11_competition_thresholds_v1"
+}

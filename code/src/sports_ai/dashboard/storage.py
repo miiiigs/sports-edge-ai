@@ -1,0 +1,357 @@
+"""SQLite persistence for the operational football dashboard."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any, Iterable
+
+from .models import NormalizedFixture
+
+SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS dashboard_fixtures (
+        fixture_id TEXT PRIMARY KEY,
+        provider_fixture_id TEXT,
+        provider TEXT NOT NULL,
+        competition_id TEXT NOT NULL,
+        competition_name TEXT NOT NULL,
+        division_code TEXT,
+        season TEXT NOT NULL,
+        home_team_id TEXT,
+        home_team_name TEXT NOT NULL,
+        away_team_id TEXT,
+        away_team_name TEXT NOT NULL,
+        kickoff_utc TEXT NOT NULL,
+        status TEXT NOT NULL,
+        elapsed_minute INTEGER,
+        home_score INTEGER,
+        away_score INTEGER,
+        last_provider_update TEXT NOT NULL,
+        source_version TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS dashboard_predictions (
+        prediction_id TEXT PRIMARY KEY,
+        fixture_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        model_as_of TEXT,
+        model_snapshot_id TEXT,
+        version_key TEXT NOT NULL UNIQUE,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(fixture_id) REFERENCES dashboard_fixtures(fixture_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS dashboard_team_mappings (
+        mapping_key TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        competition_id TEXT NOT NULL,
+        provider_team_id TEXT,
+        provider_team_name TEXT NOT NULL,
+        normalized_team_name TEXT NOT NULL,
+        canonical_team_id TEXT,
+        canonical_team_name TEXT,
+        resolution_kind TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        reason TEXT,
+        last_seen_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS dashboard_runtime_state (
+        state_key TEXT PRIMARY KEY,
+        state_value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+)
+
+
+def connect(db_path: str | Path) -> sqlite3.Connection:
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    with conn:
+        for statement in SCHEMA_STATEMENTS:
+            conn.execute(statement)
+
+
+def upsert_fixtures(
+    conn: sqlite3.Connection,
+    fixtures: Iterable[NormalizedFixture],
+    *,
+    updated_at: str,
+) -> None:
+    ensure_schema(conn)
+    with conn:
+        for fixture in fixtures:
+            payload_json = json.dumps(fixture.to_dict(timezone_name="UTC"), sort_keys=True)
+            conn.execute(
+                """
+                INSERT INTO dashboard_fixtures (
+                    fixture_id, provider_fixture_id, provider, competition_id, competition_name,
+                    division_code, season, home_team_id, home_team_name, away_team_id, away_team_name,
+                    kickoff_utc, status, elapsed_minute, home_score, away_score,
+                    last_provider_update, source_version, payload_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(fixture_id) DO UPDATE SET
+                    provider_fixture_id=excluded.provider_fixture_id,
+                    provider=excluded.provider,
+                    competition_id=excluded.competition_id,
+                    competition_name=excluded.competition_name,
+                    division_code=excluded.division_code,
+                    season=excluded.season,
+                    home_team_id=excluded.home_team_id,
+                    home_team_name=excluded.home_team_name,
+                    away_team_id=excluded.away_team_id,
+                    away_team_name=excluded.away_team_name,
+                    kickoff_utc=excluded.kickoff_utc,
+                    status=excluded.status,
+                    elapsed_minute=excluded.elapsed_minute,
+                    home_score=excluded.home_score,
+                    away_score=excluded.away_score,
+                    last_provider_update=excluded.last_provider_update,
+                    source_version=excluded.source_version,
+                    payload_json=excluded.payload_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    fixture.fixture_id,
+                    fixture.provider_fixture_id,
+                    fixture.provider,
+                    fixture.competition_id,
+                    fixture.competition_name,
+                    fixture.division_code,
+                    fixture.season,
+                    fixture.home_team_id,
+                    fixture.home_team_name,
+                    fixture.away_team_id,
+                    fixture.away_team_name,
+                    fixture.kickoff_utc,
+                    fixture.status,
+                    fixture.elapsed_minute,
+                    fixture.home_score,
+                    fixture.away_score,
+                    fixture.last_provider_update,
+                    fixture.source_version,
+                    payload_json,
+                    updated_at,
+                ),
+            )
+
+
+def fetch_all_fixtures(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    ensure_schema(conn)
+    rows = conn.execute(
+        """
+        SELECT payload_json
+        FROM dashboard_fixtures
+        ORDER BY kickoff_utc, fixture_id
+        """
+    ).fetchall()
+    return [json.loads(str(row["payload_json"])) for row in rows]
+
+
+def fetch_fixture(conn: sqlite3.Connection, fixture_id: str) -> dict[str, Any] | None:
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT payload_json
+        FROM dashboard_fixtures
+        WHERE fixture_id = ?
+        """,
+        (fixture_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return json.loads(str(row["payload_json"]))
+
+
+def save_prediction(
+    conn: sqlite3.Connection,
+    payload: dict[str, Any],
+    *,
+    updated_at: str,
+) -> None:
+    ensure_schema(conn)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO dashboard_predictions (
+                prediction_id, fixture_id, status, generated_at, model_as_of,
+                model_snapshot_id, version_key, payload_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(version_key) DO UPDATE SET
+                prediction_id=excluded.prediction_id,
+                fixture_id=excluded.fixture_id,
+                status=excluded.status,
+                generated_at=excluded.generated_at,
+                model_as_of=excluded.model_as_of,
+                model_snapshot_id=excluded.model_snapshot_id,
+                payload_json=excluded.payload_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                str(payload["prediction_id"]),
+                str(payload["fixture_id"]),
+                str(payload["prediction_status"]),
+                str(payload["generated_at"]),
+                None if payload.get("model_as_of") is None else str(payload["model_as_of"]),
+                None if payload.get("model_snapshot_id") is None else str(payload["model_snapshot_id"]),
+                str(payload["version_key"]),
+                json.dumps(payload, sort_keys=True),
+                updated_at,
+            ),
+        )
+
+
+def fetch_prediction_by_version_key(
+    conn: sqlite3.Connection,
+    version_key: str,
+) -> dict[str, Any] | None:
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT payload_json
+        FROM dashboard_predictions
+        WHERE version_key = ?
+        """,
+        (version_key,),
+    ).fetchone()
+    if row is None:
+        return None
+    return json.loads(str(row["payload_json"]))
+
+
+def fetch_latest_prediction_for_fixture(
+    conn: sqlite3.Connection,
+    fixture_id: str,
+) -> dict[str, Any] | None:
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT payload_json
+        FROM dashboard_predictions
+        WHERE fixture_id = ?
+        ORDER BY generated_at DESC, prediction_id DESC
+        LIMIT 1
+        """,
+        (fixture_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return json.loads(str(row["payload_json"]))
+
+
+def fetch_all_predictions(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    ensure_schema(conn)
+    rows = conn.execute(
+        """
+        SELECT payload_json
+        FROM dashboard_predictions
+        ORDER BY generated_at DESC, fixture_id
+        """
+    ).fetchall()
+    return [json.loads(str(row["payload_json"])) for row in rows]
+
+
+def record_team_resolution(
+    conn: sqlite3.Connection,
+    resolution: dict[str, Any],
+    *,
+    updated_at: str,
+) -> None:
+    ensure_schema(conn)
+    mapping_key = "|".join(
+        [
+            str(resolution["provider"]),
+            str(resolution["competition_id"]),
+            str(resolution.get("provider_team_id") or ""),
+            str(resolution["normalized_team_name"]),
+        ]
+    )
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO dashboard_team_mappings (
+                mapping_key, provider, competition_id, provider_team_id, provider_team_name,
+                normalized_team_name, canonical_team_id, canonical_team_name, resolution_kind,
+                confidence, reason, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(mapping_key) DO UPDATE SET
+                provider_team_name=excluded.provider_team_name,
+                canonical_team_id=excluded.canonical_team_id,
+                canonical_team_name=excluded.canonical_team_name,
+                resolution_kind=excluded.resolution_kind,
+                confidence=excluded.confidence,
+                reason=excluded.reason,
+                last_seen_at=excluded.last_seen_at
+            """,
+            (
+                mapping_key,
+                str(resolution["provider"]),
+                str(resolution["competition_id"]),
+                None if resolution.get("provider_team_id") is None else str(resolution["provider_team_id"]),
+                str(resolution["provider_team_name"]),
+                str(resolution["normalized_team_name"]),
+                None if resolution.get("canonical_team_id") is None else str(resolution["canonical_team_id"]),
+                None if resolution.get("canonical_team_name") is None else str(resolution["canonical_team_name"]),
+                str(resolution["resolution_kind"]),
+                float(resolution["confidence"]),
+                None if resolution.get("reason") is None else str(resolution["reason"]),
+                updated_at,
+            ),
+        )
+
+
+def put_runtime_state(
+    conn: sqlite3.Connection,
+    *,
+    state_key: str,
+    state_value: dict[str, Any],
+    updated_at: str,
+) -> None:
+    ensure_schema(conn)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO dashboard_runtime_state (
+                state_key, state_value_json, updated_at
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(state_key) DO UPDATE SET
+                state_value_json=excluded.state_value_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                state_key,
+                json.dumps(state_value, sort_keys=True),
+                updated_at,
+            ),
+        )
+
+
+def get_runtime_state(conn: sqlite3.Connection, state_key: str) -> dict[str, Any] | None:
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT state_value_json
+        FROM dashboard_runtime_state
+        WHERE state_key = ?
+        """,
+        (state_key,),
+    ).fetchone()
+    if row is None:
+        return None
+    return json.loads(str(row["state_value_json"]))

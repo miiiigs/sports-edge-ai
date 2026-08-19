@@ -30,13 +30,13 @@
 # B. Scope Clarification
 
 - [?] MLB research-only vs production vertical
-- [?] Tennis-first formal MVP vs another sport first
+- [x] Football-first build order locked through Day 12 before tennis implementation begins
 - [?] Are corners/cards formally V1 or post-V1?
 - [?] Which sportsbook(s) are first-class targets?
 - [?] Is exchange/Betfair data available/desired?
 - [?] Is public money/ticket data available?
 - [?] Which jurisdiction/operator constraints matter?
-- [?] First user-facing deliverable: CLI, report, API, or dashboard?
+- [x] Milestone product-output standard defined: Markdown report plus CSV/JSONL/manifest and a compact `current/latest` copy
 - [x] Football immediate parallel research confirmed
 
 # C. Source / Requirements Review
@@ -368,6 +368,14 @@
 - [x] Create football research workspace
 - [x] ENG1 data spine
 - [x] ESP1 data spine
+- [x] Day 7 GAP shots/SOT/corners plus lambda-fitting closure for the currently loaded football scope
+- [x] Day 8 expected-goals and corner-distribution closure for the currently loaded football scope
+- [x] Day 9 scoreline-distribution closure for the currently loaded football scope
+- [x] Day 10 fair-pricing closure for the currently loaded football scope
+- [x] Day 10 product-output package generated under `research/product_outputs/football/day10/` and `research/product_outputs/football/latest/`
+- [x] Day 11A Manager Core
+- [x] Day 12 football safeguards / veto foundation implemented (`PARTIAL` due missing point-in-time-valid xG path)
+- [ ] Freeze football logical pipeline after Day 12 before tennis implementation begins
 - [ ] ENG2 data spine
 - [ ] F01 Team Strength
 - [ ] F02 xG
@@ -465,6 +473,7 @@
 - [x] Client requirement log
 - [x] Scope-change log
 - [ ] Weekly progress report template
+- [x] Product-output standard documented and activated for milestone completion
 
 # V. Current First-Day Priority Order
 

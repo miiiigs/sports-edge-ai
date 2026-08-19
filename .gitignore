@@ -8,3 +8,11 @@ research/chatgpt_handoff/
 research/football_research/*_predictions.jsonl
 research/football_research/*_market_prices.jsonl
 research/football_research/*_pricing_inputs.jsonl
+research/football_research/*_devig_outputs.jsonl
+research/football_research/*_joined_rows.jsonl
+research/football_research/*_normalized_market_snapshots.jsonl
+research/football_research/*_candidate_records.jsonl
+
+research/product_outputs/football/**/*.jsonl
+research/product_outputs/football/**/*.csv
+!research/product_outputs/football/**/*sample.csv

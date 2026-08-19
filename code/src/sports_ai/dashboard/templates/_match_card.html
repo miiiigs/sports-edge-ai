@@ -1,0 +1,76 @@
+<article class="match-card">
+  <div class="match-meta">
+    <span class="badge">{{ fixture.competition_name }}</span>
+    <span class="muted mono">{{ fixture.kickoff_local }}</span>
+  </div>
+  <a class="match-link" href="/matches/{{ fixture.fixture_id }}">
+    <h3>{{ fixture.home_team_name }}<span>vs</span>{{ fixture.away_team_name }}</h3>
+  </a>
+  <div class="match-status">
+    {% if fixture.status in ['LIVE', 'HALFTIME'] %}
+      <strong>LIVE{% if fixture.elapsed_minute %} {{ fixture.elapsed_minute }}'{% endif %}</strong>
+      <span class="score-readout">{{ fixture.home_score if fixture.home_score is not none else 0 }} - {{ fixture.away_score if fixture.away_score is not none else 0 }}</span>
+    {% else %}
+      <strong>{{ fixture.status }}</strong>
+      <span class="score-readout">{{ fixture.kickoff_local }}</span>
+    {% endif %}
+  </div>
+  {% if fixture.prediction %}
+    <div class="prediction-snippet">
+      <p class="snippet-label">{% if fixture.status in ['LIVE', 'HALFTIME'] %}Pre-match Sports Edge prediction locked{% else %}Prediction summary{% endif %}</p>
+      {% if fixture.prediction.prediction_status == 'READY' %}
+        {% set one_x_two = fixture.prediction.fair_prices['1x2'] %}
+        <div class="metrics-strip">
+          <div class="metric-chip">
+            <span>xG</span>
+            <strong>{{ "%.2f"|format(fixture.prediction.expected_home_goals) }} - {{ "%.2f"|format(fixture.prediction.expected_away_goals) }}</strong>
+          </div>
+          <div class="metric-chip">
+            <span>Corners</span>
+            <strong>{{ "%.2f"|format(fixture.prediction.expected_home_corners) }} - {{ "%.2f"|format(fixture.prediction.expected_away_corners) }}</strong>
+          </div>
+          {% if fixture.prediction.top_scorelines %}
+            {% set scoreline = fixture.prediction.top_scorelines[0] %}
+            <div class="metric-chip">
+              <span>Top Score</span>
+              <strong>{{ scoreline.home_goals }}-{{ scoreline.away_goals }}</strong>
+            </div>
+          {% endif %}
+          <div class="metric-chip">
+            <span>Readiness</span>
+            <strong>{{ fixture.prediction.prediction_status }}</strong>
+          </div>
+        </div>
+        <div class="price-strip">
+          <div class="price-chip">
+            <span>Home</span>
+            <strong>{{ "%.2f"|format(one_x_two.HOME.fair_decimal_price) }}</strong>
+          </div>
+          <div class="price-chip">
+            <span>Draw</span>
+            <strong>{{ "%.2f"|format(one_x_two.DRAW.fair_decimal_price) }}</strong>
+          </div>
+          <div class="price-chip">
+            <span>Away</span>
+            <strong>{{ "%.2f"|format(one_x_two.AWAY.fair_decimal_price) }}</strong>
+          </div>
+        </div>
+      {% else %}
+        <p class="state-copy">{{ fixture.prediction_eligibility_status }}</p>
+        <p>{{ fixture.prediction.blockers|join(', ') if fixture.prediction.blockers else 'Prediction not available yet.' }}</p>
+      {% endif %}
+      <div class="signal-grid">
+        <p class="status-line"><span>Status</span><strong>{{ fixture.prediction.prediction_status }}</strong></p>
+        <p class="status-line"><span>Lock</span><strong>{{ fixture.prediction.lock_state or 'PRE_MATCH_OPEN' }}</strong></p>
+        <p class="status-line"><span>Decision</span><strong>{{ fixture.prediction.manager_decision_status }}</strong></p>
+        <p class="status-line"><span>Safeguard</span><strong>{{ fixture.prediction.safeguard_status }}</strong></p>
+      </div>
+    </div>
+  {% else %}
+    <div class="prediction-snippet">
+      <p class="snippet-label">Prediction</p>
+      <p class="state-copy">{{ fixture.prediction_eligibility_status }}</p>
+      <p>Prediction has not been persisted for this fixture yet.</p>
+    </div>
+  {% endif %}
+</article>
