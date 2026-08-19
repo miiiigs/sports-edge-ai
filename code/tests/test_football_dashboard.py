@@ -277,6 +277,8 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         assert 'href="/static/dashboard.css"' in matches_response.text
         assert 'src="/static/dashboard.js"' in matches_response.text
         assert "/matches/static/dashboard.css" not in matches_response.text
+        assert 'data-auto-submit-filters="true"' in matches_response.text
+        assert "Apply Filters" not in matches_response.text
 
         predictions_page = client.get("/predictions")
         assert predictions_page.status_code == 200

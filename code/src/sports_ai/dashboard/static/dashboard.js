@@ -1,6 +1,46 @@
 (() => {
   const container = document.querySelector("[data-partial-refresh]");
   const refreshButton = document.querySelector("[data-manual-refresh]");
+  let filterSubmitTimer = null;
+
+  const submitFilterForm = (form) => {
+    if (!(form instanceof HTMLFormElement) || form.dataset.submitting === "true") {
+      return;
+    }
+    form.dataset.submitting = "true";
+    form.requestSubmit();
+  };
+
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) {
+      return;
+    }
+    const form = target.closest("form[data-auto-submit-filters='true']");
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+    if (target instanceof HTMLSelectElement) {
+      window.clearTimeout(filterSubmitTimer);
+      submitFilterForm(form);
+    }
+  });
+
+  document.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== "text") {
+      return;
+    }
+    const form = target.closest("form[data-auto-submit-filters='true']");
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+    window.clearTimeout(filterSubmitTimer);
+    filterSubmitTimer = window.setTimeout(() => {
+      submitFilterForm(form);
+    }, 350);
+  });
+
   const runPartialRefresh = async () => {
     if (!container) {
       return;

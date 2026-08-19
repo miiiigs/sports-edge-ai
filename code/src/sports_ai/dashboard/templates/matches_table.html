@@ -6,7 +6,7 @@
     </div>
     <span>{{ payload.rows|length }} fixtures</span>
   </div>
-  <form class="filters-bar" method="get" action="/matches">
+  <form class="filters-bar" method="get" action="/matches" data-auto-submit-filters="true">
     <div class="filter-group">
       <label for="status_bucket">Window</label>
       <select id="status_bucket" name="status_bucket">
@@ -37,7 +37,6 @@
         <option value="PREDICTION_PENDING" {% if payload.filters.prediction_status == 'PREDICTION_PENDING' %}selected{% endif %}>Pending</option>
       </select>
     </div>
-    <button class="refresh-button" type="submit">Apply Filters</button>
   </form>
   <div class="table-shell">
     <table>
