@@ -268,10 +268,37 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         dashboard_response = client.get("/")
         assert dashboard_response.status_code == 200
         assert "Sports Edge AI" in dashboard_response.text
+        assert 'href="/static/dashboard.css"' in dashboard_response.text
+        assert 'src="/static/dashboard.js"' in dashboard_response.text
+        assert "/matches/static/dashboard.css" not in dashboard_response.text
+
+        matches_response = client.get("/matches")
+        assert matches_response.status_code == 200
+        assert 'href="/static/dashboard.css"' in matches_response.text
+        assert 'src="/static/dashboard.js"' in matches_response.text
+        assert "/matches/static/dashboard.css" not in matches_response.text
+
+        predictions_page = client.get("/predictions")
+        assert predictions_page.status_code == 200
+        assert 'href="/static/dashboard.css"' in predictions_page.text
+        assert 'src="/static/dashboard.js"' in predictions_page.text
+
+        candidates_page = client.get("/candidates")
+        assert candidates_page.status_code == 200
+        assert 'href="/static/dashboard.css"' in candidates_page.text
+        assert 'src="/static/dashboard.js"' in candidates_page.text
 
         status_page = client.get("/status")
         assert status_page.status_code == 200
         assert "System Health" in status_page.text
+        assert 'href="/static/dashboard.css"' in status_page.text
+        assert 'src="/static/dashboard.js"' in status_page.text
+
+        stylesheet_response = client.get("/static/dashboard.css")
+        assert stylesheet_response.status_code == 200
+        assert "text/css" in stylesheet_response.headers["content-type"]
+        assert ":root" in stylesheet_response.text
+        assert ".app-shell" in stylesheet_response.text
 
         status_response = client.get("/api/system/status")
         assert status_response.status_code == 200
