@@ -1,0 +1,9 @@
+.git
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+tmp_pdf_extract/
+mock_design/node_modules/
+mock_design/.next/
