@@ -1,0 +1,6 @@
+market,line,selection,sample_size,hit_rate,mean_predicted_probability,actual_frequency,brier,log_loss,avg_odds,break_even_rate,roi,status,notes
+1X2,,ALL,9664,0.4705091059602649,,,0.6251452853900419,1.0395173320870106,,,,READY,Top-probability selection accuracy. Historical profitability remains unproven because only closing 1X2 snapshots are available.
+BTTS,,YES,9664,0.5256622516556292,0.5190995891076169,0.5256622516556292,0.24804439121801475,0.6892376529220399,,,,READY,Binary event benchmark from the frozen Day 10 model outputs.
+GOALS_TOTAL,1.5,OVER,9664,0.742135761589404,0.7383169642912049,0.742135761589404,0.18923672419019816,0.5650540927212314,,,,READY,Representative half-line benchmark row shown in the compact market table.
+CORNER_TOTAL,8.5,OVER,9664,0.6533526490066225,0.6534923642660952,0.6533526490066225,0.22561755500387592,0.643702887656496,,,,READY,Representative half-line benchmark row shown in the compact market table.
+ASIAN_HANDICAP,,ALL,0,,,,,,,,,SETTLEMENT_READY,"Settlement-aware grading is supported, but naive binary accuracy is intentionally not reported."

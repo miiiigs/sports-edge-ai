@@ -1103,6 +1103,10 @@ thead th,
   grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
 }
 
+.performance-deck {
+  align-items: start;
+}
+
 .command-panel--primary,
 .hero-card {
   background: rgba(12, 26, 41, 0.92);
@@ -1417,6 +1421,59 @@ tbody tr:hover {
   display: flex;
   gap: 7px;
   align-items: center;
+}
+
+.calibration-chart {
+  width: 100%;
+  aspect-ratio: 1.4 / 1;
+  border: 1px solid rgba(26, 48, 67, 0.85);
+  border-radius: 8px;
+  background: rgba(13, 27, 43, 0.65);
+  padding: 12px;
+}
+
+.calibration-chart svg {
+  width: 100%;
+  height: 100%;
+}
+
+.calibration-ideal {
+  stroke: rgba(126, 145, 167, 0.8);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.legend-row {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 2px;
+  display: inline-block;
+}
+
+.legend-home {
+  background: var(--cyan);
+}
+
+.legend-draw {
+  background: var(--purple);
+}
+
+.legend-away {
+  background: var(--green);
 }
 
 @media (max-width: 1200px) {

@@ -1,16 +1,17 @@
 # Project Status
 
-Last updated: Wednesday, August 19, 2026
+Last updated: Thursday, August 20, 2026
 
 ## Current phase
 
-Wednesday, August 19, 2026 implementation state is now updated through the first operational
-football dashboard build. The accepted football model path remains closed through Day 11A, with
+Thursday, August 20, 2026 implementation state is now updated through the football validation
+build, historical performance benchmark, provider-independent current market contract, and
+paper-trading foundation. The accepted football model path remains closed through Day 11A, with
 Day 12 still implemented as an honest `PARTIAL` for the currently loaded football scope.
 
 The current user-directed product milestone is now:
 
-- `CURRENT PRODUCT MILESTONE = FOOTBALL DASHBOARD V1.2 FOOTBALL-DATA.ORG WATCHLIST REFRESH`
+- `CURRENT PRODUCT MILESTONE = FOOTBALL VALIDATION + CURRENT MARKET/PAPER TRACKING FOUNDATION`
 - `TENNIS DEVELOPMENT = PAUSED`
 
 The repository remains the active migration workspace under the August 2026 PDF-first football and
@@ -26,11 +27,69 @@ closed through:
 
 The current bounded product boundary is now:
 
-`current fixture provider -> normalized fixture -> current forward football snapshot -> frozen pre-match prediction -> Day 10 fair prices -> dashboard display`
+`frozen historical football outputs -> benchmark + audit -> current market-provider contract -> immutable paper ledger -> performance dashboard`
 
 It is still not:
 
 `live betting system ready`
+
+## Football Validation Build
+
+The active football milestone is now the historical validation and live-readiness foundation rather
+than another dashboard redesign.
+
+Real local verification on Thursday, August 20, 2026:
+
+- full historical benchmark executed successfully from the frozen accepted football artifacts
+- new dashboard `/performance` page and `/api/performance` endpoint added successfully
+- current full suite after the validation build: `206 passed, 1 warning in 35.41s`
+
+Real benchmark summary from the current repo snapshot:
+
+- evaluation sample: `9664`
+- `MODEL_VALIDATION = PROMISING`
+- `PROFITABILITY_PROVEN = NO`
+- `CLV_PROVEN = NO`
+- `LIVE_EDGE_PROVEN = NO`
+- `1X2` accuracy: `0.470509`
+- `1X2` Brier: `0.625145`
+- `1X2` log loss: `1.039517`
+- goals MAE: `1.275611`
+- corners MAE: `2.696198`
+- average expected calibration error: `0.0157`
+- strongest measured market: `GOALS_TOTAL`
+- weakest measured market: `1X2`
+- historical CLV availability: `UNAVAILABLE_HISTORICALLY`
+
+The benchmark now ships under:
+
+- `research/product_outputs/football/performance/FOOTBALL_MODEL_PERFORMANCE_REPORT.md`
+- `research/product_outputs/football/performance/football_performance_summary.json`
+- `research/product_outputs/football/performance/football_performance_by_market.csv`
+- `research/product_outputs/football/performance/football_performance_by_competition.csv`
+- `research/product_outputs/football/performance/football_performance_by_season.csv`
+- `research/product_outputs/football/performance/football_calibration.csv`
+- `research/product_outputs/football/performance/football_1x2_confusion_matrix.csv`
+- `research/product_outputs/football/performance/FOOTBALL_MODEL_IMPROVEMENT_BACKLOG.md`
+
+The new live-readiness foundation now also exists in code:
+
+- provider-independent current market interface under `sports_ai.market_data`
+- append-oriented current market snapshot storage
+- immutable football paper-trading ledger foundation with deterministic settlement reuse
+- dashboard performance surface with readiness/status reporting
+
+The key verified runtime truth is now:
+
+- `CURRENT_ODDS_PROVIDER = NOT_CONFIGURED`
+- `CURRENT_MARKET_DECISIONS = BLOCKED`
+- `PAPER_TRADING_LEDGER_READY = YES`
+- `CURRENT_PAPER_TRACKING_ACTIVE = NO`
+- `CLV_TRACKING_READY = YES`
+
+This means the football model can now be benchmarked and audited honestly, and the repo is ready
+to ingest real current market snapshots once a provider is connected, but it still cannot claim
+live paper profitability or live CLV evidence.
 
 ## Football Dashboard V1.2
 
@@ -258,6 +317,17 @@ Day 10 product outputs remain available under both:
 The `latest` Day 10 copies are now stored as hard links to avoid an unnecessary duplicate multi-GB
  storage hit inside the local workspace.
 
+Performance outputs now also ship under:
+
+- `research/product_outputs/football/performance/FOOTBALL_MODEL_PERFORMANCE_REPORT.md`
+- `research/product_outputs/football/performance/football_performance_summary.json`
+- `research/product_outputs/football/performance/football_performance_by_market.csv`
+- `research/product_outputs/football/performance/football_performance_by_competition.csv`
+- `research/product_outputs/football/performance/football_performance_by_season.csv`
+- `research/product_outputs/football/performance/football_calibration.csv`
+- `research/product_outputs/football/performance/football_1x2_confusion_matrix.csv`
+- `research/product_outputs/football/performance/FOOTBALL_MODEL_IMPROVEMENT_BACKLOG.md`
+
 ## Repository state
 
 - Day 10 model archive remains frozen and unreopened:
@@ -270,6 +340,7 @@ The `latest` Day 10 copies are now stored as hard links to avoid an unnecessary 
 - verified root suite after Operational Football Dashboard V1 implementation: `200 passed in 31.70s`
 - verified root suite after Football Dashboard V1.1 runtime validation hardening: `202 passed in 29.50s`
 - verified root suite after Football Dashboard V1.2 football-data.org refresh: `203 passed in 35.13s`
+- verified root suite after Football Validation Build: `206 passed, 1 warning in 35.41s`
 - root test route remains `pytest -q` from repo root via `pytest.ini`
 - new Day 11A implementation modules:
   - `code/src/sports_ai/experiments/football_day11_manager_core.py`
@@ -282,20 +353,27 @@ The `latest` Day 10 copies are now stored as hard links to avoid an unnecessary 
   - `code/tests/test_football_day11_product_outputs.py`
 - new Day 12 test coverage:
   - `code/tests/test_football_day12_safeguards.py`
+- new validation-build implementation modules:
+  - `code/src/sports_ai/experiments/football_model_performance.py`
+  - `code/src/sports_ai/market_data/providers.py`
+  - `code/src/sports_ai/storage/football_paper_trading.py`
+- new validation-build test coverage:
+  - `code/tests/test_football_model_performance.py`
+  - `code/tests/test_football_paper_trading.py`
 - current repo shape:
-  - `68` Python modules under `code/src/sports_ai`
-  - `30` `test_*.py` files under `code/tests`
-  - `190` explicit `def test_...` functions
+  - `72` Python modules under `code/src/sports_ai`
+  - `32` `test_*.py` files under `code/tests`
+  - `196` explicit `def test_...` functions
 
 ## Locked development sequence
 
-1. operational football dashboard V1.2 complete
-2. configure `SPORTS_AI_FOOTBALL_DATA_TOKEN` and validate the first real current football-data.org fixture through the dashboard path
-3. current football market-data integration plus current Day 11/Day 12 runtime readiness
-4. point-in-time-valid xG dependency resolution for the required football competitions
-5. freeze the football logical pipeline only after the live market and xG blockers are resolved
-6. tennis remains paused until football is explicitly re-authorized as complete enough to branch
-6. shared football + tennis later work remains downstream of that re-authorization
+1. football historical validation build complete
+2. connect a real current odds provider through the new provider-independent market-data contract
+3. capture genuine current market snapshots and activate current paper-decision persistence
+4. resolve current forward-production football parameter snapshots for present-tense paper use
+5. resolve point-in-time-valid xG dependency for the competitions where Day 12 requires it
+6. freeze the football logical pipeline only after live market and xG blockers are resolved
+7. tennis remains paused until football is explicitly re-authorized as complete enough to branch
 
 Do not reopen accepted Days 7 through 11A unless a genuine correctness issue is discovered.
 
@@ -306,9 +384,13 @@ Do not reopen accepted Days 7 through 11A unless a genuine correctness issue is 
 - the currently loaded football archive still covers only `ENG1`, `ENG2`, `ENG3`, `ENG4`, and
   `ESP1`, not the full football-spec scope
 - no resolved live sharp-reference provider is connected yet
+- no resolved current odds provider is connected yet, so the new market-provider contract remains
+  unconfigured in production terms
 - no approved production odds-snapshot runtime is in place yet
 - the current real historical Day 11A market input is archived closing `1X2`, not a genuine
   point-in-time original market capture
+- the historical benchmark now measures calibration and market-level performance honestly, but it
+  still cannot prove decision-time ROI or CLV from the archived closing-snapshot-only source mix
 - current Day 8 conversion coefficients, Day 8 corner parameters, and Day 9 rho are valid
   walk-forward historical artifacts, but they are not automatically a current forward-production fit
   for 2026-27 paper predictions
@@ -322,19 +404,21 @@ Do not reopen accepted Days 7 through 11A unless a genuine correctness issue is 
 
 1. keep the accepted Day 7 through Day 12 model mathematics frozen unless a genuine correctness
    issue is found
-2. resolve the current-fixture provider path so at least one real supported current/upcoming
-   football fixture can flow into a persisted current prediction
-3. add the current/live odds-market snapshot path needed for real Day 11 current-fixture decisions
+2. connect a current odds provider through the new normalized market-data contract
+3. activate genuine current market snapshot capture and immutable paper-trade entry storage
 4. resolve the point-in-time-valid xG dependency for the competitions where the football spec
    requires that safeguard
-5. preserve the distinction between a connected current fixture feed and a fully ready live paper
+5. resolve current forward-production Day 8 and Day 9 parameter snapshot readiness for 2026-27
+   paper output
+6. preserve the distinction between connected current data plumbing and a fully ready live paper
    betting pipeline
-6. do not begin tennis, staking, Kelly, or production deployment until football status is
+7. do not begin tennis, staking, Kelly, or production deployment until football status is
    explicitly re-authorized
 
 ## Bottom line
 
-For the currently loaded football scope, Day 11A is closed and Day 12 is now genuinely implemented:
+For the currently loaded football scope, the accepted football model stack remains closed through
+Day 11A and the repo now has a real validation and paper-tracking foundation on top of it:
 
 - frozen Day 10 fair prices are consumed as immutable model authority
 - supplied market snapshots are normalized and validated
@@ -345,7 +429,13 @@ For the currently loaded football scope, Day 11A is closed and Day 12 is now gen
 - full-slate preliminary candidate / no-bet decisions are persisted and reported
 - every Day 11 preliminary candidate now receives a deterministic Day 12 safeguard disposition
 - missing xG is surfaced honestly as a blocked state instead of being silently bypassed
+- the accepted historical football stack now has a formal performance benchmark and manager-facing
+  performance report
+- current market provider, snapshot storage, and paper-ledger contracts now exist without
+  fabricating live odds
+- the dashboard now exposes a dedicated `/performance` surface for benchmark and paper-tracking
+  readiness
 
 The broader August 2026 build is still not done. Point-in-time-valid xG coverage, the football
-logical-pipeline freeze, full archive scope, live providers, current forward-fit football paper
-readiness, tennis implementation, and the final football/tennis split all remain pending.
+logical-pipeline freeze, full archive scope, live odds connectivity, current forward-fit football
+paper readiness, tennis implementation, and the final football/tennis split all remain pending.

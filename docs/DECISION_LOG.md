@@ -1,5 +1,25 @@
 # Decision Log
 
+## DEC-039
+
+- `date`: 2026-08-20
+- `context`: the accepted Day 7 through Day 12 football stack needed a truthful answer to "how
+  good are our predictions?" plus the first durable foundations for current market capture and
+  immutable paper tracking
+- `decision`: freeze the accepted football math stack, build a formal historical performance
+  benchmark around the frozen artifacts, add a provider-independent current market-data contract,
+  add append-oriented paper-trading storage, and expose the resulting readiness state through a
+  dedicated dashboard performance surface
+- `reason`: the next risk was not missing another UI variant; it was lacking an auditable baseline
+  for calibration, market-specific performance, and future live paper evaluation
+- `alternatives`: keep discussing ad hoc win-rate figures, build another dashboard-only pass, or
+  connect a specific odds provider before creating the normalized contract and ledger foundation
+- `consequences`: the repo now has a truthful historical validation layer, `CURRENT_ODDS_PROVIDER`
+  remains explicitly `NOT_CONFIGURED` until real credentials are supplied, and the next football
+  engineering dependency shifts to live market capture plus current forward-fit readiness rather
+  than reopening accepted model mathematics
+- `status`: active
+
 ## DEC-038
 
 - `date`: 2026-08-19

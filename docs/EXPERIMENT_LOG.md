@@ -1,6 +1,80 @@
 # Experiment Log
 
-Last updated: Wednesday, August 19, 2026
+Last updated: Thursday, August 20, 2026
+
+## EXP-028 - Football Historical Performance Benchmark And Paper-Tracking Foundation
+
+- `date`: 2026-08-20
+- `scope`: benchmark the accepted frozen football stack honestly, add a provider-independent
+  current-market contract, add immutable paper-trading storage foundations, and expose the new
+  validation state through the dashboard without redesigning the whole UI
+- `implementation`:
+  - `code/src/sports_ai/experiments/football_model_performance.py`
+  - `code/src/sports_ai/market_data/providers.py`
+  - `code/src/sports_ai/storage/football_paper_trading.py`
+  - `code/src/sports_ai/dashboard/app.py`
+  - `code/src/sports_ai/dashboard/services.py`
+  - `code/src/sports_ai/dashboard/templates/`
+  - `code/src/sports_ai/dashboard/static/dashboard.css`
+  - `code/tests/test_football_model_performance.py`
+  - `code/tests/test_football_paper_trading.py`
+  - `code/tests/test_football_dashboard.py`
+- `verified baseline before coding`:
+  - full suite: `203 passed, 1 warning in 42.33s`
+- `verified post-implementation baseline`:
+  - full suite: `206 passed, 1 warning in 35.41s`
+- `real benchmark result`:
+  - evaluation sample: `9664`
+  - `MODEL_VALIDATION = PROMISING`
+  - `PROFITABILITY_PROVEN = NO`
+  - `CLV_PROVEN = NO`
+  - `LIVE_EDGE_PROVEN = NO`
+  - `1X2` accuracy: `0.470509`
+  - `1X2` Brier: `0.625145`
+  - `1X2` log loss: `1.039517`
+  - goals MAE: `1.275611`
+  - corners MAE: `2.696198`
+  - average expected calibration error: `0.0157`
+  - strongest measured market: `GOALS_TOTAL`
+  - weakest measured market: `1X2`
+  - `CLV_STATUS = UNAVAILABLE_HISTORICALLY`
+- `candidate-context result`:
+  - candidate count from the frozen Day 11A demo lane: `10299`
+  - historical price context: `CLOSING_SNAPSHOT_ONLY`
+  - average closing snapshot price: `4.735634`
+  - break-even rate at the closing snapshot average: `0.211165`
+  - ROI status: `UNAVAILABLE_ENTRY_TIMING`
+- `chronology verification`:
+  - rows checked: `9664`
+  - `as_of_after_kickoff = 0`
+  - `as_of_equal_kickoff = 9664`
+  - chronology status: `PASS`
+  - source-time status: `UNAVAILABLE_IN_FROZEN_ARCHIVE`
+- `market-contract result`:
+  - provider-independent market-provider interface added
+  - default live-provider state reports `CURRENT_ODDS_PROVIDER = NOT_CONFIGURED`
+  - current market decisions remain blocked without configured credentials
+- `paper-ledger result`:
+  - immutable append-oriented market snapshot and paper-trade tables added
+  - settlement reuse implemented for `1X2`, `BTTS`, totals, `AH`, and corners
+  - duplicate paper trade signatures are rejected
+- `dashboard result`:
+  - `/performance` page added
+  - `/api/performance` endpoint added
+  - system status now reports historical validation, market-provider readiness, paper-ledger state,
+    closing-price tracking, and CLV readiness
+- `artifacts`:
+  - `research/product_outputs/football/performance/FOOTBALL_MODEL_PERFORMANCE_REPORT.md`
+  - `research/product_outputs/football/performance/football_performance_summary.json`
+  - `research/product_outputs/football/performance/football_performance_by_market.csv`
+  - `research/product_outputs/football/performance/football_performance_by_competition.csv`
+  - `research/product_outputs/football/performance/football_performance_by_season.csv`
+  - `research/product_outputs/football/performance/football_calibration.csv`
+  - `research/product_outputs/football/performance/football_1x2_confusion_matrix.csv`
+  - `research/product_outputs/football/performance/FOOTBALL_MODEL_IMPROVEMENT_BACKLOG.md`
+- `conclusion`: the current football repo can now answer the historical validation question
+  honestly and is structurally ready to begin current market capture and paper tracking once a real
+  odds provider is connected
 
 ## EXP-027 - Football Dashboard V1.2 football-data.org Watchlist Refresh
 

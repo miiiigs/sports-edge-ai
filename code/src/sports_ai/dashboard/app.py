@@ -111,6 +111,16 @@ def create_app(
             context=_context(request, page="candidates", payload=payload),
         )
 
+    @app.get("/performance", response_class=HTMLResponse)
+    async def performance_page(request: Request):
+        payload = resolved_services.get_performance_payload()
+        template_name = "performance_content.html" if request.query_params.get("partial") == "1" else "performance.html"
+        return templates.TemplateResponse(
+            request=request,
+            name=template_name,
+            context=_context(request, page="performance", payload=payload),
+        )
+
     @app.get("/status", response_class=HTMLResponse)
     @app.get("/system-status", response_class=HTMLResponse)
     async def status_page(request: Request):
@@ -162,6 +172,10 @@ def create_app(
     @app.get("/api/candidates")
     async def api_candidates():
         return JSONResponse(resolved_services.get_candidates_payload())
+
+    @app.get("/api/performance")
+    async def api_performance():
+        return JSONResponse(resolved_services.get_performance_payload())
 
     @app.get("/api/system/status")
     async def api_system_status():

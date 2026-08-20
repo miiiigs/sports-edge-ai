@@ -1,0 +1,499 @@
+"""Append-oriented football paper-trading storage and settlement helpers."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from ..experiments.football_day10_market_pricing import _aggregate_component_results, _component_lines, _component_result
+from ..locking import canonical_hash
+
+PAPER_TRADE_STATE_VALUES = {
+    "PENDING",
+    "OPEN",
+    "WON",
+    "LOST",
+    "PUSH",
+    "HALF_WIN",
+    "HALF_LOSS",
+    "VOID",
+    "BLOCKED",
+    "UNSETTLED",
+}
+_TOTAL_MARKETS = {"goals_total", "corner_total"}
+
+SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS market_snapshots (
+        snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fixture_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        bookmaker TEXT NOT NULL,
+        market TEXT NOT NULL,
+        selection TEXT NOT NULL,
+        line REAL,
+        odds REAL NOT NULL,
+        provider_market_id TEXT,
+        provider_timestamp TEXT,
+        captured_at TEXT NOT NULL,
+        is_pre_match INTEGER NOT NULL,
+        ingestion_version TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS paper_trade_entries (
+        paper_trade_id TEXT PRIMARY KEY,
+        prediction_id TEXT NOT NULL,
+        fixture_id TEXT NOT NULL,
+        model_snapshot_id TEXT NOT NULL,
+        model_version TEXT NOT NULL,
+        market TEXT NOT NULL,
+        selection TEXT NOT NULL,
+        line REAL,
+        model_probability REAL,
+        model_fair_price REAL NOT NULL,
+        available_market_price REAL NOT NULL,
+        edge REAL,
+        minimum_acceptable_price REAL,
+        decision TEXT NOT NULL,
+        decision_timestamp TEXT NOT NULL,
+        kickoff TEXT NOT NULL,
+        bookmaker TEXT,
+        provider TEXT,
+        safeguard_state TEXT NOT NULL,
+        entry_eligibility TEXT NOT NULL,
+        entry_odds REAL,
+        entry_captured_at TEXT,
+        entry_snapshot_id INTEGER,
+        closing_odds REAL,
+        closing_captured_at TEXT,
+        closing_snapshot_id INTEGER,
+        entry_signature TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS paper_trade_updates (
+        paper_trade_update_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paper_trade_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        trade_state TEXT NOT NULL,
+        gross_return REAL,
+        net_pnl REAL,
+        notes TEXT,
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY(paper_trade_id) REFERENCES paper_trade_entries(paper_trade_id)
+    )
+    """,
+)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def connect(db_path: str | Path) -> sqlite3.Connection:
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    with conn:
+        for statement in SCHEMA_STATEMENTS:
+            conn.execute(statement)
+
+
+@dataclass(frozen=True)
+class StoredMarketSnapshot:
+    fixture_id: str
+    provider: str
+    bookmaker: str
+    market: str
+    selection: str
+    odds: float
+    ingestion_version: str
+    line: float | None = None
+    provider_market_id: str | None = None
+    provider_timestamp: str | None = None
+    captured_at: str = field(default_factory=_utc_now)
+    is_pre_match: bool = True
+
+    def __post_init__(self) -> None:
+        if self.odds <= 1.0:
+            raise ValueError("odds must be > 1")
+
+
+@dataclass(frozen=True)
+class PaperTradeEntry:
+    prediction_id: str
+    fixture_id: str
+    model_snapshot_id: str
+    model_version: str
+    market: str
+    selection: str
+    model_fair_price: float
+    available_market_price: float
+    decision: str
+    decision_timestamp: str
+    kickoff: str
+    safeguard_state: str
+    entry_eligibility: str
+    line: float | None = None
+    model_probability: float | None = None
+    edge: float | None = None
+    minimum_acceptable_price: float | None = None
+    bookmaker: str | None = None
+    provider: str | None = None
+    entry_odds: float | None = None
+    entry_captured_at: str | None = None
+    entry_snapshot_id: int | None = None
+    closing_odds: float | None = None
+    closing_captured_at: str | None = None
+    closing_snapshot_id: int | None = None
+    paper_trade_id: str = field(init=False)
+    entry_signature: str = field(init=False)
+    created_at: str = field(default_factory=_utc_now)
+
+    def __post_init__(self) -> None:
+        if self.model_fair_price <= 1.0:
+            raise ValueError("model_fair_price must be > 1")
+        if self.available_market_price <= 1.0:
+            raise ValueError("available_market_price must be > 1")
+        signature_payload = {
+            "prediction_id": self.prediction_id,
+            "fixture_id": self.fixture_id,
+            "market": self.market,
+            "selection": self.selection,
+            "line": self.line,
+            "decision_timestamp": self.decision_timestamp,
+        }
+        signature = canonical_hash(signature_payload)
+        object.__setattr__(self, "entry_signature", signature)
+        object.__setattr__(self, "paper_trade_id", f"paper_{signature}")
+
+
+@dataclass(frozen=True)
+class PaperTradeUpdate:
+    paper_trade_id: str
+    trade_state: str
+    payload_json: str
+    gross_return: float | None = None
+    net_pnl: float | None = None
+    notes: str | None = None
+    updated_at: str = field(default_factory=_utc_now)
+
+    def __post_init__(self) -> None:
+        if self.trade_state not in PAPER_TRADE_STATE_VALUES:
+            raise ValueError(f"invalid trade_state {self.trade_state!r}")
+        json.loads(self.payload_json)
+
+
+def record_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnapshot) -> int:
+    ensure_schema(conn)
+    with conn:
+        result = conn.execute(
+            """
+            INSERT INTO market_snapshots (
+                fixture_id, provider, bookmaker, market, selection, line, odds,
+                provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                snapshot.fixture_id,
+                snapshot.provider,
+                snapshot.bookmaker,
+                snapshot.market,
+                snapshot.selection,
+                snapshot.line,
+                snapshot.odds,
+                snapshot.provider_market_id,
+                snapshot.provider_timestamp,
+                snapshot.captured_at,
+                1 if snapshot.is_pre_match else 0,
+                snapshot.ingestion_version,
+            ),
+        )
+    return int(result.lastrowid)
+
+
+def fetch_market_snapshots(conn: sqlite3.Connection, *, fixture_id: str | None = None) -> list[dict[str, Any]]:
+    ensure_schema(conn)
+    sql = """
+        SELECT snapshot_id, fixture_id, provider, bookmaker, market, selection, line, odds,
+               provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version
+        FROM market_snapshots
+    """
+    params: list[Any] = []
+    if fixture_id is not None:
+        sql += " WHERE fixture_id = ?"
+        params.append(fixture_id)
+    sql += " ORDER BY captured_at, snapshot_id"
+    return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -> str:
+    ensure_schema(conn)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO paper_trade_entries (
+                paper_trade_id, prediction_id, fixture_id, model_snapshot_id, model_version, market,
+                selection, line, model_probability, model_fair_price, available_market_price, edge,
+                minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
+                safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
+                closing_odds, closing_captured_at, closing_snapshot_id, entry_signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry.paper_trade_id,
+                entry.prediction_id,
+                entry.fixture_id,
+                entry.model_snapshot_id,
+                entry.model_version,
+                entry.market,
+                entry.selection,
+                entry.line,
+                entry.model_probability,
+                entry.model_fair_price,
+                entry.available_market_price,
+                entry.edge,
+                entry.minimum_acceptable_price,
+                entry.decision,
+                entry.decision_timestamp,
+                entry.kickoff,
+                entry.bookmaker,
+                entry.provider,
+                entry.safeguard_state,
+                entry.entry_eligibility,
+                entry.entry_odds,
+                entry.entry_captured_at,
+                entry.entry_snapshot_id,
+                entry.closing_odds,
+                entry.closing_captured_at,
+                entry.closing_snapshot_id,
+                entry.entry_signature,
+                entry.created_at,
+            ),
+        )
+    return entry.paper_trade_id
+
+
+def append_trade_update(conn: sqlite3.Connection, update: PaperTradeUpdate) -> int:
+    ensure_schema(conn)
+    with conn:
+        result = conn.execute(
+            """
+            INSERT INTO paper_trade_updates (
+                paper_trade_id, updated_at, trade_state, gross_return, net_pnl, notes, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                update.paper_trade_id,
+                update.updated_at,
+                update.trade_state,
+                update.gross_return,
+                update.net_pnl,
+                update.notes,
+                update.payload_json,
+            ),
+        )
+    return int(result.lastrowid)
+
+
+def fetch_paper_trade_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    ensure_schema(conn)
+    entries = conn.execute(
+        """
+        SELECT *
+        FROM paper_trade_entries
+        ORDER BY decision_timestamp, paper_trade_id
+        """
+    ).fetchall()
+    merged_rows: list[dict[str, Any]] = []
+    for entry in entries:
+        merged = dict(entry)
+        updates = conn.execute(
+            """
+            SELECT updated_at, trade_state, gross_return, net_pnl, notes, payload_json
+            FROM paper_trade_updates
+            WHERE paper_trade_id = ?
+            ORDER BY updated_at, paper_trade_update_id
+            """,
+            (entry["paper_trade_id"],),
+        ).fetchall()
+        merged["trade_state"] = "PENDING"
+        merged["gross_return"] = None
+        merged["net_pnl"] = None
+        merged["update_notes"] = None
+        merged["latest_update_payload"] = None
+        for update in updates:
+            merged["trade_state"] = update["trade_state"]
+            merged["gross_return"] = update["gross_return"]
+            merged["net_pnl"] = update["net_pnl"]
+            merged["update_notes"] = update["notes"]
+            merged["latest_update_payload"] = json.loads(str(update["payload_json"]))
+            merged["updated_at"] = update["updated_at"]
+        merged_rows.append(merged)
+    return merged_rows
+
+
+def settlement_state_for_market(
+    *,
+    market: str,
+    selection: str,
+    line: float | None,
+    actual_home_goals: int,
+    actual_away_goals: int,
+    actual_total_corners: int | None = None,
+) -> str:
+    market_key = market.lower()
+    selection_key = selection.upper()
+    if market_key == "1x2":
+        if actual_home_goals > actual_away_goals:
+            winner = "HOME"
+        elif actual_home_goals < actual_away_goals:
+            winner = "AWAY"
+        else:
+            winner = "DRAW"
+        return "WON" if selection_key == winner else "LOST"
+    if market_key == "btts":
+        btts = actual_home_goals >= 1 and actual_away_goals >= 1
+        if (selection_key == "YES" and btts) or (selection_key == "NO" and not btts):
+            return "WON"
+        return "LOST"
+    if market_key in _TOTAL_MARKETS:
+        if line is None:
+            raise ValueError("totals settlement requires a line")
+        observed_total = (
+            actual_home_goals + actual_away_goals
+            if market_key == "goals_total"
+            else actual_total_corners
+        )
+        if observed_total is None:
+            raise ValueError("corner total settlement requires actual_total_corners")
+        return _split_line_state(
+            observed_total=float(observed_total),
+            selection=selection_key,
+            line=line,
+        )
+    if market_key == "asian_handicap":
+        if line is None:
+            raise ValueError("asian handicap settlement requires a line")
+        return _split_line_state(
+            observed_total=float(actual_home_goals - actual_away_goals),
+            selection=selection_key,
+            line=line,
+            handicap_mode=True,
+        )
+    raise ValueError(f"unsupported market {market!r}")
+
+
+def _split_line_state(
+    *,
+    observed_total: float,
+    selection: str,
+    line: float,
+    handicap_mode: bool = False,
+) -> str:
+    selection_multiplier = 1.0
+    if handicap_mode and selection == "AWAY":
+        selection_multiplier = -1.0
+    elif not handicap_mode and selection == "UNDER":
+        selection_multiplier = -1.0
+    component_results: list[str] = []
+    for component_line in _component_lines(line):
+        if handicap_mode:
+            adjusted = (observed_total * selection_multiplier) + (float(component_line) * selection_multiplier)
+        else:
+            adjusted = (observed_total - float(component_line)) * selection_multiplier
+        component_results.append(_component_result(adjusted))
+    aggregated = _aggregate_component_results(component_results)
+    return {
+        "full_win": "WON",
+        "half_win": "HALF_WIN",
+        "push": "PUSH",
+        "half_loss": "HALF_LOSS",
+        "full_loss": "LOST",
+    }[aggregated]
+
+
+def profit_for_state(*, state: str, odds: float, stake: float = 1.0) -> tuple[float, float]:
+    if odds <= 1.0:
+        raise ValueError("odds must be > 1")
+    if state == "WON":
+        gross_return = stake * odds
+        return gross_return, gross_return - stake
+    if state == "LOST":
+        return 0.0, -stake
+    if state == "PUSH":
+        return stake, 0.0
+    if state == "HALF_WIN":
+        gross_return = (stake / 2.0) * odds + (stake / 2.0)
+        return gross_return, gross_return - stake
+    if state == "HALF_LOSS":
+        return stake / 2.0, -stake / 2.0
+    if state in {"VOID", "BLOCKED", "PENDING", "OPEN", "UNSETTLED"}:
+        return 0.0, 0.0
+    raise ValueError(f"unsupported state {state!r}")
+
+
+def build_trade_update_payload(
+    *,
+    paper_trade_id: str,
+    trade_state: str,
+    settlement_context: dict[str, Any],
+    odds: float,
+    stake: float = 1.0,
+    notes: str | None = None,
+) -> PaperTradeUpdate:
+    gross_return, net_pnl = profit_for_state(state=trade_state, odds=odds, stake=stake)
+    payload = {
+        "paper_trade_id": paper_trade_id,
+        "trade_state": trade_state,
+        "stake": stake,
+        "gross_return": gross_return,
+        "net_pnl": net_pnl,
+        "settlement_context": settlement_context,
+    }
+    return PaperTradeUpdate(
+        paper_trade_id=paper_trade_id,
+        trade_state=trade_state,
+        gross_return=gross_return,
+        net_pnl=net_pnl,
+        notes=notes,
+        payload_json=json.dumps(payload, sort_keys=True),
+    )
+
+
+def paper_trading_status(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    cumulative_pnl = 0.0
+    open_count = 0
+    clv_count = 0
+    for row in rows:
+        if row.get("trade_state") in {"PENDING", "OPEN", "UNSETTLED"}:
+            open_count += 1
+        if row.get("closing_odds") is not None:
+            clv_count += 1
+        if row.get("net_pnl") is not None:
+            cumulative_pnl += float(row["net_pnl"])
+    settled_rows = [row for row in rows if row.get("net_pnl") is not None]
+    return {
+        "paper_bets": len(rows),
+        "open_positions": open_count,
+        "settled_positions": len(settled_rows),
+        "cumulative_pnl": cumulative_pnl,
+        "roi": (cumulative_pnl / len(settled_rows)) if settled_rows else None,
+        "clv_state": "PENDING" if rows and clv_count == 0 else ("AVAILABLE" if clv_count else "UNAVAILABLE"),
+        "ledger_state": "READY",
+    }
+
+
+def entry_as_dict(entry: PaperTradeEntry) -> dict[str, Any]:
+    return asdict(entry)

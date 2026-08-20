@@ -42,6 +42,9 @@
         <a href="/candidates" class="nav-item {% if page == 'candidates' %}nav-active{% endif %}">
           <span>Watchlist</span>
         </a>
+        <a href="/performance" class="nav-item {% if page == 'performance' %}nav-active{% endif %}">
+          <span>Performance</span>
+        </a>
 
         <p class="eyebrow nav-gap">Tools</p>
         <a href="/status" class="nav-item {% if page == 'status' %}nav-active{% endif %}">
@@ -77,6 +80,8 @@
             <b>Live Monitor</b>
           {% elif page == 'predictions' %}
             <b>Predictions</b>
+          {% elif page == 'performance' %}
+            <b>Performance</b>
           {% elif page == 'status' %}
             <b>Status</b>
           {% else %}

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import json
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..market_data.providers import MarketProvider as CurrentMarketProvider
+from ..market_data.providers import NotConfiguredMarketProvider
+from ..storage import football_paper_trading
 from . import storage
 from .fixture_provider import (
     FootballDataOrgFixtureProvider,
@@ -39,6 +45,8 @@ class DashboardConfig:
     repo_root: Path
     research_db_path: Path
     dashboard_db_path: Path
+    paper_trading_db_path: Path
+    performance_output_dir: Path
     display_timezone: str = "Asia/Manila"
     upcoming_horizon_days: int = DEFAULT_UPCOMING_HORIZON_DAYS
     scheduler_interval_seconds: int = 300
@@ -56,6 +64,8 @@ class DashboardConfig:
             repo_root=repo_root,
             research_db_path=repo_root / "research" / "football_research" / "store" / "football_research.sqlite",
             dashboard_db_path=repo_root / "research" / "product_outputs" / "dashboard" / "football_dashboard.sqlite",
+            paper_trading_db_path=repo_root / "research" / "product_outputs" / "dashboard" / "football_paper_trading.sqlite",
+            performance_output_dir=repo_root / "research" / "product_outputs" / "football" / "performance",
             scheduler_interval_seconds=300,
             live_refresh_interval_seconds=60,
             future_refresh_interval_seconds=300,
@@ -71,9 +81,11 @@ class DashboardServices:
         config: DashboardConfig | None = None,
         *,
         fixture_provider: FixtureProvider | None = None,
+        market_provider: CurrentMarketProvider | None = None,
     ):
         self.config = DashboardConfig.default() if config is None else config
         self.fixture_provider = fixture_provider or FootballDataOrgFixtureProvider()
+        self.market_provider = market_provider or NotConfiguredMarketProvider()
         self.snapshot: CurrentFootballModelSnapshot | None = None
         self.snapshot_error: str | None = None
         self._background_task: asyncio.Task[None] | None = None
@@ -103,6 +115,8 @@ class DashboardServices:
     async def initialize(self) -> None:
         with storage.connect(self.config.dashboard_db_path) as conn:
             storage.ensure_schema(conn)
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            football_paper_trading.ensure_schema(conn)
         self._build_snapshot()
         await self.sync_once(sync_kind="startup", include_schedule=True)
         if self.config.enable_scheduler and self._background_task is None:
@@ -196,6 +210,64 @@ class DashboardServices:
                 suffix = f" (competitions={','.join(str(code) for code in competition_codes)})"
             return f"{message.strip()}{suffix}"
         return None
+
+    def _market_provider_state(self) -> dict[str, Any]:
+        diagnostics = self.market_provider.diagnostics()
+        configured = bool(diagnostics.get("configured", self.market_provider.configured()))
+        state = str(diagnostics.get("state") or ("CONNECTED" if configured else "NOT_CONFIGURED"))
+        return {
+            "provider": self.market_provider.provider_name(),
+            "configured": configured,
+            "state": state,
+            "current_market_decisions": diagnostics.get(
+                "current_market_decisions",
+                "READY" if configured else "BLOCKED",
+            ),
+            "reason": diagnostics.get("reason"),
+            "captured_at": diagnostics.get("captured_at"),
+        }
+
+    def _performance_summary_path(self) -> Path:
+        return self.config.performance_output_dir / "football_performance_summary.json"
+
+    def _performance_csv_path(self, filename: str) -> Path:
+        return self.config.performance_output_dir / filename
+
+    def _load_json_file(self, path: Path) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _load_csv_rows(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return list(csv.DictReader(handle))
+
+    def _paper_positions(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        return rows, football_paper_trading.paper_trading_status(rows)
+
+    def _performance_status(self, summary_payload: dict[str, Any] | None, paper_status: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "historical_validation": {
+                "state": "READY" if summary_payload is not None else "BLOCKED",
+                "summary_generated_at": None if summary_payload is None else summary_payload.get("generated_at"),
+            },
+            "paper_ledger": {
+                "state": paper_status["ledger_state"],
+                "paper_bets": paper_status["paper_bets"],
+                "open_positions": paper_status["open_positions"],
+                "settled_positions": paper_status["settled_positions"],
+            },
+            "closing_price_tracking": {
+                "state": "READY",
+            },
+            "clv": {
+                "state": paper_status["clv_state"],
+            },
+        }
 
     def _next_scheduled_refresh_at(self, *, from_now: datetime | None = None) -> str | None:
         if not self.config.enable_scheduler:
@@ -802,14 +874,83 @@ class DashboardServices:
         }
 
     def get_candidates_payload(self) -> dict[str, Any]:
+        market_state = self._market_provider_state()
         return {
-            "connected": self.config.current_odds_connected,
-            "reason": "Current market decision service unavailable until a current odds provider is configured.",
+            "connected": market_state["configured"],
+            "reason": market_state["reason"] or "Current market decision service unavailable until a current odds provider is configured.",
             "experimental_candidates": [],
             "preliminary_candidates": [],
             "blocked_candidates": [],
             "no_bet_candidates": [],
             "rows": [self.serialize_fixture_row(row) for row in self._future_fixture_rows(self._all_fixtures_with_predictions())[:12]],
+            "system_status": self.get_system_status(),
+        }
+
+    def get_performance_payload(self) -> dict[str, Any]:
+        summary_payload = self._load_json_file(self._performance_summary_path())
+        market_rows = self._load_csv_rows(self._performance_csv_path("football_performance_by_market.csv"))
+        competition_rows = self._load_csv_rows(self._performance_csv_path("football_performance_by_competition.csv"))
+        season_rows = self._load_csv_rows(self._performance_csv_path("football_performance_by_season.csv"))
+        calibration_rows = self._load_csv_rows(self._performance_csv_path("football_calibration.csv"))
+        paper_positions, paper_status = self._paper_positions()
+        status = self._performance_status(summary_payload, paper_status)
+
+        calibration_series: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in calibration_rows:
+            if row.get("scope_type") != "overall":
+                continue
+            if row.get("market") != "1x2":
+                continue
+            if not row.get("sample_size") or row.get("sample_size") == "0":
+                continue
+            selection = str(row.get("selection") or "UNKNOWN")
+            if not row.get("predicted_mean_probability") or not row.get("observed_hit_rate"):
+                continue
+            calibration_series[selection].append(
+                {
+                    "x": float(row["predicted_mean_probability"]),
+                    "y": float(row["observed_hit_rate"]),
+                    "bucket_label": row["bucket_label"],
+                    "sample_size": int(row["sample_size"]),
+                }
+            )
+        for points in calibration_series.values():
+            points.sort(key=lambda item: item["x"])
+
+        summary = (summary_payload or {}).get("summary") or {}
+        kpis = [
+            ("Historical Fixtures", str(summary.get("evaluation_sample") or "NOT AVAILABLE")),
+            ("Prediction Sample", str(summary.get("evaluation_sample") or "NOT AVAILABLE")),
+            (
+                "1X2 Accuracy",
+                "NOT AVAILABLE" if summary.get("one_x_two_accuracy") is None else f"{float(summary['one_x_two_accuracy']):.2%}",
+            ),
+            (
+                "Brier Score",
+                "NOT AVAILABLE" if summary.get("one_x_two_brier") is None else f"{float(summary['one_x_two_brier']):.4f}",
+            ),
+            (
+                "Log Loss",
+                "NOT AVAILABLE" if summary.get("one_x_two_log_loss") is None else f"{float(summary['one_x_two_log_loss']):.4f}",
+            ),
+            ("Paper Bets", str(paper_status["paper_bets"])),
+            (
+                "Paper ROI",
+                "NOT AVAILABLE" if paper_status["roi"] is None else f"{float(paper_status['roi']):+.2%}",
+            ),
+            ("CLV", paper_status["clv_state"].replace("_", " ")),
+        ]
+        return {
+            "summary": summary,
+            "summary_generated_at": None if summary_payload is None else summary_payload.get("generated_at"),
+            "status_flags": {} if summary_payload is None else summary_payload.get("status_flags", {}),
+            "kpis": kpis,
+            "market_rows": market_rows,
+            "competition_rows": competition_rows,
+            "season_rows": season_rows,
+            "calibration_series": calibration_series,
+            "paper_positions": paper_positions,
+            "performance_status": status,
             "system_status": self.get_system_status(),
         }
 
@@ -824,6 +965,10 @@ class DashboardServices:
 
     def get_system_status(self) -> dict[str, Any]:
         snapshot_state = "READY" if self.snapshot is not None else "BLOCKED"
+        market_state = self._market_provider_state()
+        summary_payload = self._load_json_file(self._performance_summary_path())
+        _, paper_status = self._paper_positions()
+        performance_status = self._performance_status(summary_payload, paper_status)
         return {
             "current_time_utc": utc_now_iso(),
             "current_time_local": datetime.now(timezone.utc)
@@ -871,7 +1016,9 @@ class DashboardServices:
                 "error": self.snapshot_error,
             },
             "odds_feed": {
-                "state": "CONNECTED" if self.config.current_odds_connected else "NOT_CONFIGURED",
+                "state": market_state["state"],
+                "provider": market_state["provider"],
+                "reason": market_state["reason"],
             },
             "xg": {
                 "state": "AVAILABLE" if self.config.current_xg_connected else "MISSING",
@@ -882,12 +1029,17 @@ class DashboardServices:
                 "blocked_reason": None if self.config.current_xg_connected else "POINT-IN-TIME XG NOT AVAILABLE",
             },
             "dashboard_ui_ready": "YES",
+            "historical_validation": performance_status["historical_validation"],
+            "market_provider": market_state,
+            "paper_ledger": performance_status["paper_ledger"],
+            "closing_price_tracking": performance_status["closing_price_tracking"],
+            "clv": performance_status["clv"],
             "current_fixture_feed_ready": "YES"
             if self._provider_state["configured"] and self._provider_state["state"] == "CONNECTED"
             else "NO",
             "current_prediction_pipeline_ready": "YES"
             if self.snapshot is not None
             else "NO",
-            "current_market_decision_ready": "YES" if self.config.current_odds_connected else "NO",
-            "live_paper_pipeline_ready": "NO",
+            "current_market_decision_ready": "YES" if market_state["configured"] else "NO",
+            "live_paper_pipeline_ready": "YES" if market_state["configured"] else "NO",
         }

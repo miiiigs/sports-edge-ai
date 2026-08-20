@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -76,10 +77,55 @@ def _repo_root() -> Path:
 
 def _dashboard_config(tmp_path: Path) -> DashboardConfig:
     repo_root = _repo_root()
+    performance_dir = tmp_path / "performance"
+    performance_dir.mkdir(parents=True, exist_ok=True)
+    (performance_dir / "football_performance_summary.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-08-20T04:18:32+00:00",
+                "summary": {
+                    "MODEL_VALIDATION": "PROMISING",
+                    "PROFITABILITY_PROVEN": "NO",
+                    "CLV_PROVEN": "NO",
+                    "LIVE_EDGE_PROVEN": "NO",
+                    "evaluation_sample": 9664,
+                    "one_x_two_accuracy": 0.470509,
+                    "one_x_two_brier": 0.625145,
+                    "one_x_two_log_loss": 1.039517,
+                },
+                "status_flags": {
+                    "HISTORICAL_BENCHMARK_COMPLETE": "YES",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (performance_dir / "football_performance_by_market.csv").write_text(
+        "market,line,selection,sample_size,hit_rate,mean_predicted_probability,actual_frequency,brier,log_loss,avg_odds,break_even_rate,roi,status,notes\n"
+        "1X2,,ALL,9664,0.470509,,,0.625145,1.039517,,,,READY,Test row\n",
+        encoding="utf-8",
+    )
+    (performance_dir / "football_performance_by_competition.csv").write_text(
+        "competition_id,fixtures,1x2_accuracy,1x2_brier,1x2_log_loss,goals_mae,corners_mae,candidate_count,candidate_roi,status\n"
+        "ENG1,1520,0.520395,0.594798,0.99749,1.329659,2.733234,1910,,PRICE_CONTEXT_CLOSING_ONLY\n",
+        encoding="utf-8",
+    )
+    (performance_dir / "football_performance_by_season.csv").write_text(
+        "season_code,fixtures,1x2_accuracy,1x2_brier,1x2_log_loss,goals_mae,corners_mae,status\n"
+        "2526,2416,0.472682,0.625951,1.041255,1.225309,2.684581,READY\n",
+        encoding="utf-8",
+    )
+    (performance_dir / "football_calibration.csv").write_text(
+        "scope_type,scope_value,market,line,selection,subset,bucket_label,bucket_lo,bucket_hi,predicted_mean_probability,observed_hit_rate,sample_size,calibration_gap\n"
+        "overall,ALL,1x2,,HOME,ALL_PREDICTIONS,40-50%,0.4,0.5,0.45,0.47,100,-0.02\n",
+        encoding="utf-8",
+    )
     return DashboardConfig(
         repo_root=repo_root,
         research_db_path=repo_root / "research" / "football_research" / "store" / "football_research.sqlite",
         dashboard_db_path=tmp_path / "football_dashboard.sqlite",
+        paper_trading_db_path=tmp_path / "football_paper_trading.sqlite",
+        performance_output_dir=performance_dir,
         display_timezone="Asia/Manila",
         upcoming_horizon_days=3,
         scheduler_interval_seconds=9999,
@@ -290,6 +336,12 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         assert 'href="/static/dashboard.css"' in candidates_page.text
         assert 'src="/static/dashboard.js"' in candidates_page.text
 
+        performance_page = client.get("/performance")
+        assert performance_page.status_code == 200
+        assert "Performance" in performance_page.text
+        assert 'href="/static/dashboard.css"' in performance_page.text
+        assert 'src="/static/dashboard.js"' in performance_page.text
+
         status_page = client.get("/status")
         assert status_page.status_code == 200
         assert "System Health" in status_page.text
@@ -317,6 +369,10 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         predictions_response = client.get("/api/predictions")
         assert predictions_response.status_code == 200
         assert predictions_response.json()["rows"][0]["prediction"]["prediction_status"] == "READY"
+
+        performance_response = client.get("/api/performance")
+        assert performance_response.status_code == 200
+        assert performance_response.json()["summary"]["MODEL_VALIDATION"] == "PROMISING"
 
         prediction_response = client.get(f"/api/predictions/{fixture.fixture_id}")
         assert prediction_response.status_code == 200
