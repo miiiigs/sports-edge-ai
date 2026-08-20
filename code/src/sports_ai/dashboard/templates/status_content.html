@@ -22,7 +22,7 @@
       <div class="metric-tile">
         <span class="status-label">Market State</span>
         <strong>{{ payload.system_status.odds_feed.state }}</strong>
-        <p>Current market decisions remain disconnected.</p>
+        <p>{{ payload.system_status.market_sync.decision_count }} decisions across {{ payload.system_status.market_sync.fixtures_matched }} matched fixtures</p>
       </div>
       <div class="metric-tile">
         <span class="status-label">Safeguards</span>
@@ -82,6 +82,10 @@
       <div><span>Market Decision Ready</span><strong>{{ payload.system_status.current_market_decision_ready }}</strong></div>
       <div><span>Fixture Feed Ready</span><strong>{{ payload.system_status.current_fixture_feed_ready }}</strong></div>
       <div><span>Prediction Pipeline Ready</span><strong>{{ payload.system_status.current_prediction_pipeline_ready }}</strong></div>
+      <div><span>Fixtures Matched</span><strong>{{ payload.system_status.market_sync.fixtures_matched }}</strong></div>
+      <div><span>Snapshots</span><strong>{{ payload.system_status.market_sync.market_snapshots }}</strong></div>
+      <div><span>Paper Entries</span><strong>{{ payload.system_status.market_sync.paper_entry_count }}</strong></div>
+      <div><span>Freshness</span><strong>{{ payload.system_status.market_sync.freshness }}</strong></div>
     </div>
   </article>
 

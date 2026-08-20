@@ -29,6 +29,15 @@ class NormalizedMarketSnapshot:
     provider_market_id: str | None = None
     source_timestamp: str | None = None
     is_pre_match: bool = True
+    provider_fixture_id: str | None = None
+    home_team_name: str | None = None
+    away_team_name: str | None = None
+    competition_id: str | None = None
+    competition_name: str | None = None
+    kickoff_utc: str | None = None
+    freshness_state: str | None = None
+    reference_designation: str | None = None
+    reference_rank: int | None = None
 
     def __post_init__(self) -> None:
         if self.decimal_odds <= 1.0:
@@ -47,13 +56,28 @@ class MarketProvider(Protocol):
     def configured(self) -> bool:
         ...
 
-    def get_fixture_markets(self, fixture_id: str) -> Sequence[NormalizedMarketSnapshot]:
+    def get_fixture_markets(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict[str, Any] | None = None,
+    ) -> Sequence[NormalizedMarketSnapshot]:
         ...
 
-    def get_best_prices(self, fixture_id: str) -> Sequence[NormalizedMarketSnapshot]:
+    def get_best_prices(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict[str, Any] | None = None,
+    ) -> Sequence[NormalizedMarketSnapshot]:
         ...
 
-    def get_market_snapshot(self, fixture_id: str) -> Sequence[NormalizedMarketSnapshot]:
+    def get_market_snapshot(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict[str, Any] | None = None,
+    ) -> Sequence[NormalizedMarketSnapshot]:
         ...
 
     def diagnostics(self) -> dict[str, Any]:
@@ -72,13 +96,28 @@ class NotConfiguredMarketProvider:
     def configured(self) -> bool:
         return False
 
-    def get_fixture_markets(self, fixture_id: str) -> Sequence[NormalizedMarketSnapshot]:
+    def get_fixture_markets(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict[str, Any] | None = None,
+    ) -> Sequence[NormalizedMarketSnapshot]:
         raise MarketProviderError("CURRENT_ODDS_PROVIDER = NOT_CONFIGURED")
 
-    def get_best_prices(self, fixture_id: str) -> Sequence[NormalizedMarketSnapshot]:
+    def get_best_prices(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict[str, Any] | None = None,
+    ) -> Sequence[NormalizedMarketSnapshot]:
         raise MarketProviderError("CURRENT_ODDS_PROVIDER = NOT_CONFIGURED")
 
-    def get_market_snapshot(self, fixture_id: str) -> Sequence[NormalizedMarketSnapshot]:
+    def get_market_snapshot(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict[str, Any] | None = None,
+    ) -> Sequence[NormalizedMarketSnapshot]:
         raise MarketProviderError("CURRENT_ODDS_PROVIDER = NOT_CONFIGURED")
 
     def diagnostics(self) -> dict[str, Any]:

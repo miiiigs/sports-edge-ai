@@ -104,6 +104,67 @@
       </div>
     </article>
   </section>
+
+  <section class="section-block">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Current Market</p>
+        <h2>Live Paper Evaluation</h2>
+      </div>
+      <span>{{ payload.market_evaluation.state if payload.market_evaluation else 'NOT_SYNCED' }}</span>
+    </div>
+    {% if payload.market_evaluation and payload.market_evaluation.decision_rows %}
+      <div class="hero-strip">
+        <div class="metric-tile">
+          <span>Snapshots</span>
+          <strong>{{ payload.market_evaluation.market_snapshot_count }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Preliminary</span>
+          <strong>{{ payload.market_evaluation.counts.preliminary_candidates }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Passed Day 12</span>
+          <strong>{{ payload.market_evaluation.counts.passed_safeguards }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Freshness</span>
+          <strong>{{ payload.market_evaluation.freshness }}</strong>
+        </div>
+      </div>
+      <div class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Model Fair</th>
+              <th>Best Offer</th>
+              <th>Edge</th>
+              <th>Decision</th>
+              <th>Day 12</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payload.market_evaluation.display_rows %}
+              <tr>
+                <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+                <td>{{ "{:.2f}".format(row.model_fair_decimal_price|float) }}</td>
+                <td>{{ row.best_available_bookmaker or 'N/A' }}{% if row.best_available_price is not none %} @ {{ "{:.2f}".format(row.best_available_price|float) }}{% endif %}</td>
+                <td>{{ "{:+.2%}".format(row.settlement_aware_edge|float) if row.settlement_aware_edge is not none else 'N/A' }}</td>
+                <td>{{ row.decision }}</td>
+                <td>{{ row.day12_state }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <article class="empty-state">
+        <strong>No current-market evaluation is available for this fixture yet.</strong>
+        <p>{{ payload.market_evaluation.reason if payload.market_evaluation else 'Waiting for a market snapshot sync.' }}</p>
+      </article>
+    {% endif %}
+  </section>
 {% else %}
   <section class="empty-state">No prediction has been persisted for this fixture yet.</section>
 {% endif %}

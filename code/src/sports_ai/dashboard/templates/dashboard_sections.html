@@ -177,13 +177,21 @@
             </span>
           </span>
           <span class="edge-cell">
-            <b>{{ fixture.prediction_eligibility_status }}</b>
-            <small class="{% if fixture.prediction and fixture.prediction.prediction_status == 'READY' %}positive{% else %}negative{% endif %}">
-              {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
+            <b>{{ fixture.market_signal.decision if fixture.market_signal else fixture.prediction_eligibility_status }}</b>
+            <small class="{% if fixture.market_signal and fixture.market_signal.decision == 'PRELIMINARY_CANDIDATE' %}positive{% else %}negative{% endif %}">
+              {% if fixture.market_signal %}
+                {{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}
+              {% else %}
+                {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
+              {% endif %}
             </small>
           </span>
           <span class="prob-cell">
-            {% if fixture.prediction and fixture.prediction.prediction_status == 'READY' %}
+            {% if fixture.market_signal and fixture.market_signal.edge is not none %}
+              {% set edge_percent = fixture.market_signal.edge * 100 %}
+              <b>{{ "{:+.1f}%".format(edge_percent) }}</b>
+              <span class="mini-bar"><i style="width: {{ "%.0f"|format([edge_percent * 2, 100]|min if edge_percent > 0 else 0) }}%"></i></span>
+            {% elif fixture.prediction and fixture.prediction.prediction_status == 'READY' %}
               {% set home_price = fixture.prediction.fair_prices['1x2'].HOME.fair_decimal_price %}
               <b>{{ "%.0f"|format((100 / home_price) if home_price else 0) }}%</b>
               <span class="mini-bar"><i style="width: {{ "%.0f"|format((100 / home_price) if home_price else 0) }}%"></i></span>

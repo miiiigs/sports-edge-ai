@@ -25,6 +25,8 @@ PAPER_TRADE_STATE_VALUES = {
     "UNSETTLED",
 }
 _TOTAL_MARKETS = {"goals_total", "corner_total"}
+_FINAL_SETTLEMENT_STATES = {"WON", "LOST", "PUSH", "HALF_WIN", "HALF_LOSS", "VOID"}
+_ACTIVE_SETTLEMENT_STATES = {"PENDING", "OPEN", "UNSETTLED"}
 
 SCHEMA_STATEMENTS = (
     """
@@ -41,7 +43,14 @@ SCHEMA_STATEMENTS = (
         provider_timestamp TEXT,
         captured_at TEXT NOT NULL,
         is_pre_match INTEGER NOT NULL,
-        ingestion_version TEXT NOT NULL
+        ingestion_version TEXT NOT NULL,
+        provider_fixture_id TEXT,
+        home_team_name TEXT,
+        away_team_name TEXT,
+        competition_id TEXT,
+        competition_name TEXT,
+        kickoff_utc TEXT,
+        freshness_state TEXT
     )
     """,
     """
@@ -108,6 +117,30 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     with conn:
         for statement in SCHEMA_STATEMENTS:
             conn.execute(statement)
+    _ensure_columns(
+        conn,
+        table_name="market_snapshots",
+        columns={
+            "provider_fixture_id": "TEXT",
+            "home_team_name": "TEXT",
+            "away_team_name": "TEXT",
+            "competition_id": "TEXT",
+            "competition_name": "TEXT",
+            "kickoff_utc": "TEXT",
+            "freshness_state": "TEXT",
+        },
+    )
+
+
+def _ensure_columns(conn: sqlite3.Connection, *, table_name: str, columns: dict[str, str]) -> None:
+    existing_columns = {
+        str(row["name"])
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    with conn:
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
 
 
 @dataclass(frozen=True)
@@ -124,6 +157,13 @@ class StoredMarketSnapshot:
     provider_timestamp: str | None = None
     captured_at: str = field(default_factory=_utc_now)
     is_pre_match: bool = True
+    provider_fixture_id: str | None = None
+    home_team_name: str | None = None
+    away_team_name: str | None = None
+    competition_id: str | None = None
+    competition_name: str | None = None
+    kickoff_utc: str | None = None
+    freshness_state: str | None = None
 
     def __post_init__(self) -> None:
         if self.odds <= 1.0:
@@ -202,8 +242,10 @@ def record_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnaps
             """
             INSERT INTO market_snapshots (
                 fixture_id, provider, bookmaker, market, selection, line, odds,
-                provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
+                provider_fixture_id, home_team_name, away_team_name, competition_id, competition_name,
+                kickoff_utc, freshness_state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot.fixture_id,
@@ -218,6 +260,13 @@ def record_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnaps
                 snapshot.captured_at,
                 1 if snapshot.is_pre_match else 0,
                 snapshot.ingestion_version,
+                snapshot.provider_fixture_id,
+                snapshot.home_team_name,
+                snapshot.away_team_name,
+                snapshot.competition_id,
+                snapshot.competition_name,
+                snapshot.kickoff_utc,
+                snapshot.freshness_state,
             ),
         )
     return int(result.lastrowid)
@@ -227,7 +276,9 @@ def fetch_market_snapshots(conn: sqlite3.Connection, *, fixture_id: str | None =
     ensure_schema(conn)
     sql = """
         SELECT snapshot_id, fixture_id, provider, bookmaker, market, selection, line, odds,
-               provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version
+               provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
+               provider_fixture_id, home_team_name, away_team_name, competition_id, competition_name,
+               kickoff_utc, freshness_state
         FROM market_snapshots
     """
     params: list[Any] = []
@@ -285,6 +336,58 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
     return entry.paper_trade_id
 
 
+def find_existing_paper_trade_entry(
+    conn: sqlite3.Connection,
+    *,
+    prediction_id: str,
+    fixture_id: str,
+    market: str,
+    selection: str,
+    line: float | None,
+) -> dict[str, Any] | None:
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT *
+        FROM paper_trade_entries
+        WHERE prediction_id = ?
+          AND fixture_id = ?
+          AND market = ?
+          AND selection = ?
+          AND (
+              (line IS NULL AND ? IS NULL)
+              OR line = ?
+          )
+        ORDER BY created_at DESC, paper_trade_id DESC
+        LIMIT 1
+        """,
+        (prediction_id, fixture_id, market, selection, line, line),
+    ).fetchone()
+    return None if row is None else dict(row)
+
+
+def attach_closing_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    paper_trade_id: str,
+    closing_odds: float,
+    closing_captured_at: str,
+    closing_snapshot_id: int | None,
+) -> None:
+    ensure_schema(conn)
+    with conn:
+        conn.execute(
+            """
+            UPDATE paper_trade_entries
+            SET closing_odds = ?,
+                closing_captured_at = ?,
+                closing_snapshot_id = ?
+            WHERE paper_trade_id = ?
+            """,
+            (closing_odds, closing_captured_at, closing_snapshot_id, paper_trade_id),
+        )
+
+
 def append_trade_update(conn: sqlite3.Connection, update: PaperTradeUpdate) -> int:
     ensure_schema(conn)
     with conn:
@@ -340,6 +443,13 @@ def fetch_paper_trade_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             merged["update_notes"] = update["notes"]
             merged["latest_update_payload"] = json.loads(str(update["payload_json"]))
             merged["updated_at"] = update["updated_at"]
+        merged["price_clv"] = None
+        merged["implied_probability_clv"] = None
+        entry_odds = merged.get("entry_odds")
+        closing_odds = merged.get("closing_odds")
+        if entry_odds and closing_odds and float(entry_odds) > 1.0 and float(closing_odds) > 1.0:
+            merged["price_clv"] = float(entry_odds) - float(closing_odds)
+            merged["implied_probability_clv"] = (1.0 / float(closing_odds)) - (1.0 / float(entry_odds))
         merged_rows.append(merged)
     return merged_rows
 
@@ -473,25 +583,117 @@ def build_trade_update_payload(
 
 
 def paper_trading_status(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    cumulative_pnl = 0.0
-    open_count = 0
-    clv_count = 0
-    for row in rows:
-        if row.get("trade_state") in {"PENDING", "OPEN", "UNSETTLED"}:
-            open_count += 1
-        if row.get("closing_odds") is not None:
-            clv_count += 1
-        if row.get("net_pnl") is not None:
-            cumulative_pnl += float(row["net_pnl"])
-    settled_rows = [row for row in rows if row.get("net_pnl") is not None]
+    performance = paper_trading_performance(rows)
     return {
         "paper_bets": len(rows),
-        "open_positions": open_count,
-        "settled_positions": len(settled_rows),
-        "cumulative_pnl": cumulative_pnl,
-        "roi": (cumulative_pnl / len(settled_rows)) if settled_rows else None,
-        "clv_state": "PENDING" if rows and clv_count == 0 else ("AVAILABLE" if clv_count else "UNAVAILABLE"),
+        "open_positions": performance["open_positions"],
+        "settled_positions": performance["settled_positions"],
+        "cumulative_pnl": performance["net_units"],
+        "roi": performance["roi"],
+        "clv_state": performance["clv_state"],
         "ledger_state": "READY",
+        "performance": performance,
+    }
+
+
+def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    open_rows = [row for row in rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]
+    settled_rows = [row for row in rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
+    net_units = sum(float(row.get("net_pnl") or 0.0) for row in settled_rows)
+    average_odds = (
+        sum(float(row["entry_odds"]) for row in rows if row.get("entry_odds")) / len([row for row in rows if row.get("entry_odds")])
+        if any(row.get("entry_odds") for row in rows)
+        else None
+    )
+    break_even_rate = (
+        sum(1.0 / float(row["entry_odds"]) for row in rows if row.get("entry_odds")) / len([row for row in rows if row.get("entry_odds")])
+        if any(row.get("entry_odds") for row in rows)
+        else None
+    )
+    weighted_wins = sum(
+        1.0 if row.get("trade_state") == "WON" else 0.5 if row.get("trade_state") == "HALF_WIN" else 0.0
+        for row in settled_rows
+    )
+    clv_rows = [row for row in rows if row.get("implied_probability_clv") is not None]
+    cumulative = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for row in settled_rows:
+        cumulative += float(row.get("net_pnl") or 0.0)
+        peak = max(peak, cumulative)
+        max_drawdown = max(max_drawdown, peak - cumulative)
+    by_market: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_market.setdefault(str(row["market"]), []).append(row)
+    market_summary = {
+        market: {
+            "positions": len(market_rows),
+            "settled_positions": len([row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]),
+            "open_positions": len([row for row in market_rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]),
+            "hit_rate": None
+            if not [row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
+            else sum(
+                1.0 if row.get("trade_state") == "WON" else 0.5 if row.get("trade_state") == "HALF_WIN" else 0.0
+                for row in market_rows
+                if row.get("trade_state") in _FINAL_SETTLEMENT_STATES
+            )
+            / len([row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]),
+            "average_odds": (
+                sum(float(row["entry_odds"]) for row in market_rows if row.get("entry_odds"))
+                / len([row for row in market_rows if row.get("entry_odds")])
+                if any(row.get("entry_odds") for row in market_rows)
+                else None
+            ),
+            "break_even_rate": (
+                sum(1.0 / float(row["entry_odds"]) for row in market_rows if row.get("entry_odds"))
+                / len([row for row in market_rows if row.get("entry_odds")])
+                if any(row.get("entry_odds") for row in market_rows)
+                else None
+            ),
+            "net_units": sum(float(row.get("net_pnl") or 0.0) for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES),
+            "roi": (
+                sum(float(row.get("net_pnl") or 0.0) for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES)
+                / len([row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES])
+                if [row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
+                else None
+            ),
+            "average_clv": (
+                sum(float(row["implied_probability_clv"]) for row in market_rows if row.get("implied_probability_clv") is not None)
+                / len([row for row in market_rows if row.get("implied_probability_clv") is not None])
+                if any(row.get("implied_probability_clv") is not None for row in market_rows)
+                else None
+            ),
+        }
+        for market, market_rows in sorted(by_market.items())
+    }
+    if not rows:
+        sample_status = "NO_CURRENT_PAPER_POSITIONS_YET"
+    elif len(settled_rows) < 5:
+        sample_status = "INSUFFICIENT_SAMPLE"
+    else:
+        sample_status = "TRACKING"
+    return {
+        "positions": len(rows),
+        "open_positions": len(open_rows),
+        "settled_positions": len(settled_rows),
+        "wins": sum(1 for row in settled_rows if row.get("trade_state") == "WON"),
+        "losses": sum(1 for row in settled_rows if row.get("trade_state") == "LOST"),
+        "pushes": sum(1 for row in settled_rows if row.get("trade_state") == "PUSH"),
+        "half_wins": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_WIN"),
+        "half_losses": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_LOSS"),
+        "hit_rate": None if not settled_rows else (weighted_wins / len(settled_rows)),
+        "average_odds": average_odds,
+        "break_even_rate": break_even_rate,
+        "net_units": net_units,
+        "roi": None if not settled_rows else (net_units / len(settled_rows)),
+        "yield": None if not settled_rows else (net_units / len(settled_rows)),
+        "max_drawdown": max_drawdown,
+        "clv_state": "PENDING" if rows and not clv_rows else ("AVAILABLE" if clv_rows else "UNAVAILABLE"),
+        "average_clv": None
+        if not clv_rows
+        else sum(float(row["implied_probability_clv"]) for row in clv_rows) / len(clv_rows),
+        "sample_status": sample_status,
+        "by_market": market_summary,
     }
 
 

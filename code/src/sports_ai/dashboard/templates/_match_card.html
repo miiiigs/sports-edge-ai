@@ -62,9 +62,21 @@
       <div class="signal-grid">
         <p class="status-line"><span>Status</span><strong>{{ fixture.prediction.prediction_status }}</strong></p>
         <p class="status-line"><span>Lock</span><strong>{{ fixture.prediction.lock_state or 'PRE_MATCH_OPEN' }}</strong></p>
-        <p class="status-line"><span>Decision</span><strong>{{ fixture.prediction.manager_decision_status }}</strong></p>
-        <p class="status-line"><span>Safeguard</span><strong>{{ fixture.prediction.safeguard_status }}</strong></p>
+        <p class="status-line">
+          <span>Current Market</span>
+          <strong>{{ fixture.market_signal.decision if fixture.market_signal else fixture.prediction.manager_decision_status }}</strong>
+        </p>
+        <p class="status-line">
+          <span>Safeguard</span>
+          <strong>{{ fixture.market_signal.day12_state if fixture.market_signal else fixture.prediction.safeguard_status }}</strong>
+        </p>
       </div>
+      {% if fixture.market_signal %}
+        <div class="signal-grid">
+          <p class="status-line"><span>Selection</span><strong>{{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}</strong></p>
+          <p class="status-line"><span>Edge</span><strong>{{ "{:+.2%}".format(fixture.market_signal.edge|float) if fixture.market_signal.edge is not none else 'N/A' }}</strong></p>
+        </div>
+      {% endif %}
     </div>
   {% else %}
     <div class="prediction-snippet">

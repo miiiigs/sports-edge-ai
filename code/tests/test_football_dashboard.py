@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -12,6 +12,8 @@ from sports_ai.dashboard.app import create_app
 from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FootballDataOrgFixtureProvider
 from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices
+from sports_ai.market_data.providers import NormalizedMarketSnapshot
+from sports_ai.storage import football_paper_trading
 
 
 class FakeFixtureProvider:
@@ -69,6 +71,57 @@ class FakeFixtureProvider:
             if fixture.fixture_id == fixture_id:
                 return fixture
         return None
+
+
+class FakeMarketProvider:
+    def __init__(
+        self,
+        snapshots_by_fixture: dict[str, list[NormalizedMarketSnapshot]] | None = None,
+        *,
+        configured: bool = True,
+    ) -> None:
+        self.snapshots_by_fixture = snapshots_by_fixture or {}
+        self._configured = configured
+
+    def provider_name(self) -> str:
+        return "fake-market-provider"
+
+    def configured(self) -> bool:
+        return self._configured
+
+    def get_fixture_markets(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict | None = None,
+    ) -> list[NormalizedMarketSnapshot]:
+        return list(self.snapshots_by_fixture.get(fixture_id, []))
+
+    def get_best_prices(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict | None = None,
+    ) -> list[NormalizedMarketSnapshot]:
+        return list(self.snapshots_by_fixture.get(fixture_id, []))
+
+    def get_market_snapshot(
+        self,
+        fixture_id: str,
+        *,
+        fixture_context: dict | None = None,
+    ) -> list[NormalizedMarketSnapshot]:
+        return list(self.snapshots_by_fixture.get(fixture_id, []))
+
+    def diagnostics(self) -> dict:
+        return {
+            "provider": self.provider_name(),
+            "configured": self._configured,
+            "state": "CONNECTED" if self._configured else "NOT_CONFIGURED",
+            "current_market_decisions": "READY" if self._configured else "BLOCKED",
+            "captured_at": "2026-08-20T00:00:00+00:00",
+            "reason": None if self._configured else "Fake market provider disabled for this test.",
+        }
 
 
 def _repo_root() -> Path:
@@ -144,6 +197,10 @@ def _fixture(
     home_score: int | None = None,
     away_score: int | None = None,
 ) -> NormalizedFixture:
+    kickoff_utc = (
+        datetime.now(timezone.utc).replace(hour=20, minute=0, second=0, microsecond=0) + timedelta(days=2)
+    ).isoformat()
+    last_provider_update = (datetime.now(timezone.utc) - timedelta(hours=4)).replace(microsecond=0).isoformat()
     return NormalizedFixture(
         fixture_id=fixture_id,
         provider_fixture_id="fixture-1",
@@ -156,14 +213,49 @@ def _fixture(
         home_team_name=home_team_name,
         away_team_id="200",
         away_team_name=away_team_name,
-        kickoff_utc="2026-08-20T20:00:00+00:00",
+        kickoff_utc=kickoff_utc,
         status=status,
         elapsed_minute=63 if status == FIXTURE_STATUS_LIVE else None,
         home_score=home_score,
         away_score=away_score,
-        last_provider_update="2026-08-19T12:00:00+00:00",
+        last_provider_update=last_provider_update,
         source_version="fake_fixture_provider_v1",
         provider_payload={"fixture_id": fixture_id},
+    )
+
+
+def _market_snapshot(
+    *,
+    fixture: NormalizedFixture,
+    bookmaker: str,
+    market: str,
+    selection: str,
+    decimal_odds: float,
+    reference_designation: str,
+    line: float | None = None,
+    provider_market_id: str | None = None,
+) -> NormalizedMarketSnapshot:
+    return NormalizedMarketSnapshot(
+        provider="fake-market-provider",
+        fixture_id=fixture.fixture_id,
+        provider_fixture_id=fixture.provider_fixture_id,
+        captured_at="2026-08-20T10:00:00+00:00",
+        source_timestamp="2026-08-20T10:00:00+00:00",
+        market=market,
+        selection=selection,
+        line=line,
+        decimal_odds=decimal_odds,
+        bookmaker=bookmaker,
+        ingestion_version="test_market_ingestion_v1",
+        provider_market_id=provider_market_id,
+        home_team_name=fixture.home_team_name,
+        away_team_name=fixture.away_team_name,
+        competition_id=fixture.competition_id,
+        competition_name=fixture.competition_name,
+        kickoff_utc=fixture.kickoff_utc,
+        freshness_state="FRESH",
+        reference_designation=reference_designation,
+        reference_rank=1 if reference_designation == "reference" else None,
     )
 
 
@@ -235,7 +327,11 @@ def test_football_data_org_normalization_maps_status_and_score():
 def test_dashboard_services_generate_prediction_and_ignore_live_score(tmp_path: Path):
     fixture = _fixture()
     provider = FakeFixtureProvider([fixture])
-    services = DashboardServices(config=_dashboard_config(tmp_path), fixture_provider=provider)
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=provider,
+        market_provider=FakeMarketProvider(configured=False),
+    )
 
     asyncio.run(services.initialize())
     initial_payload = services.get_fixture_detail_payload(fixture.fixture_id)
@@ -269,6 +365,7 @@ def test_dashboard_services_block_unresolved_team_identity(tmp_path: Path):
     services = DashboardServices(
         config=_dashboard_config(tmp_path),
         fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
     )
 
     asyncio.run(services.initialize())
@@ -283,7 +380,9 @@ def test_dashboard_services_do_not_generate_first_prediction_after_kickoff(tmp_p
     fixture = replace(
         _fixture(),
         fixture_id="fake:past_fixture",
-        kickoff_utc="2026-08-18T20:00:00+00:00",
+        kickoff_utc=(
+            datetime.now(timezone.utc).replace(hour=20, minute=0, second=0, microsecond=0) - timedelta(days=2)
+        ).isoformat(),
         status=FIXTURE_STATUS_LIVE,
         elapsed_minute=52,
         home_score=1,
@@ -292,6 +391,7 @@ def test_dashboard_services_do_not_generate_first_prediction_after_kickoff(tmp_p
     services = DashboardServices(
         config=_dashboard_config(tmp_path),
         fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
     )
 
     asyncio.run(services.initialize())
@@ -308,6 +408,7 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
     app = create_app(
         config=_dashboard_config(tmp_path),
         fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
     )
 
     with TestClient(app) as client:
@@ -387,6 +488,7 @@ def test_dashboard_routes_surface_provider_not_configured(tmp_path: Path):
     app = create_app(
         config=_dashboard_config(tmp_path),
         fixture_provider=FakeFixtureProvider(configured=False),
+        market_provider=FakeMarketProvider(configured=False),
     )
 
     with TestClient(app) as client:
@@ -415,9 +517,92 @@ def test_dashboard_routes_surface_provider_diagnostics_errors(tmp_path: Path):
     app = create_app(
         config=_dashboard_config(tmp_path),
         fixture_provider=FakeFixtureProvider([fixture], diagnostics=diagnostics),
+        market_provider=FakeMarketProvider(configured=False),
     )
 
     with TestClient(app) as client:
         payload = client.get("/api/system/status").json()
         assert payload["fixture_feed"]["state"] == "DEGRADED"
         assert "current season unavailable on this plan" in payload["fixture_feed"]["last_error"]
+
+
+def test_dashboard_services_current_market_candidate_creates_idempotent_paper_entry(tmp_path: Path):
+    fixture = _fixture()
+    config = replace(_dashboard_config(tmp_path), current_xg_connected=True)
+    market_provider = FakeMarketProvider()
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=market_provider,
+    )
+
+    asyncio.run(services.initialize())
+    market_provider.snapshots_by_fixture[fixture.fixture_id] = [
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="Pinnacle",
+            market="1x2",
+            selection="HOME",
+            decimal_odds=2.05,
+            reference_designation="reference",
+            provider_market_id="pin-home",
+        ),
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="Pinnacle",
+            market="1x2",
+            selection="DRAW",
+            decimal_odds=3.35,
+            reference_designation="reference",
+            provider_market_id="pin-draw",
+        ),
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="Pinnacle",
+            market="1x2",
+            selection="AWAY",
+            decimal_odds=3.95,
+            reference_designation="reference",
+            provider_market_id="pin-away",
+        ),
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="bet365",
+            market="1x2",
+            selection="HOME",
+            decimal_odds=10.0,
+            reference_designation="available",
+            provider_market_id="b365-home",
+        ),
+    ]
+
+    asyncio.run(services.sync_once())
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["market_evaluation"]["state"] == "READY"
+    assert payload["market_evaluation"]["counts"]["preliminary_candidates"] >= 1
+    assert payload["fixture"]["market_signal"]["decision"] == "PRELIMINARY_CANDIDATE"
+
+    candidates_payload = services.get_candidates_payload()
+    assert candidates_payload["connected"] is True
+    assert candidates_payload["preliminary_candidates"]
+    assert candidates_payload["preliminary_candidates"][0]["paper_entry_eligible"] is True
+
+    performance_payload = services.get_performance_payload()
+    assert performance_payload["current_paper_summary"]["positions"] == 1
+    assert performance_payload["current_paper_summary"]["open_positions"] == 1
+
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        assert len(paper_rows) == 1
+        assert paper_rows[0]["entry_snapshot_id"] is not None
+        first_trade_id = str(paper_rows[0]["paper_trade_id"])
+
+    asyncio.run(services.sync_once())
+
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        assert len(paper_rows) == 1
+        assert str(paper_rows[0]["paper_trade_id"]) == first_trade_id
+
+    asyncio.run(services.shutdown())

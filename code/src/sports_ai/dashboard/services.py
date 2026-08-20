@@ -12,10 +12,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..market_data.api_football import ApiFootballOddsProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
 from ..storage import football_paper_trading
 from . import storage
+from .current_market import build_fixture_market_evaluation
 from .fixture_provider import (
     FootballDataOrgFixtureProvider,
     FixtureProvider,
@@ -38,6 +40,11 @@ from .prediction_service import PredictionContext, build_prediction_for_fixture
 from .snapshot_service import CurrentFootballModelSnapshot, CurrentSnapshotError, build_current_football_model_snapshot
 
 DEFAULT_UPCOMING_HORIZON_DAYS = 5
+
+
+def _default_market_provider() -> CurrentMarketProvider:
+    provider = ApiFootballOddsProvider()
+    return provider if provider.configured() else NotConfiguredMarketProvider()
 
 
 @dataclass(frozen=True)
@@ -85,7 +92,7 @@ class DashboardServices:
     ):
         self.config = DashboardConfig.default() if config is None else config
         self.fixture_provider = fixture_provider or FootballDataOrgFixtureProvider()
-        self.market_provider = market_provider or NotConfiguredMarketProvider()
+        self.market_provider = market_provider or _default_market_provider()
         self.snapshot: CurrentFootballModelSnapshot | None = None
         self.snapshot_error: str | None = None
         self._background_task: asyncio.Task[None] | None = None
@@ -110,6 +117,24 @@ class DashboardServices:
             "pending_fixture_count": 0,
             "blocked_fixture_count": 0,
             "ready_fixture_count": 0,
+        }
+        self._market_runtime_state: dict[str, Any] = {
+            "state": "NOT_CONFIGURED" if not self.market_provider.configured() else "CONNECTED",
+            "last_sync_at": None,
+            "last_successful_snapshot_at": None,
+            "last_error": None,
+            "fixtures_considered": 0,
+            "fixtures_matched": 0,
+            "market_snapshots": 0,
+            "markets_covered": [],
+            "freshness": "UNKNOWN",
+            "unresolved_fixture_count": 0,
+            "stale_market_count": 0,
+            "candidate_count": 0,
+            "paper_entry_count": 0,
+            "settlement_queue_count": 0,
+            "decision_count": 0,
+            "evaluations": {},
         }
 
     async def initialize(self) -> None:
@@ -248,6 +273,12 @@ class DashboardServices:
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             rows = football_paper_trading.fetch_paper_trade_rows(conn)
         return rows, football_paper_trading.paper_trading_status(rows)
+
+    def _market_evaluation_map(self) -> dict[str, Any]:
+        return dict(self._market_runtime_state.get("evaluations") or {})
+
+    def _market_evaluation_for_fixture(self, fixture_id: str) -> dict[str, Any] | None:
+        return self._market_evaluation_map().get(str(fixture_id))
 
     def _performance_status(self, summary_payload: dict[str, Any] | None, paper_status: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -479,6 +510,7 @@ class DashboardServices:
                 }
             )
             self._update_prediction_state(rows_with_predictions)
+            self._sync_current_market_state(rows_with_predictions)
             storage.put_runtime_state(
                 conn,
                 state_key="provider_state",
@@ -491,7 +523,368 @@ class DashboardServices:
                 state_value=self._prediction_state,
                 updated_at=attempted_at,
             )
+            storage.put_runtime_state(
+                conn,
+                state_key="market_runtime_state",
+                state_value=self._market_runtime_state,
+                updated_at=attempted_at,
+            )
         return self._provider_state
+
+    def _latest_closing_snapshot(
+        self,
+        snapshot_rows: list[dict[str, Any]],
+        *,
+        market: str,
+        selection: str,
+        line: float | None,
+        kickoff_utc: str,
+    ) -> dict[str, Any] | None:
+        kickoff = parse_iso_datetime(kickoff_utc)
+        candidates = [
+            row
+            for row in snapshot_rows
+            if str(row["market"]) == market
+            and str(row["selection"]) == selection
+            and ((line is None and row.get("line") is None) or row.get("line") == line)
+            and bool(row.get("is_pre_match"))
+            and parse_iso_datetime(str(row["captured_at"])) <= kickoff
+        ]
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda row: (row["captured_at"], int(row["snapshot_id"])))[-1]
+
+    def _maybe_create_paper_entries(
+        self,
+        conn: Any,
+        *,
+        prediction: dict[str, Any],
+        evaluation: dict[str, Any],
+    ) -> int:
+        created = 0
+        for row in evaluation.get("decision_rows") or []:
+            if not row.get("paper_entry_eligible"):
+                continue
+            existing = football_paper_trading.find_existing_paper_trade_entry(
+                conn,
+                prediction_id=str(prediction["prediction_id"]),
+                fixture_id=str(prediction["fixture_id"]),
+                market=str(row["market_family"]),
+                selection=str(row["selection"]),
+                line=None if row.get("line") is None else float(row["line"]),
+            )
+            if existing is not None:
+                row["paper_trade_id"] = existing["paper_trade_id"]
+                continue
+            entry = football_paper_trading.PaperTradeEntry(
+                prediction_id=str(prediction["prediction_id"]),
+                fixture_id=str(prediction["fixture_id"]),
+                model_snapshot_id=str(prediction["model_snapshot_id"]),
+                model_version=str(
+                    (prediction.get("model_versions") or {}).get("current_snapshot_model_version")
+                    or prediction.get("prediction_version")
+                ),
+                market=str(row["market_family"]),
+                selection=str(row["selection"]),
+                line=None if row.get("line") is None else float(row["line"]),
+                model_probability=float(row["model_probability"]),
+                model_fair_price=float(row["model_fair_decimal_price"]),
+                available_market_price=float(row["best_available_price"]),
+                edge=None if row.get("settlement_aware_edge") is None else float(row["settlement_aware_edge"]),
+                minimum_acceptable_price=None
+                if row.get("minimum_acceptable_price") is None
+                else float(row["minimum_acceptable_price"]),
+                decision="PAPER_CANDIDATE",
+                decision_timestamp=str(row["market_as_of"]),
+                kickoff=str(prediction["kickoff_utc"]),
+                safeguard_state=str(row["day12_state"]),
+                entry_eligibility="ELIGIBLE",
+                bookmaker=None if row.get("best_available_bookmaker") is None else str(row["best_available_bookmaker"]),
+                provider=self.market_provider.provider_name(),
+                entry_odds=float(row["best_available_price"]),
+                entry_captured_at=str(row.get("best_available_source_timestamp") or row["market_as_of"]),
+                entry_snapshot_id=row.get("entry_snapshot_id"),
+            )
+            football_paper_trading.record_paper_trade_entry(conn, entry)
+            row["paper_trade_id"] = entry.paper_trade_id
+            created += 1
+        return created
+
+    def _process_paper_trading_updates(self, rows_with_predictions: list[dict[str, Any]]) -> None:
+        fixture_rows = {str(row["fixture_id"]): row for row in rows_with_predictions}
+        now_utc = datetime.now(timezone.utc)
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            snapshot_rows_by_fixture: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for snapshot_row in football_paper_trading.fetch_market_snapshots(conn):
+                snapshot_rows_by_fixture[str(snapshot_row["fixture_id"])].append(snapshot_row)
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+            for row in paper_rows:
+                fixture = fixture_rows.get(str(row["fixture_id"]))
+                if fixture is None:
+                    continue
+                kickoff_utc = str(row["kickoff"])
+                kickoff = parse_iso_datetime(kickoff_utc)
+                if row.get("closing_odds") is None and now_utc >= kickoff:
+                    closing_snapshot = self._latest_closing_snapshot(
+                        snapshot_rows_by_fixture.get(str(row["fixture_id"]), []),
+                        market=str(row["market"]),
+                        selection=str(row["selection"]),
+                        line=row.get("line"),
+                        kickoff_utc=kickoff_utc,
+                    )
+                    if closing_snapshot is not None:
+                        football_paper_trading.attach_closing_snapshot(
+                            conn,
+                            paper_trade_id=str(row["paper_trade_id"]),
+                            closing_odds=float(closing_snapshot["odds"]),
+                            closing_captured_at=str(closing_snapshot["captured_at"]),
+                            closing_snapshot_id=int(closing_snapshot["snapshot_id"]),
+                        )
+                if row.get("trade_state") == "PENDING" and now_utc >= kickoff and str(fixture["status"]) in FIXTURE_LIVE_STATUSES:
+                    football_paper_trading.append_trade_update(
+                        conn,
+                        football_paper_trading.build_trade_update_payload(
+                            paper_trade_id=str(row["paper_trade_id"]),
+                            trade_state="OPEN",
+                            settlement_context={"status": str(fixture["status"])},
+                            odds=float(row.get("entry_odds") or row["available_market_price"]),
+                            notes="Fixture started; position is now open.",
+                        ),
+                    )
+                if str(fixture["status"]) != FIXTURE_STATUS_FINISHED:
+                    continue
+                if str(row.get("trade_state")) in {"WON", "LOST", "PUSH", "HALF_WIN", "HALF_LOSS", "VOID"}:
+                    continue
+                actual_total_corners = None
+                if fixture.get("home_corners") is not None and fixture.get("away_corners") is not None:
+                    actual_total_corners = int(fixture["home_corners"]) + int(fixture["away_corners"])
+                try:
+                    state = football_paper_trading.settlement_state_for_market(
+                        market=str(row["market"]),
+                        selection=str(row["selection"]),
+                        line=None if row.get("line") is None else float(row["line"]),
+                        actual_home_goals=int(fixture.get("home_score") or 0),
+                        actual_away_goals=int(fixture.get("away_score") or 0),
+                        actual_total_corners=actual_total_corners,
+                    )
+                except ValueError:
+                    football_paper_trading.append_trade_update(
+                        conn,
+                        football_paper_trading.build_trade_update_payload(
+                            paper_trade_id=str(row["paper_trade_id"]),
+                            trade_state="UNSETTLED",
+                            settlement_context={"status": str(fixture["status"])},
+                            odds=float(row.get("entry_odds") or row["available_market_price"]),
+                            notes="Settlement pending because the required final market result is unavailable.",
+                        ),
+                    )
+                    continue
+                football_paper_trading.append_trade_update(
+                    conn,
+                    football_paper_trading.build_trade_update_payload(
+                        paper_trade_id=str(row["paper_trade_id"]),
+                        trade_state=state,
+                        settlement_context={
+                            "actual_home_goals": int(fixture.get("home_score") or 0),
+                            "actual_away_goals": int(fixture.get("away_score") or 0),
+                            "actual_total_corners": actual_total_corners,
+                        },
+                        odds=float(row.get("entry_odds") or row["available_market_price"]),
+                    ),
+                )
+
+    def _sync_current_market_state(self, rows_with_predictions: list[dict[str, Any]]) -> None:
+        market_state = self._market_provider_state()
+        now_utc = datetime.now(timezone.utc)
+        evaluations: dict[str, Any] = {}
+        if not market_state["configured"]:
+            self._market_runtime_state.update(
+                {
+                    "state": "NOT_CONFIGURED",
+                    "last_sync_at": utc_now_iso(),
+                    "last_error": market_state["reason"],
+                    "fixtures_considered": 0,
+                    "fixtures_matched": 0,
+                    "market_snapshots": 0,
+                    "markets_covered": [],
+                    "freshness": "UNKNOWN",
+                    "unresolved_fixture_count": 0,
+                    "stale_market_count": 0,
+                    "candidate_count": 0,
+                    "paper_entry_count": 0,
+                    "settlement_queue_count": 0,
+                    "decision_count": 0,
+                    "evaluations": {},
+                }
+            )
+            return
+
+        future_rows = [
+            row
+            for row in self._future_fixture_rows(rows_with_predictions)
+            if self._prediction_eligibility_status(row.get("prediction")) == "PREDICTION_READY"
+        ]
+        snapshot_count = 0
+        matched_count = 0
+        candidate_count = 0
+        passed_safeguards = 0
+        unresolved_fixture_count = 0
+        stale_market_count = 0
+        paper_entries_created = 0
+        markets_covered: set[str] = set()
+        freshness_values: set[str] = set()
+        last_successful_snapshot_at: str | None = None
+
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            for row in future_rows:
+                prediction = row.get("prediction")
+                if prediction is None:
+                    continue
+                try:
+                    snapshots = list(
+                        self.market_provider.get_market_snapshot(
+                            str(row["fixture_id"]),
+                            fixture_context=row,
+                        )
+                    )
+                except Exception as exc:
+                    reason = str(exc)
+                    if "MARKET_FIXTURE_UNRESOLVED" in reason:
+                        unresolved_fixture_count += 1
+                        evaluations[str(row["fixture_id"])] = {
+                            "fixture_id": str(row["fixture_id"]),
+                            "state": "MARKET_FIXTURE_UNRESOLVED",
+                            "reason": reason,
+                            "decision_rows": [],
+                            "display_rows": [],
+                            "counts": {
+                                "predictions_evaluated": 0,
+                                "preliminary_candidates": 0,
+                                "no_bets": 0,
+                                "blocked": 0,
+                                "passed_safeguards": 0,
+                            },
+                        }
+                    else:
+                        evaluations[str(row["fixture_id"])] = {
+                            "fixture_id": str(row["fixture_id"]),
+                            "state": "ODDS_PROVIDER_DEGRADED",
+                            "reason": reason,
+                            "decision_rows": [],
+                            "display_rows": [],
+                            "counts": {
+                                "predictions_evaluated": 0,
+                                "preliminary_candidates": 0,
+                                "no_bets": 0,
+                                "blocked": 0,
+                                "passed_safeguards": 0,
+                            },
+                        }
+                    continue
+
+                if not snapshots:
+                    evaluations[str(row["fixture_id"])] = {
+                        "fixture_id": str(row["fixture_id"]),
+                        "state": "MARKET_NOT_AVAILABLE",
+                        "reason": "MARKET_NOT_AVAILABLE",
+                        "decision_rows": [],
+                        "display_rows": [],
+                        "counts": {
+                            "predictions_evaluated": 0,
+                            "preliminary_candidates": 0,
+                            "no_bets": 0,
+                            "blocked": 0,
+                            "passed_safeguards": 0,
+                        },
+                    }
+                    continue
+
+                matched_count += 1
+                last_successful_snapshot_at = max(snapshot.captured_at for snapshot in snapshots)
+                entry_snapshot_ids: dict[str, int] = {}
+                for snapshot in snapshots:
+                    db_snapshot_id = football_paper_trading.record_market_snapshot(
+                        conn,
+                        football_paper_trading.StoredMarketSnapshot(
+                            fixture_id=str(snapshot.fixture_id),
+                            provider=str(snapshot.provider),
+                            bookmaker=str(snapshot.bookmaker),
+                            market=str(snapshot.market),
+                            selection=str(snapshot.selection),
+                            odds=float(snapshot.decimal_odds),
+                            ingestion_version=str(snapshot.ingestion_version),
+                            line=None if snapshot.line is None else float(snapshot.line),
+                            provider_market_id=snapshot.provider_market_id,
+                            provider_timestamp=snapshot.source_timestamp,
+                            captured_at=str(snapshot.captured_at),
+                            is_pre_match=bool(snapshot.is_pre_match),
+                            provider_fixture_id=snapshot.provider_fixture_id,
+                            home_team_name=snapshot.home_team_name,
+                            away_team_name=snapshot.away_team_name,
+                            competition_id=snapshot.competition_id,
+                            competition_name=snapshot.competition_name,
+                            kickoff_utc=snapshot.kickoff_utc,
+                            freshness_state=snapshot.freshness_state,
+                        ),
+                    )
+                    if snapshot.provider_market_id:
+                        entry_snapshot_ids[str(snapshot.provider_market_id)] = db_snapshot_id
+                    snapshot_count += 1
+                    markets_covered.add(str(snapshot.market))
+                    freshness_values.add(str(snapshot.freshness_state or "UNKNOWN"))
+
+                evaluation = build_fixture_market_evaluation(
+                    fixture_context=row,
+                    prediction=prediction,
+                    snapshots=snapshots,
+                    current_xg_connected=self.config.current_xg_connected,
+                )
+                for decision_row in evaluation.get("decision_rows") or []:
+                    provider_market_id = decision_row.get("best_available_provider_market_id")
+                    if provider_market_id is not None:
+                        decision_row["entry_snapshot_id"] = entry_snapshot_ids.get(str(provider_market_id))
+                created = self._maybe_create_paper_entries(conn, prediction=prediction, evaluation=evaluation)
+                paper_entries_created += created
+                candidate_count += int(evaluation["counts"]["preliminary_candidates"])
+                passed_safeguards += int(evaluation["counts"]["passed_safeguards"])
+                stale_market_count += sum(
+                    1
+                    for decision_row in evaluation.get("decision_rows") or []
+                    if decision_row.get("decision") == "STALE_MARKET"
+                )
+                evaluations[str(row["fixture_id"])] = evaluation
+
+            self._process_paper_trading_updates(rows_with_predictions)
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+
+        self._market_runtime_state.update(
+            {
+                "state": market_state["state"],
+                "last_sync_at": utc_now_iso(),
+                "last_successful_snapshot_at": last_successful_snapshot_at,
+                "last_error": market_state.get("last_error") or market_state.get("reason"),
+                "fixtures_considered": len(future_rows),
+                "fixtures_matched": matched_count,
+                "market_snapshots": snapshot_count,
+                "markets_covered": sorted(markets_covered),
+                "freshness": "FRESH"
+                if freshness_values == {"FRESH"}
+                else ("STALE" if freshness_values == {"STALE"} else "UNKNOWN"),
+                "unresolved_fixture_count": unresolved_fixture_count,
+                "stale_market_count": stale_market_count,
+                "candidate_count": candidate_count,
+                "paper_entry_count": len(paper_rows),
+                "settlement_queue_count": sum(
+                    1
+                    for row in paper_rows
+                    if str(row.get("trade_state")) in {"PENDING", "OPEN", "UNSETTLED"}
+                    and parse_iso_datetime(str(row["kickoff"])) <= now_utc
+                ),
+                "decision_count": sum(len(value.get("decision_rows") or []) for value in evaluations.values()),
+                "passed_safeguards_count": passed_safeguards,
+                "evaluations": evaluations,
+            }
+        )
 
     def ensure_prediction(self, conn: Any, fixture: NormalizedFixture) -> dict[str, Any]:
         if self.snapshot is None:
@@ -756,11 +1149,27 @@ class DashboardServices:
         kickoff = parse_iso_datetime(str(fixture_row["kickoff_utc"]))
         local_kickoff = kickoff.astimezone(ZoneInfo(self.config.display_timezone)).strftime("%Y-%m-%d %H:%M")
         prediction = self._decorate_prediction_runtime(fixture_row.get("prediction"))
+        market_evaluation = self._market_evaluation_for_fixture(str(fixture_row["fixture_id"]))
+        top_market_row = None
+        if market_evaluation and market_evaluation.get("display_rows"):
+            top_market_row = market_evaluation["display_rows"][0]
         return {
             **fixture_row,
             "kickoff_local": local_kickoff,
             "prediction": prediction,
             "prediction_eligibility_status": self._prediction_eligibility_status(prediction),
+            "market_evaluation": market_evaluation,
+            "market_signal": None
+            if top_market_row is None
+            else {
+                "state": market_evaluation["state"],
+                "edge": top_market_row.get("settlement_aware_edge"),
+                "decision": top_market_row.get("decision"),
+                "day12_state": top_market_row.get("day12_state"),
+                "market_family": top_market_row.get("market_family"),
+                "selection": top_market_row.get("selection"),
+                "line": top_market_row.get("line"),
+            },
         }
 
     def get_dashboard_payload(self) -> dict[str, Any]:
@@ -837,9 +1246,11 @@ class DashboardServices:
             prediction = storage.fetch_latest_prediction_for_fixture(conn, fixture_id)
         if fixture is None:
             return None
+        serialized_fixture = self.serialize_fixture_row({**fixture, "prediction": prediction})
         return {
-            "fixture": self.serialize_fixture_row({**fixture, "prediction": prediction}),
+            "fixture": serialized_fixture,
             "prediction": self._decorate_prediction_runtime(prediction),
+            "market_evaluation": serialized_fixture.get("market_evaluation"),
             "system_status": self.get_system_status(),
         }
 
@@ -875,13 +1286,28 @@ class DashboardServices:
 
     def get_candidates_payload(self) -> dict[str, Any]:
         market_state = self._market_provider_state()
+        evaluations = list(self._market_evaluation_map().values())
+        preliminary = []
+        blocked = []
+        no_bets = []
+        for evaluation in evaluations:
+            for row in evaluation.get("decision_rows") or []:
+                if row["decision"] == "PRELIMINARY_CANDIDATE":
+                    preliminary.append(row)
+                elif row["decision"] == "NO_BET":
+                    no_bets.append(row)
+                else:
+                    blocked.append(row)
         return {
             "connected": market_state["configured"],
             "reason": market_state["reason"] or "Current market decision service unavailable until a current odds provider is configured.",
             "experimental_candidates": [],
-            "preliminary_candidates": [],
-            "blocked_candidates": [],
-            "no_bet_candidates": [],
+            "preliminary_candidates": sorted(
+                preliminary,
+                key=lambda row: (-float(row.get("settlement_aware_edge") or 0.0), str(row["fixture_id"])),
+            ),
+            "blocked_candidates": blocked,
+            "no_bet_candidates": no_bets,
             "rows": [self.serialize_fixture_row(row) for row in self._future_fixture_rows(self._all_fixtures_with_predictions())[:12]],
             "system_status": self.get_system_status(),
         }
@@ -894,6 +1320,7 @@ class DashboardServices:
         calibration_rows = self._load_csv_rows(self._performance_csv_path("football_calibration.csv"))
         paper_positions, paper_status = self._paper_positions()
         status = self._performance_status(summary_payload, paper_status)
+        current_paper = paper_status.get("performance", {})
 
         calibration_series: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in calibration_rows:
@@ -936,9 +1363,9 @@ class DashboardServices:
             ("Paper Bets", str(paper_status["paper_bets"])),
             (
                 "Paper ROI",
-                "NOT AVAILABLE" if paper_status["roi"] is None else f"{float(paper_status['roi']):+.2%}",
+                "NOT AVAILABLE" if current_paper.get("roi") is None else f"{float(current_paper['roi']):+.2%}",
             ),
-            ("CLV", paper_status["clv_state"].replace("_", " ")),
+            ("CLV", str(current_paper.get("clv_state", "UNAVAILABLE")).replace("_", " ")),
         ]
         return {
             "summary": summary,
@@ -950,6 +1377,8 @@ class DashboardServices:
             "season_rows": season_rows,
             "calibration_series": calibration_series,
             "paper_positions": paper_positions,
+            "current_paper_summary": current_paper,
+            "current_paper_by_market": current_paper.get("by_market", {}),
             "performance_status": status,
             "system_status": self.get_system_status(),
         }
@@ -1020,6 +1449,7 @@ class DashboardServices:
                 "provider": market_state["provider"],
                 "reason": market_state["reason"],
             },
+            "market_sync": dict(self._market_runtime_state),
             "xg": {
                 "state": "AVAILABLE" if self.config.current_xg_connected else "MISSING",
             },
@@ -1040,6 +1470,13 @@ class DashboardServices:
             "current_prediction_pipeline_ready": "YES"
             if self.snapshot is not None
             else "NO",
-            "current_market_decision_ready": "YES" if market_state["configured"] else "NO",
-            "live_paper_pipeline_ready": "YES" if market_state["configured"] else "NO",
+            "current_market_decision_ready": "YES"
+            if market_state["configured"] and self._provider_state["configured"]
+            else "NO",
+            "current_paper_tracking_active": "YES"
+            if int(self._market_runtime_state.get("paper_entry_count") or 0) > 0
+            else "NO",
+            "live_paper_pipeline_ready": "YES"
+            if market_state["configured"] and self._provider_state["configured"] and self.config.current_xg_connected
+            else "NO",
         }

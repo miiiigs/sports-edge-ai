@@ -50,7 +50,9 @@
           <th>xG</th>
           <th>Top Score</th>
           <th>1X2 Fair</th>
-          <th>Decision</th>
+          <th>Market State</th>
+          <th>Top Signal</th>
+          <th>Paper</th>
         </tr>
       </thead>
       <tbody>
@@ -84,11 +86,26 @@
                 N/A
               {% endif %}
             </td>
-            <td>{{ row.prediction.manager_decision_status if row.prediction else 'N/A' }}</td>
+            <td>{{ row.market_evaluation.state if row.market_evaluation else 'NOT_SYNCED' }}</td>
+            <td>
+              {% if row.market_signal %}
+                {{ row.market_signal.decision }} | {{ row.market_signal.selection }}{% if row.market_signal.line is not none %} {{ row.market_signal.line }}{% endif %}
+                {% if row.market_signal.edge is not none %}<br><small>{{ "{:+.2%}".format(row.market_signal.edge|float) }}</small>{% endif %}
+              {% else %}
+                {{ row.prediction.manager_decision_status if row.prediction else 'N/A' }}
+              {% endif %}
+            </td>
+            <td>
+              {% if row.market_signal %}
+                {{ row.market_signal.day12_state }}
+              {% else %}
+                {{ row.prediction.safeguard_status if row.prediction else 'N/A' }}
+              {% endif %}
+            </td>
           </tr>
         {% else %}
           <tr>
-            <td colspan="9">No fixtures match the current filters.</td>
+            <td colspan="11">No fixtures match the current filters.</td>
           </tr>
         {% endfor %}
       </tbody>

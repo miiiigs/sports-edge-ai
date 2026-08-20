@@ -144,11 +144,77 @@
       <div><span>Paper Bets</span><strong>{{ payload.performance_status.paper_ledger.paper_bets }}</strong></div>
       <div><span>Open Positions</span><strong>{{ payload.performance_status.paper_ledger.open_positions }}</strong></div>
       <div><span>Settled Positions</span><strong>{{ payload.performance_status.paper_ledger.settled_positions }}</strong></div>
+      <div><span>Net Units</span><strong>{{ "{:+.2f}".format(payload.current_paper_summary.net_units|float) if payload.current_paper_summary.net_units is not none else 'NOT AVAILABLE' }}</strong></div>
+      <div><span>ROI</span><strong>{{ "{:+.2%}".format(payload.current_paper_summary.roi|float) if payload.current_paper_summary.roi is not none else 'NOT AVAILABLE' }}</strong></div>
       <div><span>Current Odds Provider</span><strong>{{ payload.system_status.market_provider.state }}</strong></div>
       <div><span>Current Market Decisions</span><strong>{{ payload.system_status.market_provider.current_market_decisions }}</strong></div>
       <div><span>CLV</span><strong>{{ payload.system_status.clv.state }}</strong></div>
     </div>
   </article>
+</section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <h2>Current Paper Summary</h2>
+      <span>{{ payload.current_paper_summary.sample_status or 'NOT AVAILABLE' }}</span>
+    </div>
+  </div>
+  <div class="hero-strip">
+    <div class="metric-tile">
+      <span>Positions</span>
+      <strong>{{ payload.current_paper_summary.positions or 0 }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Hit Rate</span>
+      <strong>{{ "{:.2%}".format(payload.current_paper_summary.hit_rate|float) if payload.current_paper_summary.hit_rate is not none else 'NOT AVAILABLE' }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Break Even</span>
+      <strong>{{ "{:.2%}".format(payload.current_paper_summary.break_even_rate|float) if payload.current_paper_summary.break_even_rate is not none else 'NOT AVAILABLE' }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Avg CLV</span>
+      <strong>{{ "{:+.4f}".format(payload.current_paper_summary.average_clv|float) if payload.current_paper_summary.average_clv is not none else 'NOT AVAILABLE' }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <h2>Current Paper By Market</h2>
+      <span>Only live-paper ledger rows</span>
+    </div>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Market</th>
+          <th>Positions</th>
+          <th>Hit Rate</th>
+          <th>ROI</th>
+          <th>Net Units</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for market, row in payload.current_paper_by_market.items() %}
+          <tr>
+            <td>{{ market }}</td>
+            <td>{{ row.positions }}</td>
+            <td>{{ "{:.2%}".format(row.hit_rate|float) if row.hit_rate is not none else 'NOT AVAILABLE' }}</td>
+            <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else 'NOT AVAILABLE' }}</td>
+            <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else 'NOT AVAILABLE' }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="5">No current paper positions have settled into a by-market summary yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section class="section-block">

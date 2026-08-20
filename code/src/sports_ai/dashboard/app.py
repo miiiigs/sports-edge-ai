@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .fixture_provider import FixtureProvider
+from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from .services import DashboardConfig, DashboardServices
 
 
@@ -26,9 +27,14 @@ def create_app(
     config: DashboardConfig | None = None,
     *,
     fixture_provider: FixtureProvider | None = None,
+    market_provider: CurrentMarketProvider | None = None,
     services: DashboardServices | None = None,
 ) -> FastAPI:
-    resolved_services = services or DashboardServices(config=config, fixture_provider=fixture_provider)
+    resolved_services = services or DashboardServices(
+        config=config,
+        fixture_provider=fixture_provider,
+        market_provider=market_provider,
+    )
     templates = Jinja2Templates(directory=str(_template_directory()))
 
     @asynccontextmanager

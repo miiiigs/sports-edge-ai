@@ -20,7 +20,8 @@
           <th>Most Likely Score</th>
           <th>Status</th>
           <th>Lock</th>
-          <th>Decision</th>
+          <th>Market State</th>
+          <th>Top Signal</th>
           <th>Safeguard</th>
           <th>Open</th>
         </tr>
@@ -56,13 +57,20 @@
             </td>
             <td>{{ row.prediction.prediction_status }}</td>
             <td>{{ row.prediction.lock_state or 'PRE_MATCH_OPEN' }}</td>
-            <td>{{ row.prediction.manager_decision_status }}</td>
-            <td>{{ row.prediction.safeguard_status }}</td>
+            <td>{{ row.fixture.market_evaluation.state if row.fixture.market_evaluation else 'NOT_SYNCED' }}</td>
+            <td>
+              {% if row.fixture.market_signal %}
+                {{ row.fixture.market_signal.decision }} | {{ row.fixture.market_signal.selection }}{% if row.fixture.market_signal.line is not none %} {{ row.fixture.market_signal.line }}{% endif %}
+              {% else %}
+                {{ row.prediction.manager_decision_status }}
+              {% endif %}
+            </td>
+            <td>{{ row.fixture.market_signal.day12_state if row.fixture.market_signal else row.prediction.safeguard_status }}</td>
             <td><a href="/matches/{{ row.fixture.fixture_id }}">Detail</a></td>
           </tr>
         {% else %}
           <tr>
-            <td colspan="13">No predictions have been stored yet.</td>
+            <td colspan="14">No predictions have been stored yet.</td>
           </tr>
         {% endfor %}
       </tbody>

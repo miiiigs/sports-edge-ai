@@ -4,46 +4,142 @@
       <p class="eyebrow">Decision Layer</p>
       <h2>Candidates</h2>
     </div>
-    <span>{{ payload.system_status.odds_feed.state }}</span>
+    <span>{{ payload.system_status.market_sync.state }}</span>
   </div>
-  <article class="empty-state">
-    <strong>Current market decision service not connected.</strong>
-    <p>{{ payload.reason }}</p>
-  </article>
+  {% if not payload.connected %}
+    <article class="empty-state">
+      <strong>Current market decision service not connected.</strong>
+      <p>{{ payload.reason }}</p>
+    </article>
+  {% endif %}
 
+  <div class="hero-strip">
+    <div class="metric-tile">
+      <span>Fixtures Considered</span>
+      <strong>{{ payload.system_status.market_sync.fixtures_considered }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Decisions</span>
+      <strong>{{ payload.system_status.market_sync.decision_count }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Preliminary</span>
+      <strong>{{ payload.preliminary_candidates|length }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Paper Entries</span>
+      <strong>{{ payload.system_status.market_sync.paper_entry_count }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Preliminary</p>
+      <h2>Eligible Current-Market Signals</h2>
+    </div>
+    <span>{{ payload.preliminary_candidates|length }} rows</span>
+  </div>
   <div class="table-shell">
     <table>
       <thead>
         <tr>
           <th>Fixture</th>
-          <th>Kickoff</th>
-          <th>Prediction</th>
-          <th>1X2 Fair</th>
-          <th>Decision Layer</th>
+          <th>Market</th>
+          <th>Offer</th>
+          <th>Fair</th>
+          <th>Edge</th>
           <th>Day 12</th>
         </tr>
       </thead>
       <tbody>
-        {% for row in payload.rows %}
+        {% for row in payload.preliminary_candidates %}
           <tr>
-            <td><a href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
-            <td>{{ row.kickoff_local }}</td>
-            <td>{{ row.prediction.prediction_status if row.prediction else row.prediction_eligibility_status }}</td>
-            <td>
-              {% if row.prediction and row.prediction.prediction_status == 'READY' %}
-                H {{ "%.2f"|format(row.prediction.fair_prices['1x2'].HOME.fair_decimal_price) }}
-                | D {{ "%.2f"|format(row.prediction.fair_prices['1x2'].DRAW.fair_decimal_price) }}
-                | A {{ "%.2f"|format(row.prediction.fair_prices['1x2'].AWAY.fair_decimal_price) }}
-              {% else %}
-                N/A
-              {% endif %}
-            </td>
-            <td>{{ row.prediction.manager_decision_status if row.prediction else 'MARKET_DATA_NOT_CONNECTED' }}</td>
-            <td>{{ row.prediction.safeguard_reason if row.prediction else 'POINT-IN-TIME XG NOT AVAILABLE' }}</td>
+            <td><a href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
+            <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+            <td>{{ row.best_available_bookmaker or 'N/A' }} @ {{ "{:.2f}".format(row.best_available_price|float) if row.best_available_price is not none else 'N/A' }}</td>
+            <td>{{ "{:.2f}".format(row.model_fair_decimal_price|float) }}</td>
+            <td>{{ "{:+.2%}".format(row.settlement_aware_edge|float) if row.settlement_aware_edge is not none else 'N/A' }}</td>
+            <td>{{ row.day12_state }}</td>
           </tr>
         {% else %}
           <tr>
-            <td colspan="6">No current operational fixtures are queued yet.</td>
+            <td colspan="6">No preliminary current-market candidates are available yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Blocked</p>
+      <h2>Rejected Or Missing-Market Rows</h2>
+    </div>
+    <span>{{ payload.blocked_candidates|length }} rows</span>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Fixture</th>
+          <th>Market</th>
+          <th>Decision</th>
+          <th>Reasons</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payload.blocked_candidates %}
+          <tr>
+            <td><a href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
+            <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+            <td>{{ row.decision }}</td>
+            <td>{{ row.reason_codes|join(', ') }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="4">No blocked rows are currently recorded.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">No Bet</p>
+      <h2>Priced But Below Threshold</h2>
+    </div>
+    <span>{{ payload.no_bet_candidates|length }} rows</span>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Fixture</th>
+          <th>Market</th>
+          <th>Offer</th>
+          <th>Minimum Price</th>
+          <th>Reasons</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in payload.no_bet_candidates %}
+          <tr>
+            <td><a href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
+            <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+            <td>{{ "{:.2f}".format(row.best_available_price|float) if row.best_available_price is not none else 'N/A' }}</td>
+            <td>{{ "{:.2f}".format(row.minimum_acceptable_price|float) if row.minimum_acceptable_price is not none else 'N/A' }}</td>
+            <td>{{ row.reason_codes|join(', ') }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="5">No below-threshold rows are currently recorded.</td>
           </tr>
         {% endfor %}
       </tbody>
