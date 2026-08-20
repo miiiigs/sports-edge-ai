@@ -1,5 +1,28 @@
 # Decision Log
 
+## DEC-040
+
+- `date`: 2026-08-20
+- `context`: the next football production-hardening step was to explain the remaining current-slate
+  coverage gaps before any bookmaker integration work, especially the user-reported unresolved
+  `Málaga` and `Deportivo` labels plus the promoted/relegated clubs blocked by missing current
+  model history
+- `decision`: validate provider competition mappings directly from football-data.org fixture
+  payloads, add only deterministic provider-team-id coverage for `ESP1 / 84 / Málaga -> Malaga`,
+  preserve bare `Deportivo` as unresolved without provider-id evidence, and keep the accepted GAP
+  current-snapshot behavior competition-specific rather than transferring state automatically across
+  leagues
+- `reason`: this resolves genuine identity bugs where the evidence is deterministic, while
+  preserving honest blocking for ambiguous short names and for clubs that have history in other
+  divisions but no state in the current model competition
+- `alternatives`: map `Deportivo` by fuzzy text only, force league-agnostic historical state into
+  the current snapshot, or inject synthetic current-competition priors to hide the missing-state
+  problem
+- `consequences`: the remaining current-slate blockers are now classified more truthfully as one
+  unresolved live provider label still needing direct payload evidence plus legitimate
+  competition-specific model-history gaps; odds integration and model tuning remain out of scope
+- `status`: active
+
 ## DEC-039
 
 - `date`: 2026-08-20

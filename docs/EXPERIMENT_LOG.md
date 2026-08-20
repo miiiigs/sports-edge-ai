@@ -2,6 +2,47 @@
 
 Last updated: Thursday, August 20, 2026
 
+## EXP-029 - Current Fixture And Model Coverage Audit
+
+- `date`: 2026-08-20
+- `scope`: audit current football-data.org fixture identity resolution, verify provider-to-model
+  competition mapping, distinguish honest current-competition history gaps from mapping bugs, and
+  generate explicit current-slate coverage artifacts without changing accepted football math
+- `implementation`:
+  - `code/src/sports_ai/dashboard/team_aliases.py`
+  - `code/src/sports_ai/experiments/football_current_fixture_model_coverage_audit.py`
+  - `code/tests/test_football_dashboard.py`
+  - `research/product_outputs/football/current/CURRENT_FIXTURE_MODEL_COVERAGE_AUDIT.md`
+  - `research/product_outputs/football/current/current_fixture_model_coverage.json`
+- `verified baseline before coding`:
+  - full suite: `213 passed in 68.58s`
+- `verified post-implementation baseline`:
+  - full suite: `215 passed in 65.83s`
+  - focused dashboard regression slice: `17 passed in 32.97s`
+- `runtime verification`:
+  - production-style route verification returned `200` for `/`, `/matches`, `/predictions`,
+    `/status`, `/api/system/status`, and `/health`
+- `audit result`:
+  - user-supplied Railway production baseline remained: `51 discovered / 32 supported / 23 ready /
+    27 blocked`
+  - local stored current-slate replay through the current code path produced:
+    - `45 discovered`
+    - `28 supported`
+    - `49 resolved / 0 unresolved / 7 model-history-missing`
+    - `21 ready / 24 blocked`
+  - the suspicious competition assignments were validated as provider-truth:
+    - `PL -> ENG1`
+    - `ELC -> ENG2`
+    - `PD -> ESP1`
+  - deterministic provider-team-id aliasing now resolves `ESP1 / 84 / Málaga -> Malaga`
+  - bare `Deportivo` remains unresolved intentionally because no local live provider-id payload was
+    available to prove which club that short name represents
+  - promoted/relegated clubs with history in other leagues remain blocked honestly because the
+    accepted GAP snapshot is competition-specific rather than cross-league transferable
+- `conclusion`: the remaining current football blockers are now understood as either one still-live
+  unresolved provider label needing direct payload evidence (`Deportivo`) or legitimate current
+  competition model-history gaps, not hidden competition-map bugs
+
 ## EXP-028 - Football Historical Performance Benchmark And Paper-Tracking Foundation
 
 - `date`: 2026-08-20

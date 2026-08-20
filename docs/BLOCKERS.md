@@ -52,6 +52,13 @@ Last updated: Thursday, August 20, 2026
 - because of that verified configuration gap, the dashboard currently reports the fixture feed as
   `NOT_CONFIGURED` and cannot yet validate a first real current football-data.org fixture flowing
   into a persisted current prediction through the live dashboard path
+- the Thursday, August 20, 2026 current fixture / model coverage audit closed the deterministic
+  local replay path, but it still could not reproduce the user-reported live `Deportivo` row
+  because the local machine cannot perform a fresh football-data.org sync without
+  `SPORTS_AI_FOOTBALL_DATA_TOKEN`
+- `Málaga` is now covered deterministically through football-data.org provider team id `84`, but it
+  remains an honest current-competition model-history blocker because the loaded `ESP1` snapshot
+  has no accepted shots / shots-on-target / corners state for that club
 - the new normalized current market-provider contract is implemented, but no real current odds
   provider is configured yet, so the system correctly reports `CURRENT_ODDS_PROVIDER =
   NOT_CONFIGURED` and `CURRENT_MARKET_DECISIONS = BLOCKED`

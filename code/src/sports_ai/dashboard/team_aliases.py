@@ -60,6 +60,11 @@ _FOOTBALL_DATA_TEAM_ID_ALIASES: dict[str, dict[str, ProviderTeamAlias]] = {
     "ESP1": {
         "78": ProviderTeamAlias("Ath Madrid", "D", "provider shortName differs from historical canonical name"),
         "81": ProviderTeamAlias("Barcelona", "B", "accented shortName differs from historical canonical name"),
+        "84": ProviderTeamAlias(
+            "Malaga",
+            "E",
+            "provider shortName identifies the club, but current La Liga model history may still be missing",
+        ),
         "5335": ProviderTeamAlias(
             "Racing Santander",
             "E",
@@ -88,6 +93,7 @@ _FOOTBALL_DATA_TEAM_NAME_ALIASES: dict[str, dict[str, ProviderTeamAlias]] = {
     "ESP1": {
         normalize_text_key("Atleti"): _FOOTBALL_DATA_TEAM_ID_ALIASES["ESP1"]["78"],
         normalize_text_key("Barça"): _FOOTBALL_DATA_TEAM_ID_ALIASES["ESP1"]["81"],
+        normalize_text_key("Malaga"): _FOOTBALL_DATA_TEAM_ID_ALIASES["ESP1"]["84"],
         normalize_text_key("Santander"): _FOOTBALL_DATA_TEAM_ID_ALIASES["ESP1"]["5335"],
     },
 }

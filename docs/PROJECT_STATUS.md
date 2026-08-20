@@ -6,13 +6,13 @@ Last updated: Thursday, August 20, 2026
 
 Thursday, August 20, 2026 implementation state is now updated through the football validation
 build, historical performance benchmark, provider-independent current market contract, immutable
-paper-trading foundation, and football production hardening. The accepted football model path
-remains closed through Day 11A, with Day 12 still implemented as an honest `PARTIAL` for the
-currently loaded football scope.
+paper-trading foundation, football production hardening, and the bounded current fixture / model
+coverage audit. The accepted football model path remains closed through Day 11A, with Day 12 still
+implemented as an honest `PARTIAL` for the currently loaded football scope.
 
 The current user-directed product milestone is now:
 
-- `CURRENT PRODUCT MILESTONE = FOOTBALL PRODUCTION HARDENING`
+- `CURRENT PRODUCT MILESTONE = CURRENT FIXTURE & MODEL COVERAGE AUDIT`
 - `TENNIS DEVELOPMENT = PAUSED`
 
 The repository remains the active migration workspace under the August 2026 PDF-first football and
@@ -76,6 +76,45 @@ Current blocker for real current-fixture validation:
 - the verified local environment still does not provide `SPORTS_AI_FOOTBALL_DATA_TOKEN`
 - therefore the code path is ready, but a genuine football-data.org current-fixture-to-prediction
   validation could not be completed from this machine on Thursday, August 20, 2026
+
+## Current Fixture & Model Coverage Audit
+
+The next bounded football production-hardening task on Thursday, August 20, 2026 was to verify
+whether the remaining current-slate blockers were real data limitations or just mapping bugs.
+
+Real local verification on Thursday, August 20, 2026:
+
+- full suite baseline before this audit pass: `213 passed in 68.58s`
+- current full suite after the audit pass: `215 passed in 65.83s`
+- focused dashboard regression slice after the new resolver/audit coverage: `17 passed in 32.97s`
+- production-style route verification after the audit pass again returned `200` for `/`,
+  `/matches`, `/predictions`, `/status`, `/api/system/status`, and `/health`
+
+Stored-current-slate replay result from the local football-data.org snapshot using the current
+resolver/model path:
+
+- `FIXTURES_DISCOVERED = 45`
+- `SUPPORTED_FIXTURES = 28`
+- `TEAM_RESOLUTION = 49 RESOLVED / 0 UNRESOLVED / 7 MODEL_HISTORY_MISSING`
+- `PREDICTIONS_READY = 21`
+- `PREDICTIONS_BLOCKED = 24`
+
+What the audit closed on Thursday, August 20, 2026:
+
+- the suspicious English league placements are provider-truth, not internal competition-map bugs:
+  `PL -> ENG1`, `ELC -> ENG2`, `PD -> ESP1`
+- deterministic provider-team-id coverage now resolves `ESP1 / 84 / Málaga -> Malaga`
+- bare `Deportivo` remains intentionally unresolved because the local repo does not contain the
+  live provider payload needed to map it safely by club identity
+- the accepted current football GAP snapshot remains competition-specific, so historical state is
+  not automatically transferred across leagues for promoted or relegated clubs
+
+The practical result is that the remaining blocked current teams are now separated cleanly into:
+
+- one still-unresolved live production label that needs provider-id evidence (`Deportivo`)
+- honest current-competition model-history gaps for `Coventry City`, `Hull City`, `Lincoln City`,
+  `West Ham`, `Wolverhampton`, `Bolton`, `Santander`, and now deterministically identified
+  `Málaga`
 
 ## Football Validation Build
 

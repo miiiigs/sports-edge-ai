@@ -481,6 +481,58 @@ def test_dashboard_services_block_missing_model_history_after_identity_resolutio
     asyncio.run(services.shutdown())
 
 
+def test_dashboard_services_resolve_malaga_alias_but_keep_history_block(tmp_path: Path):
+    fixture = replace(
+        _fixture(home_team_name="Atleti", away_team_name="M\ufffdlaga"),
+        provider="football-data.org",
+        competition_id="ESP1",
+        competition_name="Primera Division",
+        division_code="SP1",
+        home_team_id="78",
+        away_team_id="84",
+    )
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["prediction"]["prediction_status"] == "BLOCKED"
+    assert payload["prediction"]["blockers"] == ["AWAY_MODEL_HISTORY_MISSING"]
+    assert payload["prediction"]["team_resolution"]["home"]["canonical_team_name"] == "Ath Madrid"
+    assert payload["prediction"]["team_resolution"]["away"]["canonical_team_name"] == "Malaga"
+    assert payload["prediction"]["model_history"]["away"]["available"] is False
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_leave_bare_deportivo_unresolved_without_context(tmp_path: Path):
+    fixture = replace(
+        _fixture(home_team_name="Deportivo", away_team_name="Valencia"),
+        provider="football-data.org",
+        competition_id="ESP1",
+        competition_name="Primera Division",
+        division_code="SP1",
+        home_team_id=None,
+        away_team_id="95",
+    )
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["prediction"]["prediction_status"] == "BLOCKED"
+    assert payload["prediction"]["blockers"] == ["HOME_TEAM_IDENTITY_UNRESOLVED"]
+    assert payload["prediction"]["team_resolution"]["home"]["canonical_team_name"] is None
+    asyncio.run(services.shutdown())
+
+
 def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Path):
     fixture = _fixture()
     app = create_app(
