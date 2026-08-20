@@ -20,7 +20,17 @@
         <p>{{ payload.system_status.prediction_engine.ready_fixture_count }} ready fixtures</p>
       </div>
       <div class="metric-tile">
-        <span class="status-label">Market State</span>
+        <span class="status-label">Team Resolution</span>
+        <strong>{{ payload.system_status.team_resolution.resolved }}/{{ payload.system_status.team_resolution.resolved + payload.system_status.team_resolution.unresolved + payload.system_status.team_resolution.model_history_missing }}</strong>
+        <p>{{ payload.system_status.team_resolution.unresolved }} unresolved, {{ payload.system_status.team_resolution.model_history_missing }} history-missing</p>
+      </div>
+      <div class="metric-tile">
+        <span class="status-label">Storage</span>
+        <strong>{{ payload.system_status.storage.persistence_state }}</strong>
+        <p>{{ payload.system_status.storage.data_directory }}</p>
+      </div>
+      <div class="metric-tile">
+        <span class="status-label">Market Odds</span>
         <strong>{{ payload.system_status.odds_feed.state }}</strong>
         <p>
           {% if payload.system_status.odds_feed.state == 'NOT_CONFIGURED' %}
@@ -31,7 +41,7 @@
         </p>
       </div>
       <div class="metric-tile">
-        <span class="status-label">Safeguards</span>
+        <span class="status-label">Day 12 xG</span>
         <strong>{{ payload.system_status.safeguards.state }}</strong>
         <p>{{ payload.system_status.safeguards.blocked_reason or 'Ready' }}</p>
       </div>
@@ -131,6 +141,7 @@
     <div class="data-list">
       <div><span>Resolved</span><strong>{{ payload.system_status.team_resolution.resolved }}</strong></div>
       <div><span>Unresolved</span><strong>{{ payload.system_status.team_resolution.unresolved }}</strong></div>
+      <div><span>Model History Missing</span><strong>{{ payload.system_status.team_resolution.model_history_missing }}</strong></div>
       <div><span>Predictions Ready</span><strong>{{ payload.system_status.prediction_engine.ready_fixture_count }}</strong></div>
       <div><span>Predictions Blocked</span><strong>{{ payload.system_status.prediction_engine.blocked_fixture_count }}</strong></div>
     </div>
@@ -141,8 +152,11 @@
     <h3>Operational Persistence</h3>
     <div class="data-list">
       <div><span>Mode</span><strong>{{ payload.system_status.storage.mode }}</strong></div>
+      <div><span>Persistence State</span><strong>{{ payload.system_status.storage.persistence_state }}</strong></div>
       <div><span>Data Directory</span><strong>{{ payload.system_status.storage.data_directory }}</strong></div>
+      <div><span>Writable</span><strong>{{ 'YES' if payload.system_status.storage.data_directory_writable else 'NO' }}</strong></div>
       <div><span>Persistent Path</span><strong>{{ payload.system_status.storage.persistent_path_configured }}</strong></div>
+      <div><span>Last DB Init</span><strong>{{ payload.system_status.storage.last_db_initialization_at or 'N/A' }}</strong></div>
       <div><span>Dashboard DB</span><strong>{{ 'READY' if payload.system_status.storage.dashboard_db_reachable else 'ERROR' }}</strong></div>
       <div><span>Paper DB</span><strong>{{ 'READY' if payload.system_status.storage.paper_trading_db_reachable else 'ERROR' }}</strong></div>
       <div><span>Research DB</span><strong>{{ 'READY' if payload.system_status.storage.research_db_reachable else 'ERROR' }}</strong></div>
@@ -159,6 +173,66 @@
       <div><span>Open Positions</span><strong>{{ payload.system_status.paper_tracking.open_positions }}</strong></div>
       <div><span>Settled Positions</span><strong>{{ payload.system_status.paper_tracking.settled_positions }}</strong></div>
       <div><span>CLV</span><strong>{{ payload.system_status.clv.state }}</strong></div>
+    </div>
+  </article>
+</section>
+
+<section class="ops-grid">
+  <article class="detail-card">
+    <p class="eyebrow">Team Resolution</p>
+    <h3>Current Unresolved Teams</h3>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>Team</th>
+            <th>Competition</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payload.system_status.team_resolution.unresolved_examples %}
+            <tr>
+              <td>{{ row.provider_team_name }}</td>
+              <td>{{ row.competition_name }}</td>
+              <td>{{ row.reason }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="3">No unresolved supported-current teams are recorded in the active runtime.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Model History</p>
+    <h3>Resolved But Blocked</h3>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>Team</th>
+            <th>Competition</th>
+            <th>Missing</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payload.system_status.team_resolution.model_history_missing_examples %}
+            <tr>
+              <td>{{ row.provider_team_name }}</td>
+              <td>{{ row.competition_name }}</td>
+              <td>{{ row.missing_statistics|join(', ') if row.missing_statistics else row.reason }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="3">No resolved teams are currently blocked only by missing competition history.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </article>
 </section>

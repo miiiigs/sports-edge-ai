@@ -105,14 +105,16 @@ def _blocked_prediction(
     *,
     fixture: NormalizedFixture,
     generated_at: str,
-    blocker_reason: str,
+    blockers: list[str] | None = None,
+    blocker_reason: str | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
+    resolved_blockers = list(blockers or ([] if blocker_reason is None else [blocker_reason]))
     version_key = canonical_hash(
         {
             "fixture_id": fixture.fixture_id,
             "status": PREDICTION_STATUS_BLOCKED,
-            "reason": blocker_reason,
+            "reason": resolved_blockers,
         }
     )
     return {
@@ -125,7 +127,7 @@ def _blocked_prediction(
         "prediction_locked_at": fixture.kickoff_utc,
         "version_key": version_key,
         "prediction_status": PREDICTION_STATUS_BLOCKED,
-        "blockers": [blocker_reason],
+        "blockers": resolved_blockers,
         "warnings": warnings or [],
         "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
         "safeguard_status": "BLOCKED",
@@ -149,7 +151,7 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
         return _blocked_prediction(
             fixture=fixture,
             generated_at=generated_at,
-            blocker_reason="MODEL_NOT_AVAILABLE",
+            blocker_reason="COMPETITION_UNSUPPORTED",
         )
 
     home_resolution = snapshot.resolve_team(
@@ -167,19 +169,50 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
     if not home_resolution.is_resolved or not away_resolution.is_resolved:
         reasons = []
         if not home_resolution.is_resolved:
-            reasons.append("PREDICTION_BLOCKED_TEAM_IDENTITY_HOME")
+            reasons.append("HOME_TEAM_IDENTITY_UNRESOLVED")
         if not away_resolution.is_resolved:
-            reasons.append("PREDICTION_BLOCKED_TEAM_IDENTITY_AWAY")
+            reasons.append("AWAY_TEAM_IDENTITY_UNRESOLVED")
         return {
             **_blocked_prediction(
                 fixture=fixture,
                 generated_at=generated_at,
-                blocker_reason="PREDICTION_BLOCKED_TEAM_IDENTITY",
-                warnings=reasons,
+                blockers=reasons,
             ),
             "team_resolution": {
                 "home": home_resolution.to_dict(),
                 "away": away_resolution.to_dict(),
+            },
+        }
+
+    home_history = snapshot.team_model_history_status(
+        competition_id=fixture.competition_id,
+        canonical_team_id=str(home_resolution.canonical_team_id),
+        venue="home",
+    )
+    away_history = snapshot.team_model_history_status(
+        competition_id=fixture.competition_id,
+        canonical_team_id=str(away_resolution.canonical_team_id),
+        venue="away",
+    )
+    if not home_history["available"] or not away_history["available"]:
+        blockers = []
+        if not home_history["available"]:
+            blockers.append("HOME_MODEL_HISTORY_MISSING")
+        if not away_history["available"]:
+            blockers.append("AWAY_MODEL_HISTORY_MISSING")
+        return {
+            **_blocked_prediction(
+                fixture=fixture,
+                generated_at=generated_at,
+                blockers=blockers,
+            ),
+            "team_resolution": {
+                "home": home_resolution.to_dict(),
+                "away": away_resolution.to_dict(),
+            },
+            "model_history": {
+                "home": home_history,
+                "away": away_history,
             },
         }
 
@@ -245,7 +278,7 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
             **_blocked_prediction(
                 fixture=fixture,
                 generated_at=generated_at,
-                blocker_reason="CURRENT_STATE_UNAVAILABLE",
+                blocker_reason="MODEL_STATE_UNAVAILABLE",
                 warnings=[f"{type(exc).__name__}: {exc}"],
             ),
             "prediction_status": PREDICTION_STATUS_FAILED,
@@ -370,6 +403,10 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
         "team_resolution": {
             "home": home_resolution.to_dict(),
             "away": away_resolution.to_dict(),
+        },
+        "model_history": {
+            "home": home_history,
+            "away": away_history,
         },
         "expected_home_shots": float(shots.expected_home),
         "expected_away_shots": float(shots.expected_away),

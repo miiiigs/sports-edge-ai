@@ -60,12 +60,30 @@ def normalize_text_key(text: str) -> str:
     lowered = lowered.replace("/", " ")
     lowered = lowered.replace("-", " ")
     lowered = lowered.replace(".", " ")
-    lowered = lowered.replace("fc", " ")
-    lowered = lowered.replace("cf", " ")
-    lowered = lowered.replace("club", " ")
-    lowered = lowered.replace("de", " ")
-    lowered = lowered.replace("the", " ")
-    lowered = re.sub(r"\butd\b", "united", lowered)
+    lowered = lowered.replace("'", "")
+    lowered = re.sub(r"[^a-z0-9 ]+", " ", lowered)
+    token_map = {
+        "utd": "united",
+    }
+    removable_tokens = {
+        "fc",
+        "afc",
+        "cf",
+        "cd",
+        "ud",
+        "ac",
+        "as",
+        "ssc",
+        "club",
+        "the",
+    }
+    normalized_tokens = []
+    for token in lowered.split():
+        mapped = token_map.get(token, token)
+        if mapped in removable_tokens:
+            continue
+        normalized_tokens.append(mapped)
+    lowered = " ".join(normalized_tokens)
     lowered = re.sub(r"\bhotspur\b", "", lowered)
     lowered = re.sub(r"\bwanderers\b", "", lowered)
     lowered = re.sub(r"\balbion\b", "", lowered)
@@ -83,7 +101,6 @@ def normalize_text_key(text: str) -> str:
     lowered = re.sub(r"\bmanchester city\b", "man city", lowered)
     lowered = re.sub(r"\bnewcastle united\b", "newcastle", lowered)
     lowered = re.sub(r"\bwest bromwich\b", "west brom", lowered)
-    lowered = re.sub(r"[^a-z0-9 ]+", " ", lowered)
     lowered = re.sub(r"\s+", " ", lowered).strip()
     return lowered
 
@@ -161,6 +178,11 @@ class TeamResolution:
     resolution_kind: str
     confidence: float
     reason: str | None = None
+    diagnostic_category: str | None = None
+    suggested_canonical_name: str | None = None
+    canonical_candidates: tuple[str, ...] = ()
+    model_history_available: bool | None = None
+    model_history_reason: str | None = None
 
     @property
     def is_resolved(self) -> bool:

@@ -46,6 +46,8 @@ Storage resolution:
 
 - if `SPORTS_AI_DATA_DIR` is set, mutable operational databases are created there
 - otherwise local development falls back to `research/product_outputs/dashboard/`
+- when `SPORTS_AI_DATA_DIR` is set, the dashboard reports `mode = persistent` and
+  `persistent_path_configured = YES`
 
 Current operational filenames:
 
@@ -55,6 +57,18 @@ Current operational filenames:
 The app creates the operational data directory automatically and initializes schemas idempotently at startup.
 
 Repeated restarts and deployments must preserve existing data and must not wipe tables.
+
+Current storage diagnostics now report:
+
+- storage mode
+- persistence state
+- data directory
+- data-directory writability
+- dashboard DB path
+- paper-trading DB path
+- research DB path
+- operational DB path list
+- last DB initialization timestamp
 
 ## Railway Volume Setup
 
@@ -69,6 +83,17 @@ Intended result:
 
 - `/data/football_dashboard.sqlite`
 - `/data/football_paper_trading.sqlite`
+
+After adding or changing the Railway variable or volume:
+
+1. redeploy the service
+2. open `/status`
+3. confirm:
+   - `Storage -> Persistence State = PERSISTENT`
+   - `Storage -> Data Directory = /data`
+   - `Storage -> Persistent Path = YES`
+   - `Storage -> Dashboard DB = READY`
+   - `Storage -> Paper DB = READY`
 
 The immutable research store should remain packaged in the repo image unless the model-loading architecture is intentionally redesigned later.
 
@@ -105,11 +130,23 @@ For each eligible future fixture the service now:
 
 1. validates supported competition scope
 2. resolves team identity deterministically
-3. checks chronology against the current model snapshot
-4. creates a frozen pre-match prediction
-5. derives Day 10 fair prices
-6. persists the prediction idempotently
-7. reuses the same prediction on later refreshes if the version key is unchanged
+3. distinguishes resolved identity from missing competition-specific model history
+4. checks chronology against the current model snapshot
+5. creates a frozen pre-match prediction
+6. derives Day 10 fair prices
+7. persists the prediction idempotently
+8. reuses the same prediction on later refreshes if the version key is unchanged
+
+Current prediction blocker taxonomy now distinguishes:
+
+- `COMPETITION_UNSUPPORTED`
+- `HOME_TEAM_IDENTITY_UNRESOLVED`
+- `AWAY_TEAM_IDENTITY_UNRESOLVED`
+- `HOME_MODEL_HISTORY_MISSING`
+- `AWAY_MODEL_HISTORY_MISSING`
+- `MODEL_SNAPSHOT_UNAVAILABLE`
+- `MODEL_STATE_UNAVAILABLE`
+- `PREDICTION_AFTER_KICKOFF_BLOCKED`
 
 Prediction identity is based on:
 
@@ -186,6 +223,14 @@ As of Thursday, August 20, 2026:
 
 - `SPORTS_AI_FOOTBALL_DATA_TOKEN` is not present in the verified local environment
 - therefore a real football-data.org fixture sync and first genuine current fixture-to-prediction validation cannot be completed from this environment
+
+Stored-current-slate replay verification on Thursday, August 20, 2026 from the local
+Wednesday, August 19, 2026 football-data.org snapshot:
+
+- `supported fixtures = 29`
+- `team resolution = 49 resolved / 0 unresolved / 7 model-history-missing`
+- `predictions ready = 21`
+- `predictions blocked = 25`
 
 This means:
 

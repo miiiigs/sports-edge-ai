@@ -158,7 +158,13 @@ class DashboardServices:
             "last_sync_duration_seconds": None,
             "sync_diagnostics": None,
             "nearest_supported_fixture": None,
-            "team_resolution_counts": {"resolved": 0, "unresolved": 0},
+            "team_resolution_counts": {
+                "resolved": 0,
+                "unresolved": 0,
+                "model_history_missing": 0,
+                "unresolved_examples": [],
+                "model_history_missing_examples": [],
+            },
             "last_counts": self._empty_counts(),
         }
         self._prediction_state: dict[str, Any] = {
@@ -188,9 +194,11 @@ class DashboardServices:
             "decision_count": 0,
             "evaluations": {},
         }
+        self._storage_runtime_state: dict[str, Any] = {}
 
     async def initialize(self) -> None:
         ensure_operational_data_dir(self.config.operational_data_dir)
+        initialized_at = utc_now_iso()
         logger.info(
             "dashboard startup: storage_mode=%s data_dir=%s scheduler_enabled=%s fixture_provider=%s market_provider=%s",
             self.config.storage_mode,
@@ -204,6 +212,7 @@ class DashboardServices:
             self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             football_paper_trading.ensure_schema(conn)
+        self._record_storage_runtime_state(initialized_at=initialized_at)
         self._build_snapshot()
         await self.sync_once(sync_kind="startup", include_schedule=True)
         if self.config.enable_scheduler and self._background_task is None:
@@ -223,12 +232,51 @@ class DashboardServices:
         provider_state = storage.get_runtime_state(conn, "provider_state")
         prediction_state = storage.get_runtime_state(conn, "prediction_state")
         market_runtime_state = storage.get_runtime_state(conn, "market_runtime_state")
+        storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state")
         if isinstance(provider_state, dict):
-            self._provider_state.update(provider_state)
+            merged_provider_state = dict(self._provider_state)
+            merged_provider_state.update(provider_state)
+            merged_provider_state["last_counts"] = {
+                **self._empty_counts(),
+                **dict(provider_state.get("last_counts") or {}),
+            }
+            merged_provider_state["team_resolution_counts"] = {
+                "resolved": 0,
+                "unresolved": 0,
+                "model_history_missing": 0,
+                "unresolved_examples": [],
+                "model_history_missing_examples": [],
+                **dict(provider_state.get("team_resolution_counts") or {}),
+            }
+            self._provider_state.update(merged_provider_state)
         if isinstance(prediction_state, dict):
             self._prediction_state.update(prediction_state)
         if isinstance(market_runtime_state, dict):
             self._market_runtime_state.update(market_runtime_state)
+        if isinstance(storage_runtime_state, dict):
+            self._storage_runtime_state.update(storage_runtime_state)
+
+    def _record_storage_runtime_state(self, *, initialized_at: str) -> None:
+        existing = dict(self._storage_runtime_state)
+        payload = {
+            "first_initialized_at": existing.get("first_initialized_at") or initialized_at,
+            "last_db_initialization_at": initialized_at,
+            "dashboard_db_path": str(self.config.dashboard_db_path),
+            "paper_trading_db_path": str(self.config.paper_trading_db_path),
+            "research_db_path": str(self.config.research_db_path),
+            "operational_db_paths": [
+                {"role": "dashboard", "path": str(self.config.dashboard_db_path)},
+                {"role": "paper_trading", "path": str(self.config.paper_trading_db_path)},
+            ],
+        }
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            storage.put_runtime_state(
+                conn,
+                state_key="storage_runtime_state",
+                state_value=payload,
+                updated_at=initialized_at,
+            )
+        self._storage_runtime_state = payload
 
     def _build_snapshot(self) -> None:
         try:
@@ -1019,7 +1067,7 @@ class DashboardServices:
                 "prediction_locked_at": fixture.kickoff_utc,
                 "version_key": f"blocked|{fixture.fixture_id}",
                 "prediction_status": PREDICTION_STATUS_BLOCKED,
-                "blockers": ["CURRENT_MODEL_SNAPSHOT_UNAVAILABLE"],
+                "blockers": ["MODEL_SNAPSHOT_UNAVAILABLE"],
                 "warnings": [self.snapshot_error] if self.snapshot_error else [],
                 "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
                 "safeguard_status": "BLOCKED",
@@ -1049,7 +1097,7 @@ class DashboardServices:
                 "prediction_locked_at": fixture.kickoff_utc,
                 "version_key": f"missed_lock|{fixture.fixture_id}",
                 "prediction_status": PREDICTION_STATUS_BLOCKED,
-                "blockers": ["PREDICTION_LOCKED_AFTER_KICKOFF"],
+                "blockers": ["PREDICTION_AFTER_KICKOFF_BLOCKED"],
                 "warnings": ["fixture passed kickoff before a pre-match prediction version was persisted"],
                 "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
                 "safeguard_status": "BLOCKED",
@@ -1131,14 +1179,21 @@ class DashboardServices:
         if str(prediction.get("prediction_status")) == PREDICTION_STATUS_FAILED:
             return "PREDICTION_FAILED"
         blockers = {str(value) for value in prediction.get("blockers") or []}
-        if "MODEL_NOT_AVAILABLE" in blockers:
-            return "MODEL_NOT_AVAILABLE"
-        if "PREDICTION_BLOCKED_TEAM_IDENTITY" in blockers:
+        if "COMPETITION_UNSUPPORTED" in blockers or "MODEL_NOT_AVAILABLE" in blockers:
+            return "COMPETITION_UNSUPPORTED"
+        if {"HOME_TEAM_IDENTITY_UNRESOLVED", "AWAY_TEAM_IDENTITY_UNRESOLVED"} & blockers or "PREDICTION_BLOCKED_TEAM_IDENTITY" in blockers:
             return "TEAM_IDENTITY_UNRESOLVED"
-        if "CURRENT_MODEL_SNAPSHOT_UNAVAILABLE" in blockers or "CURRENT_STATE_UNAVAILABLE" in blockers:
+        if {"HOME_MODEL_HISTORY_MISSING", "AWAY_MODEL_HISTORY_MISSING"} & blockers:
+            return "MODEL_HISTORY_MISSING"
+        if {
+            "MODEL_SNAPSHOT_UNAVAILABLE",
+            "CURRENT_MODEL_SNAPSHOT_UNAVAILABLE",
+            "MODEL_STATE_UNAVAILABLE",
+            "CURRENT_STATE_UNAVAILABLE",
+        } & blockers:
             return "CURRENT_MODEL_STATE_UNAVAILABLE"
-        if "PREDICTION_LOCKED_AFTER_KICKOFF" in blockers:
-            return "PREDICTION_PENDING"
+        if "PREDICTION_AFTER_KICKOFF_BLOCKED" in blockers or "PREDICTION_LOCKED_AFTER_KICKOFF" in blockers:
+            return "PREDICTION_AFTER_KICKOFF_BLOCKED"
         return "PREDICTION_PENDING"
 
     def _filter_fixture_rows(
@@ -1191,27 +1246,113 @@ class DashboardServices:
                 counts["predictions_blocked"] += 1
         return counts
 
+    def _supported_fixture_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self.snapshot is None:
+            return []
+        return [
+            row
+            for row in rows
+            if str(row["competition_id"]) in self.snapshot.supported_competitions
+            and str(row["status"]) not in FIXTURE_TERMINAL_STATUSES
+        ]
+
+    def _team_resolution_example(
+        self,
+        *,
+        row: dict[str, Any],
+        side: str,
+        resolution: dict[str, Any],
+        reason: str,
+        missing_statistics: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "fixture_id": str(row["fixture_id"]),
+            "competition_id": str(row["competition_id"]),
+            "competition_name": str(row["competition_name"]),
+            "side": side.upper(),
+            "provider_team_id": resolution.get("provider_team_id"),
+            "provider_team_name": str(resolution.get("provider_team_name") or ""),
+            "reason": reason,
+            "diagnostic_category": resolution.get("diagnostic_category"),
+            "suggested_canonical_name": resolution.get("suggested_canonical_name"),
+            "canonical_candidates": list(resolution.get("canonical_candidates") or []),
+            "missing_statistics": list(missing_statistics or []),
+        }
+
     def _team_resolution_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         resolved = 0
         unresolved = 0
-        for row in rows:
+        model_history_missing = 0
+        unresolved_examples: list[dict[str, Any]] = []
+        model_history_examples: list[dict[str, Any]] = []
+        unresolved_seen: set[tuple[str, str, str]] = set()
+        model_history_seen: set[tuple[str, str, str]] = set()
+        for row in self._supported_fixture_rows(rows):
             prediction = row.get("prediction") or {}
             team_resolution = prediction.get("team_resolution") or {}
+            model_history = prediction.get("model_history") or {}
             if isinstance(team_resolution, dict) and team_resolution:
                 for side in ("home", "away"):
                     resolution = team_resolution.get(side)
                     if not isinstance(resolution, dict):
                         continue
-                    if resolution.get("canonical_team_id"):
-                        resolved += 1
-                    else:
+                    canonical_team_id = resolution.get("canonical_team_id")
+                    if not canonical_team_id:
                         unresolved += 1
+                        seen_key = (
+                            str(row["competition_id"]),
+                            str(resolution.get("provider_team_id") or resolution.get("provider_team_name") or ""),
+                            side,
+                        )
+                        if seen_key not in unresolved_seen and len(unresolved_examples) < 8:
+                            unresolved_examples.append(
+                                self._team_resolution_example(
+                                    row=row,
+                                    side=side,
+                                    resolution=resolution,
+                                    reason=str(resolution.get("reason") or "team identity unresolved"),
+                                )
+                            )
+                            unresolved_seen.add(seen_key)
+                        continue
+                    history_row = model_history.get(side) if isinstance(model_history, dict) else None
+                    history_available = None
+                    missing_statistics: list[str] = []
+                    if isinstance(history_row, dict):
+                        history_available = bool(history_row.get("available"))
+                        missing_statistics = [str(value) for value in history_row.get("missing_statistics") or []]
+                    if history_available is False or resolution.get("model_history_available") is False:
+                        model_history_missing += 1
+                        seen_key = (
+                            str(row["competition_id"]),
+                            str(resolution.get("provider_team_id") or resolution.get("provider_team_name") or ""),
+                            side,
+                        )
+                        if seen_key not in model_history_seen and len(model_history_examples) < 8:
+                            model_history_examples.append(
+                                self._team_resolution_example(
+                                    row=row,
+                                    side=side,
+                                    resolution=resolution,
+                                    reason=str(
+                                        resolution.get("model_history_reason")
+                                        or "resolved identity has no usable current competition history"
+                                    ),
+                                    missing_statistics=missing_statistics,
+                                )
+                            )
+                            model_history_seen.add(seen_key)
+                        continue
+                    resolved += 1
                 continue
             if self._prediction_eligibility_status(prediction) == "PREDICTION_READY":
                 resolved += 2
         return {
             "resolved": resolved,
             "unresolved": unresolved,
+            "model_history_missing": model_history_missing,
+            "unresolved_examples": unresolved_examples,
+            "model_history_missing_examples": model_history_examples,
         }
 
     def _future_fixture_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1280,21 +1421,37 @@ class DashboardServices:
         except Exception:
             return False
 
+    @staticmethod
+    def _path_writable(path: Path) -> bool:
+        try:
+            return os.access(path, os.W_OK)
+        except Exception:
+            return False
+
     def _storage_status(self) -> dict[str, Any]:
         dashboard_db_reachable = self._database_reachable(self.config.dashboard_db_path, initialize_schema=True)
         paper_trading_db_reachable = self._database_reachable(self.config.paper_trading_db_path, initialize_schema=False)
         research_db_reachable = Path(self.config.research_db_path).exists()
+        operational_paths = list(self._storage_runtime_state.get("operational_db_paths") or [])
         return {
             "mode": self.config.storage_mode,
+            "persistence_state": "PERSISTENT" if self.config.persistent_data_dir_configured else "NOT_PERSISTENT",
             "data_directory": str(self.config.operational_data_dir),
             "data_directory_exists": self.config.operational_data_dir.exists(),
+            "data_directory_writable": self._path_writable(self.config.operational_data_dir),
             "persistent_path_configured": "YES" if self.config.persistent_data_dir_configured else "NO",
+            "dashboard_db_exists": self.config.dashboard_db_path.exists(),
             "dashboard_db_path": str(self.config.dashboard_db_path),
             "dashboard_db_reachable": dashboard_db_reachable,
+            "paper_trading_db_exists": self.config.paper_trading_db_path.exists(),
             "paper_trading_db_path": str(self.config.paper_trading_db_path),
             "paper_trading_db_reachable": paper_trading_db_reachable,
+            "research_db_exists": Path(self.config.research_db_path).exists(),
             "research_db_path": str(self.config.research_db_path),
             "research_db_reachable": research_db_reachable,
+            "last_db_initialization_at": self._storage_runtime_state.get("last_db_initialization_at"),
+            "first_initialized_at": self._storage_runtime_state.get("first_initialized_at"),
+            "operational_db_paths": operational_paths,
             "mutable_storage_class": "OPERATIONAL_RUNTIME",
             "immutable_storage_class": "RESEARCH_REFERENCE",
         }
@@ -1306,7 +1463,7 @@ class DashboardServices:
             kickoff_utc = parse_iso_datetime(str(row["kickoff_utc"]))
             if kickoff_utc <= now_utc:
                 continue
-            if self._prediction_eligibility_status(row.get("prediction")) == "MODEL_NOT_AVAILABLE":
+            if self._prediction_eligibility_status(row.get("prediction")) == "COMPETITION_UNSUPPORTED":
                 continue
             candidates.append(row)
         if not candidates:
@@ -1588,6 +1745,24 @@ class DashboardServices:
         _, paper_status = self._paper_positions()
         performance_status = self._performance_status(summary_payload, paper_status)
         storage_state = self._storage_status()
+        team_resolution_state = dict(
+            self._provider_state.get(
+                "team_resolution_counts",
+                {
+                    "resolved": 0,
+                    "unresolved": 0,
+                    "model_history_missing": 0,
+                    "unresolved_examples": [],
+                    "model_history_missing_examples": [],
+                },
+            )
+        )
+        team_resolution_state.setdefault("resolved_count", int(team_resolution_state.get("resolved", 0)))
+        team_resolution_state.setdefault("unresolved_count", int(team_resolution_state.get("unresolved", 0)))
+        team_resolution_state.setdefault(
+            "model_history_missing_count",
+            int(team_resolution_state.get("model_history_missing", 0)),
+        )
         return {
             "current_time_utc": utc_now_iso(),
             "current_time_local": datetime.now(timezone.utc)
@@ -1619,14 +1794,14 @@ class DashboardServices:
                 },
             },
             "current_fixture_state": {
-                "fixtures_discovered": int(self._provider_state["last_counts"]["normalized"]),
-                "supported_fixtures": int(self._provider_state["last_counts"]["supported"]),
-                "live_count": int(self._provider_state["last_counts"]["live"]),
-                "today_count": int(self._provider_state["last_counts"]["today"]),
-                "upcoming_count": int(self._provider_state["last_counts"]["upcoming"]),
-                "next_count": int(self._provider_state["last_counts"]["next"]),
+                "fixtures_discovered": int((self._provider_state.get("last_counts") or {}).get("normalized", 0)),
+                "supported_fixtures": int((self._provider_state.get("last_counts") or {}).get("supported", 0)),
+                "live_count": int((self._provider_state.get("last_counts") or {}).get("live", 0)),
+                "today_count": int((self._provider_state.get("last_counts") or {}).get("today", 0)),
+                "upcoming_count": int((self._provider_state.get("last_counts") or {}).get("upcoming", 0)),
+                "next_count": int((self._provider_state.get("last_counts") or {}).get("next", 0)),
             },
-            "team_resolution": dict(self._provider_state.get("team_resolution_counts") or {"resolved": 0, "unresolved": 0}),
+            "team_resolution": team_resolution_state,
             "prediction_engine": {
                 "state": self._prediction_state["state"],
                 "last_prediction_generated_at": self._prediction_state["last_prediction_generated_at"],
@@ -1701,5 +1876,6 @@ class DashboardServices:
             "prediction_snapshot_ready": snapshot_ready,
             "dashboard_db_reachable": storage_state["dashboard_db_reachable"],
             "paper_trading_db_reachable": storage_state["paper_trading_db_reachable"],
+            "storage_mode": storage_state["mode"],
             "persistent_path_configured": storage_state["persistent_path_configured"],
         }

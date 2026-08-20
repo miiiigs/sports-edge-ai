@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sports_ai.dashboard.app import create_app
 from sports_ai.dashboard import storage as dashboard_storage
 from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FixtureProviderError, FootballDataOrgFixtureProvider
-from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture
+from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture, normalize_text_key
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
 from sports_ai.storage import football_paper_trading
@@ -383,7 +383,7 @@ def test_dashboard_config_default_uses_configured_data_dir(monkeypatch, tmp_path
     assert config.operational_data_dir == tmp_path
     assert config.dashboard_db_path == tmp_path / "football_dashboard.sqlite"
     assert config.paper_trading_db_path == tmp_path / "football_paper_trading.sqlite"
-    assert config.storage_mode == "configured_data_dir"
+    assert config.storage_mode == "persistent"
     assert config.persistent_data_dir_configured is True
 
 
@@ -399,7 +399,7 @@ def test_dashboard_services_block_unresolved_team_identity(tmp_path: Path):
     payload = services.get_fixture_detail_payload(fixture.fixture_id)
     assert payload is not None
     assert payload["prediction"]["prediction_status"] == "BLOCKED"
-    assert payload["prediction"]["blockers"] == ["PREDICTION_BLOCKED_TEAM_IDENTITY"]
+    assert payload["prediction"]["blockers"] == ["HOME_TEAM_IDENTITY_UNRESOLVED"]
     asyncio.run(services.shutdown())
 
 
@@ -425,8 +425,59 @@ def test_dashboard_services_do_not_generate_first_prediction_after_kickoff(tmp_p
     payload = services.get_fixture_detail_payload(fixture.fixture_id)
     assert payload is not None
     assert payload["prediction"]["prediction_status"] == "BLOCKED"
-    assert payload["prediction"]["blockers"] == ["PREDICTION_LOCKED_AFTER_KICKOFF"]
+    assert payload["prediction"]["blockers"] == ["PREDICTION_AFTER_KICKOFF_BLOCKED"]
     assert payload["prediction"]["lock_state"] == "LOCKED_PRE_MATCH_PREDICTION"
+    asyncio.run(services.shutdown())
+
+
+def test_normalize_text_key_preserves_safe_tokens():
+    assert normalize_text_key("Derby County FC") == "derby county"
+    assert normalize_text_key("Real Racing Club de Santander") == "real racing de santander"
+
+
+def test_dashboard_services_resolve_alias_and_generate_prediction(tmp_path: Path):
+    fixture = _fixture(home_team_name="Brighton Hove", away_team_name="Chelsea")
+    fixture = replace(fixture, provider="football-data.org", home_team_id="397")
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["prediction"]["prediction_status"] == "READY"
+    assert payload["prediction"]["team_resolution"]["home"]["canonical_team_name"] == "Brighton"
+    assert payload["prediction"]["team_resolution"]["home"]["model_history_available"] is True
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_block_missing_model_history_after_identity_resolution(tmp_path: Path):
+    fixture = replace(
+        _fixture(home_team_name="West Ham", away_team_name="Leeds"),
+        provider="football-data.org",
+        competition_id="ENG2",
+        competition_name="Championship",
+        division_code="E1",
+        home_team_id="563",
+        away_team_id="341",
+    )
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["prediction"]["prediction_status"] == "BLOCKED"
+    assert payload["prediction"]["blockers"] == ["HOME_MODEL_HISTORY_MISSING"]
+    assert payload["prediction"]["team_resolution"]["home"]["canonical_team_name"] == "West Ham"
+    assert payload["prediction"]["model_history"]["home"]["available"] is False
+    status = services.get_system_status()
+    assert status["team_resolution"]["model_history_missing"] >= 1
     asyncio.run(services.shutdown())
 
 

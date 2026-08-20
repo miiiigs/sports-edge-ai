@@ -40,13 +40,16 @@ The active football milestone is now production hardening rather than model expa
 
 Real local verification on Thursday, August 20, 2026:
 
-- full suite baseline before production-hardening changes: `207 passed in 73.01s`
-- current full suite after the production-hardening build: `210 passed in 41.71s`
-- mutable operational storage now resolves through `SPORTS_AI_DATA_DIR` when configured
+- full suite baseline before the V1.1 persistence + team-resolution hardening pass: `210 passed in 66.77s`
+- current full suite after the V1.1 hardening build: `213 passed in 64.20s`
+- mutable operational storage now resolves through `SPORTS_AI_DATA_DIR` when configured and reports
+  persistent-vs-local runtime status explicitly
 - startup-safe automatic fixture sync remains built into the dashboard runtime
-- `/health` now exists as a lightweight readiness route
-- `/status` and `/api/system/status` now expose storage, current fixture, team-resolution,
-  prediction, and paper-tracking diagnostics more explicitly
+- `/health` remains available as a lightweight readiness route
+- `/status` and `/api/system/status` now expose storage lineage, current fixture counts,
+  deterministic team-resolution diagnostics, and explicit model-history blockers
+- production-style route verification on Thursday, August 20, 2026 returned `200` for `/`,
+  `/matches`, `/predictions`, `/status`, `/api/system/status`, and `/health`
 
 Current operational truths on Thursday, August 20, 2026:
 
@@ -57,6 +60,16 @@ Current operational truths on Thursday, August 20, 2026:
 - `PAPER_LEDGER = READY`
 - `LIVE_PAPER_TRACKING = WAITING FOR CURRENT BOOKMAKER ODDS`
 - `RAILWAY_PERSISTENT_STORAGE = READY WHEN SPORTS_AI_DATA_DIR IS SET`
+
+Stored-current-slate replay verification from the local August 19, 2026 football-data.org snapshot:
+
+- `FIXTURES_DISCOVERED = 46`
+- `SUPPORTED_FIXTURES = 29`
+- `TEAM_RESOLUTION = 49 RESOLVED / 0 UNRESOLVED / 7 MODEL_HISTORY_MISSING`
+- `PREDICTIONS_READY = 21`
+- `PREDICTIONS_BLOCKED = 25`
+- all former supported-current identity failures on that stored slate are now either resolved cleanly
+  or reclassified honestly as missing current competition model history
 
 Current blocker for real current-fixture validation:
 

@@ -35,7 +35,7 @@ def resolve_dashboard_operational_paths(
             data_dir=data_dir,
             dashboard_db_path=data_dir / DEFAULT_DASHBOARD_DB_FILENAME,
             paper_trading_db_path=data_dir / DEFAULT_PAPER_TRADING_DB_FILENAME,
-            mode="configured_data_dir",
+            mode="persistent",
             persistent_path_configured=True,
             source_env_var=data_dir_env_var,
         )

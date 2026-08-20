@@ -31,9 +31,11 @@
       <select id="prediction_status" name="prediction_status">
         <option value="">All</option>
         <option value="PREDICTION_READY" {% if payload.filters.prediction_status == 'PREDICTION_READY' %}selected{% endif %}>Ready</option>
-        <option value="MODEL_NOT_AVAILABLE" {% if payload.filters.prediction_status == 'MODEL_NOT_AVAILABLE' %}selected{% endif %}>Model Not Available</option>
+        <option value="COMPETITION_UNSUPPORTED" {% if payload.filters.prediction_status == 'COMPETITION_UNSUPPORTED' %}selected{% endif %}>Competition Unsupported</option>
         <option value="TEAM_IDENTITY_UNRESOLVED" {% if payload.filters.prediction_status == 'TEAM_IDENTITY_UNRESOLVED' %}selected{% endif %}>Team Unresolved</option>
+        <option value="MODEL_HISTORY_MISSING" {% if payload.filters.prediction_status == 'MODEL_HISTORY_MISSING' %}selected{% endif %}>Model History Missing</option>
         <option value="CURRENT_MODEL_STATE_UNAVAILABLE" {% if payload.filters.prediction_status == 'CURRENT_MODEL_STATE_UNAVAILABLE' %}selected{% endif %}>Current State Unavailable</option>
+        <option value="PREDICTION_AFTER_KICKOFF_BLOCKED" {% if payload.filters.prediction_status == 'PREDICTION_AFTER_KICKOFF_BLOCKED' %}selected{% endif %}>After Kickoff Blocked</option>
         <option value="PREDICTION_PENDING" {% if payload.filters.prediction_status == 'PREDICTION_PENDING' %}selected{% endif %}>Pending</option>
       </select>
     </div>

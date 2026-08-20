@@ -16,6 +16,7 @@ import numpy as np
 from ..agents.football.gap_ratings import GapConfigEntry, GapObservation, GapRatingsEngine
 from ..locking import canonical_hash
 from .models import TeamResolution, normalize_text_key, slugify, utc_now_iso
+from .team_aliases import classify_unresolved_team, resolve_provider_team_alias, suggest_canonical_candidates
 
 try:
     from ..experiments.football_day8_goal_conversion import (
@@ -64,8 +65,52 @@ class CurrentFootballModelSnapshot:
     corner_models: dict[str, dict[str, Any]]
     rho_by_competition: dict[str, float]
     xi_by_competition: dict[str, float]
+    team_model_history_index: dict[str, dict[str, dict[str, dict[str, int]]]]
     manifest_paths: dict[str, str]
     diagnostics: dict[str, Any]
+
+    def _resolved_team_resolution(
+        self,
+        *,
+        provider: str,
+        competition_id: str,
+        provider_team_id: str | None,
+        provider_team_name: str,
+        normalized_team_name: str,
+        canonical_team_name: str,
+        resolution_kind: str,
+        confidence: float,
+        reason: str | None = None,
+        diagnostic_category: str | None = None,
+    ) -> TeamResolution:
+        candidates = self.team_catalog.get(competition_id, {})
+        target_name_key = normalize_text_key(canonical_team_name)
+        exact = candidates.get(target_name_key)
+        resolved_canonical_name = canonical_team_name if exact is None else str(exact["canonical_team_name"])
+        resolved_canonical_id = (
+            _canonical_team_id(competition_id, canonical_team_name)
+            if exact is None
+            else str(exact["canonical_team_id"])
+        )
+        model_history_available = exact is not None
+        model_history_reason = None if model_history_available else "resolved identity has no historical state in current competition"
+        return TeamResolution(
+            provider=provider,
+            competition_id=competition_id,
+            provider_team_id=provider_team_id,
+            provider_team_name=provider_team_name,
+            normalized_team_name=normalized_team_name,
+            canonical_team_id=resolved_canonical_id,
+            canonical_team_name=resolved_canonical_name,
+            resolution_kind=resolution_kind,
+            confidence=confidence,
+            reason=reason,
+            diagnostic_category=diagnostic_category,
+            suggested_canonical_name=resolved_canonical_name,
+            canonical_candidates=(resolved_canonical_name,),
+            model_history_available=model_history_available,
+            model_history_reason=model_history_reason,
+        )
 
     def resolve_team(
         self,
@@ -76,22 +121,48 @@ class CurrentFootballModelSnapshot:
         provider_team_name: str,
     ) -> TeamResolution:
         normalized_team_name = normalize_text_key(provider_team_name)
-        competition_aliases = self.alias_catalog.get(competition_id, {})
-        target_name = competition_aliases.get(normalized_team_name, normalized_team_name)
         candidates = self.team_catalog.get(competition_id, {})
-        exact = candidates.get(target_name)
-        if exact is not None:
-            return TeamResolution(
+        alias_match = resolve_provider_team_alias(
+            provider=provider,
+            competition_id=competition_id,
+            provider_team_id=provider_team_id,
+            provider_team_name=provider_team_name,
+        )
+        if alias_match is not None:
+            return self._resolved_team_resolution(
                 provider=provider,
                 competition_id=competition_id,
                 provider_team_id=provider_team_id,
                 provider_team_name=provider_team_name,
                 normalized_team_name=normalized_team_name,
-                canonical_team_id=exact["canonical_team_id"],
-                canonical_team_name=exact["canonical_team_name"],
+                canonical_team_name=str(alias_match["canonical_team_name"]),
+                resolution_kind=str(alias_match["resolution_kind"]),
+                confidence=1.0,
+                reason=str(alias_match["reason"]),
+                diagnostic_category=str(alias_match["diagnostic_category"]),
+            )
+
+        competition_aliases = self.alias_catalog.get(competition_id, {})
+        target_name = competition_aliases.get(normalized_team_name, normalized_team_name)
+        exact = candidates.get(target_name)
+        if exact is not None:
+            return self._resolved_team_resolution(
+                provider=provider,
+                competition_id=competition_id,
+                provider_team_id=provider_team_id,
+                provider_team_name=provider_team_name,
+                normalized_team_name=normalized_team_name,
+                canonical_team_name=str(exact["canonical_team_name"]),
                 resolution_kind="exact_normalized_name",
                 confidence=1.0,
             )
+
+        target_candidates = tuple(str(row["canonical_team_name"]) for row in candidates.values())
+        canonical_candidates = suggest_canonical_candidates(target_candidates, provider_team_name)
+        diagnostic_category, unresolved_reason = classify_unresolved_team(
+            provider_team_name=provider_team_name,
+            canonical_candidates=canonical_candidates,
+        )
         return TeamResolution(
             provider=provider,
             competition_id=competition_id,
@@ -102,8 +173,40 @@ class CurrentFootballModelSnapshot:
             canonical_team_name=None,
             resolution_kind="unresolved",
             confidence=0.0,
-            reason="no deterministic canonical team mapping found",
+            reason=unresolved_reason,
+            diagnostic_category=diagnostic_category,
+            suggested_canonical_name=None if not canonical_candidates else canonical_candidates[0],
+            canonical_candidates=canonical_candidates,
+            model_history_available=None,
+            model_history_reason=None,
         )
+
+    def team_model_history_status(
+        self,
+        *,
+        competition_id: str,
+        canonical_team_id: str,
+        venue: str,
+    ) -> dict[str, Any]:
+        competition_index = self.team_model_history_index.get(competition_id, {})
+        team_index = competition_index.get(canonical_team_id, {})
+        matches_observed_by_statistic = {
+            statistic: int((team_index.get(statistic) or {}).get(venue, 0))
+            for statistic in SUPPORTED_STATISTICS
+        }
+        missing_statistics = [
+            statistic
+            for statistic, matches_observed in matches_observed_by_statistic.items()
+            if matches_observed <= 0
+        ]
+        return {
+            "competition_id": competition_id,
+            "canonical_team_id": canonical_team_id,
+            "venue": venue,
+            "available": not missing_statistics,
+            "missing_statistics": missing_statistics,
+            "matches_observed_by_statistic": matches_observed_by_statistic,
+        }
 
 
 def _repo_root() -> Path:
@@ -283,6 +386,28 @@ def _build_team_catalog(rows: list[sqlite3.Row]) -> dict[str, dict[str, dict[str
                 "canonical_team_name": team_name,
             }
     return {competition_id: dict(mapping) for competition_id, mapping in sorted(catalog.items())}
+
+
+def _build_team_model_history_index(gap_engine: GapRatingsEngine) -> dict[str, dict[str, dict[str, dict[str, int]]]]:
+    history_index: dict[str, dict[str, dict[str, dict[str, int]]]] = defaultdict(lambda: defaultdict(dict))
+    for row in gap_engine.export_state_records():
+        competition_id = str(row["competition_id"])
+        team_id = str(row["team_id"])
+        statistic = str(row["statistic"])
+        venue = str(row["venue"])
+        history_index[competition_id].setdefault(team_id, {}).setdefault(statistic, {})[venue] = int(
+            row["matches_observed"]
+        )
+    return {
+        competition_id: {
+            team_id: {
+                statistic: {venue: int(count) for venue, count in venue_counts.items()}
+                for statistic, venue_counts in statistics.items()
+            }
+            for team_id, statistics in teams.items()
+        }
+        for competition_id, teams in history_index.items()
+    }
 
 
 def _log_poisson_pmf(k: int, mean_value: float) -> float:
@@ -527,6 +652,7 @@ def build_current_football_model_snapshot(
     latest_match_date = max(str(row["match_date"]) for row in rows)
     model_as_of = f"{latest_match_date}T23:59:59+00:00"
     built_at = utc_now_iso()
+    team_model_history_index = _build_team_model_history_index(gap_engine)
     snapshot_content = {
         "model_version": SNAPSHOT_MODEL_VERSION,
         "model_as_of": model_as_of,
@@ -553,6 +679,7 @@ def build_current_football_model_snapshot(
         corner_models=corner_models,
         rho_by_competition=rho_by_competition,
         xi_by_competition=xi_by_competition,
+        team_model_history_index=team_model_history_index,
         manifest_paths=manifest_paths,
         diagnostics={
             "built_at": built_at,
