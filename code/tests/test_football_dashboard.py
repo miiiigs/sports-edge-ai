@@ -508,6 +508,74 @@ def test_dashboard_services_resolve_malaga_alias_but_keep_history_block(tmp_path
     asyncio.run(services.shutdown())
 
 
+def test_dashboard_status_recomputes_team_resolution_from_current_fixture_rows(tmp_path: Path):
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([_fixture()]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+    kickoff_utc = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0).isoformat()
+    counts = services._team_resolution_counts(
+        [
+            {
+                "fixture_id": "football-data.org:564628",
+                "provider": "football-data.org",
+                "competition_id": "ESP1",
+                "competition_name": "Primera Division",
+                "status": FIXTURE_STATUS_PRE_MATCH,
+                "home_team_id": "78",
+                "home_team_name": "Atleti",
+                "away_team_id": "84",
+                "away_team_name": "M\ufffdlaga",
+                "kickoff_utc": kickoff_utc,
+                "prediction": {
+                    "prediction_id": "prediction_legacy_malaga",
+                    "fixture_id": "football-data.org:564628",
+                    "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "prediction_status": "BLOCKED",
+                    "blockers": ["PREDICTION_BLOCKED_TEAM_IDENTITY"],
+                    "team_resolution": {
+                        "home": {
+                            "provider": "football-data.org",
+                            "competition_id": "ESP1",
+                            "provider_team_id": "78",
+                            "provider_team_name": "Atleti",
+                            "normalized_team_name": "atleti",
+                            "canonical_team_id": None,
+                            "canonical_team_name": None,
+                            "resolution_kind": "unresolved",
+                            "confidence": 0.0,
+                            "reason": "no deterministic canonical team mapping found",
+                        },
+                        "away": {
+                            "provider": "football-data.org",
+                            "competition_id": "ESP1",
+                            "provider_team_id": "84",
+                            "provider_team_name": "M\ufffdlaga",
+                            "normalized_team_name": "mlaga",
+                            "canonical_team_id": None,
+                            "canonical_team_name": None,
+                            "resolution_kind": "unresolved",
+                            "confidence": 0.0,
+                            "reason": "no deterministic canonical team mapping found",
+                        },
+                    },
+                    "model_history": None,
+                },
+            }
+        ]
+    )
+    assert counts["unresolved"] == 0
+    assert counts["model_history_missing"] >= 1
+    assert any(
+        example["provider_team_id"] == "84"
+        for example in counts["model_history_missing_examples"]
+    )
+    asyncio.run(services.shutdown())
+
+
 def test_dashboard_services_leave_bare_deportivo_unresolved_without_context(tmp_path: Path):
     fixture = replace(
         _fixture(home_team_name="Deportivo", away_team_name="Valencia"),

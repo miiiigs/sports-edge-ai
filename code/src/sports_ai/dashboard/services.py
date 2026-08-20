@@ -1279,6 +1279,32 @@ class DashboardServices:
             "missing_statistics": list(missing_statistics or []),
         }
 
+    def _current_team_resolution_state(
+        self,
+        *,
+        row: dict[str, Any],
+        side: str,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        if self.snapshot is None:
+            return None, None
+        team_id_key = f"{side}_team_id"
+        team_name_key = f"{side}_team_name"
+        resolution = self.snapshot.resolve_team(
+            provider=str(row["provider"]),
+            competition_id=str(row["competition_id"]),
+            provider_team_id=None if row.get(team_id_key) is None else str(row[team_id_key]),
+            provider_team_name=str(row.get(team_name_key) or ""),
+        )
+        resolution_payload = resolution.to_dict()
+        if not resolution.is_resolved:
+            return resolution_payload, None
+        history = self.snapshot.team_model_history_status(
+            competition_id=str(row["competition_id"]),
+            canonical_team_id=str(resolution.canonical_team_id),
+            venue=side,
+        )
+        return resolution_payload, history
+
     def _team_resolution_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         resolved = 0
         unresolved = 0
@@ -1288,65 +1314,57 @@ class DashboardServices:
         unresolved_seen: set[tuple[str, str, str]] = set()
         model_history_seen: set[tuple[str, str, str]] = set()
         for row in self._supported_fixture_rows(rows):
-            prediction = row.get("prediction") or {}
-            team_resolution = prediction.get("team_resolution") or {}
-            model_history = prediction.get("model_history") or {}
-            if isinstance(team_resolution, dict) and team_resolution:
-                for side in ("home", "away"):
-                    resolution = team_resolution.get(side)
-                    if not isinstance(resolution, dict):
-                        continue
-                    canonical_team_id = resolution.get("canonical_team_id")
-                    if not canonical_team_id:
-                        unresolved += 1
-                        seen_key = (
-                            str(row["competition_id"]),
-                            str(resolution.get("provider_team_id") or resolution.get("provider_team_name") or ""),
-                            side,
-                        )
-                        if seen_key not in unresolved_seen and len(unresolved_examples) < 8:
-                            unresolved_examples.append(
-                                self._team_resolution_example(
-                                    row=row,
-                                    side=side,
-                                    resolution=resolution,
-                                    reason=str(resolution.get("reason") or "team identity unresolved"),
-                                )
+            for side in ("home", "away"):
+                resolution, history_row = self._current_team_resolution_state(row=row, side=side)
+                if not isinstance(resolution, dict):
+                    continue
+                canonical_team_id = resolution.get("canonical_team_id")
+                if not canonical_team_id:
+                    unresolved += 1
+                    seen_key = (
+                        str(row["competition_id"]),
+                        str(resolution.get("provider_team_id") or resolution.get("provider_team_name") or ""),
+                        side,
+                    )
+                    if seen_key not in unresolved_seen and len(unresolved_examples) < 8:
+                        unresolved_examples.append(
+                            self._team_resolution_example(
+                                row=row,
+                                side=side,
+                                resolution=resolution,
+                                reason=str(resolution.get("reason") or "team identity unresolved"),
                             )
-                            unresolved_seen.add(seen_key)
-                        continue
-                    history_row = model_history.get(side) if isinstance(model_history, dict) else None
-                    history_available = None
-                    missing_statistics: list[str] = []
-                    if isinstance(history_row, dict):
-                        history_available = bool(history_row.get("available"))
-                        missing_statistics = [str(value) for value in history_row.get("missing_statistics") or []]
-                    if history_available is False or resolution.get("model_history_available") is False:
-                        model_history_missing += 1
-                        seen_key = (
-                            str(row["competition_id"]),
-                            str(resolution.get("provider_team_id") or resolution.get("provider_team_name") or ""),
-                            side,
                         )
-                        if seen_key not in model_history_seen and len(model_history_examples) < 8:
-                            model_history_examples.append(
-                                self._team_resolution_example(
-                                    row=row,
-                                    side=side,
-                                    resolution=resolution,
-                                    reason=str(
-                                        resolution.get("model_history_reason")
-                                        or "resolved identity has no usable current competition history"
-                                    ),
-                                    missing_statistics=missing_statistics,
-                                )
+                        unresolved_seen.add(seen_key)
+                    continue
+                history_available = None
+                missing_statistics: list[str] = []
+                if isinstance(history_row, dict):
+                    history_available = bool(history_row.get("available"))
+                    missing_statistics = [str(value) for value in history_row.get("missing_statistics") or []]
+                if history_available is False or resolution.get("model_history_available") is False:
+                    model_history_missing += 1
+                    seen_key = (
+                        str(row["competition_id"]),
+                        str(resolution.get("provider_team_id") or resolution.get("provider_team_name") or ""),
+                        side,
+                    )
+                    if seen_key not in model_history_seen and len(model_history_examples) < 8:
+                        model_history_examples.append(
+                            self._team_resolution_example(
+                                row=row,
+                                side=side,
+                                resolution=resolution,
+                                reason=str(
+                                    resolution.get("model_history_reason")
+                                    or "resolved identity has no usable current competition history"
+                                ),
+                                missing_statistics=missing_statistics,
                             )
-                            model_history_seen.add(seen_key)
-                        continue
-                    resolved += 1
-                continue
-            if self._prediction_eligibility_status(prediction) == "PREDICTION_READY":
-                resolved += 2
+                        )
+                        model_history_seen.add(seen_key)
+                    continue
+                resolved += 1
         return {
             "resolved": resolved,
             "unresolved": unresolved,
