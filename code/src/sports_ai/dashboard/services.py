@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import logging
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -37,14 +39,48 @@ from .models import (
     utc_now_iso,
 )
 from .prediction_service import PredictionContext, build_prediction_for_fixture
+from .runtime_paths import ensure_operational_data_dir, resolve_dashboard_operational_paths
 from .snapshot_service import CurrentFootballModelSnapshot, CurrentSnapshotError, build_current_football_model_snapshot
 
 DEFAULT_UPCOMING_HORIZON_DAYS = 5
+DEFAULT_ENABLE_AUTOMATED_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_AUTOMATED_SYNC"
+DEFAULT_LIVE_REFRESH_ENV_VAR = "SPORTS_AI_FIXTURE_LIVE_REFRESH_SECONDS"
+DEFAULT_FUTURE_REFRESH_ENV_VAR = "SPORTS_AI_FIXTURE_FUTURE_REFRESH_SECONDS"
+DEFAULT_MANUAL_REFRESH_COOLDOWN_ENV_VAR = "SPORTS_AI_MANUAL_REFRESH_COOLDOWN_SECONDS"
+DEFAULT_UPCOMING_HORIZON_ENV_VAR = "SPORTS_AI_UPCOMING_HORIZON_DAYS"
+DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_XG_CONNECTED"
+DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_ODDS_CONNECTED"
+
+logger = logging.getLogger(__name__)
 
 
-def _default_market_provider() -> CurrentMarketProvider:
+def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
+    if not config.current_odds_connected:
+        return NotConfiguredMarketProvider(provider_label="waiting-for-approved-odds-provider")
     provider = ApiFootballOddsProvider()
     return provider if provider.configured() else NotConfiguredMarketProvider()
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 @dataclass(frozen=True)
@@ -54,6 +90,9 @@ class DashboardConfig:
     dashboard_db_path: Path
     paper_trading_db_path: Path
     performance_output_dir: Path
+    operational_data_dir: Path
+    storage_mode: str
+    persistent_data_dir_configured: bool
     display_timezone: str = "Asia/Manila"
     upcoming_horizon_days: int = DEFAULT_UPCOMING_HORIZON_DAYS
     scheduler_interval_seconds: int = 300
@@ -67,16 +106,24 @@ class DashboardConfig:
     @classmethod
     def default(cls) -> "DashboardConfig":
         repo_root = Path(__file__).resolve().parents[4]
+        operational_paths = resolve_dashboard_operational_paths(repo_root)
         return cls(
             repo_root=repo_root,
             research_db_path=repo_root / "research" / "football_research" / "store" / "football_research.sqlite",
-            dashboard_db_path=repo_root / "research" / "product_outputs" / "dashboard" / "football_dashboard.sqlite",
-            paper_trading_db_path=repo_root / "research" / "product_outputs" / "dashboard" / "football_paper_trading.sqlite",
+            dashboard_db_path=operational_paths.dashboard_db_path,
+            paper_trading_db_path=operational_paths.paper_trading_db_path,
             performance_output_dir=repo_root / "research" / "product_outputs" / "football" / "performance",
-            scheduler_interval_seconds=300,
-            live_refresh_interval_seconds=60,
-            future_refresh_interval_seconds=300,
-            manual_refresh_cooldown_seconds=30,
+            operational_data_dir=operational_paths.data_dir,
+            storage_mode=operational_paths.mode,
+            persistent_data_dir_configured=operational_paths.persistent_path_configured,
+            upcoming_horizon_days=_env_int(DEFAULT_UPCOMING_HORIZON_ENV_VAR, DEFAULT_UPCOMING_HORIZON_DAYS),
+            scheduler_interval_seconds=_env_int(DEFAULT_FUTURE_REFRESH_ENV_VAR, 300),
+            live_refresh_interval_seconds=_env_int(DEFAULT_LIVE_REFRESH_ENV_VAR, 60),
+            future_refresh_interval_seconds=_env_int(DEFAULT_FUTURE_REFRESH_ENV_VAR, 300),
+            manual_refresh_cooldown_seconds=_env_int(DEFAULT_MANUAL_REFRESH_COOLDOWN_ENV_VAR, 30),
+            enable_scheduler=_env_bool(DEFAULT_ENABLE_AUTOMATED_SYNC_ENV_VAR, True),
+            current_odds_connected=_env_bool(DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR, False),
+            current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
         )
 
 
@@ -92,11 +139,12 @@ class DashboardServices:
     ):
         self.config = DashboardConfig.default() if config is None else config
         self.fixture_provider = fixture_provider or FootballDataOrgFixtureProvider()
-        self.market_provider = market_provider or _default_market_provider()
+        self.market_provider = market_provider or _default_market_provider(self.config)
         self.snapshot: CurrentFootballModelSnapshot | None = None
         self.snapshot_error: str | None = None
         self._background_task: asyncio.Task[None] | None = None
         self._shutdown = False
+        self._sync_lock = asyncio.Lock()
         self._provider_state: dict[str, Any] = {
             "provider": self.fixture_provider.provider_name(),
             "configured": self.fixture_provider.configured(),
@@ -107,13 +155,17 @@ class DashboardServices:
             "last_sync_kind": None,
             "last_error": None,
             "next_scheduled_refresh_at": None,
+            "last_sync_duration_seconds": None,
             "sync_diagnostics": None,
             "nearest_supported_fixture": None,
+            "team_resolution_counts": {"resolved": 0, "unresolved": 0},
             "last_counts": self._empty_counts(),
         }
         self._prediction_state: dict[str, Any] = {
             "state": "BLOCKED",
             "last_prediction_generated_at": None,
+            "last_successful_prediction_at": None,
+            "last_prediction_error": None,
             "pending_fixture_count": 0,
             "blocked_fixture_count": 0,
             "ready_fixture_count": 0,
@@ -138,8 +190,18 @@ class DashboardServices:
         }
 
     async def initialize(self) -> None:
+        ensure_operational_data_dir(self.config.operational_data_dir)
+        logger.info(
+            "dashboard startup: storage_mode=%s data_dir=%s scheduler_enabled=%s fixture_provider=%s market_provider=%s",
+            self.config.storage_mode,
+            self.config.operational_data_dir,
+            self.config.enable_scheduler,
+            self.fixture_provider.provider_name(),
+            self.market_provider.provider_name(),
+        )
         with storage.connect(self.config.dashboard_db_path) as conn:
             storage.ensure_schema(conn)
+            self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             football_paper_trading.ensure_schema(conn)
         self._build_snapshot()
@@ -155,16 +217,34 @@ class DashboardServices:
                 await self._background_task
             except asyncio.CancelledError:
                 pass
+        logger.info("dashboard shutdown complete")
+
+    def _load_runtime_state(self, conn: Any) -> None:
+        provider_state = storage.get_runtime_state(conn, "provider_state")
+        prediction_state = storage.get_runtime_state(conn, "prediction_state")
+        market_runtime_state = storage.get_runtime_state(conn, "market_runtime_state")
+        if isinstance(provider_state, dict):
+            self._provider_state.update(provider_state)
+        if isinstance(prediction_state, dict):
+            self._prediction_state.update(prediction_state)
+        if isinstance(market_runtime_state, dict):
+            self._market_runtime_state.update(market_runtime_state)
 
     def _build_snapshot(self) -> None:
         try:
             self.snapshot = build_current_football_model_snapshot(research_db_path=self.config.research_db_path)
             self.snapshot_error = None
             self._prediction_state["state"] = "READY"
+            logger.info(
+                "current model snapshot ready: snapshot_id=%s model_as_of=%s",
+                self.snapshot.snapshot_id,
+                self.snapshot.model_as_of,
+            )
         except CurrentSnapshotError as exc:
             self.snapshot = None
             self.snapshot_error = str(exc)
             self._prediction_state["state"] = "BLOCKED"
+            logger.warning("current model snapshot unavailable: %s", exc)
 
     def _empty_counts(self) -> dict[str, int]:
         return {
@@ -177,6 +257,7 @@ class DashboardServices:
             "live": 0,
             "today": 0,
             "upcoming": 0,
+            "next": 0,
             "predictions_ready": 0,
             "predictions_blocked": 0,
             "predictions_pending": 0,
@@ -318,6 +399,11 @@ class DashboardServices:
         future_interval = max(live_interval, int(self.config.future_refresh_interval_seconds))
         next_live = datetime.now(timezone.utc) + timedelta(seconds=live_interval)
         next_future = datetime.now(timezone.utc) + timedelta(seconds=future_interval)
+        logger.info(
+            "automatic fixture sync scheduler started: live_refresh_seconds=%s future_refresh_seconds=%s",
+            live_interval,
+            future_interval,
+        )
         while not self._shutdown:
             now_utc = datetime.now(timezone.utc)
             next_due = min(next_live, next_future)
@@ -332,6 +418,7 @@ class DashboardServices:
                 )
             except Exception as exc:  # pragma: no cover - defensive background loop
                 self._provider_state["last_error"] = f"{type(exc).__name__}: {exc}"
+                logger.exception("automatic fixture sync failed: %s", exc)
             next_live = now_utc + timedelta(seconds=live_interval)
             if full_refresh:
                 next_future = now_utc + timedelta(seconds=future_interval)
@@ -361,175 +448,209 @@ class DashboardServices:
         sync_kind: str = "manual",
         include_schedule: bool = True,
     ) -> dict[str, Any]:
-        now_utc = datetime.now(timezone.utc)
-        attempted_at = utc_now_iso()
-        with storage.connect(self.config.dashboard_db_path) as conn:
-            self._provider_state["last_attempted_sync_at"] = attempted_at
-            self._provider_state["last_sync_kind"] = sync_kind
-            self._provider_state["next_scheduled_refresh_at"] = self._next_scheduled_refresh_at(from_now=now_utc)
-            if not self.fixture_provider.configured():
-                self._provider_state.update(
-                    {
-                        "configured": False,
-                        "state": "NOT_CONFIGURED",
-                        "last_sync_at": attempted_at,
-                        "last_error": "FIXTURE PROVIDER NOT CONFIGURED",
-                        "sync_diagnostics": None,
-                    }
-                )
-                storage.put_runtime_state(
-                    conn,
-                    state_key="provider_state",
-                    state_value=self._provider_state,
-                    updated_at=attempted_at,
-                )
-                return self._provider_state
-
-            self._provider_reset_sync_diagnostics()
-            self._prediction_state["state"] = "RUNNING" if self.snapshot is not None else "BLOCKED"
-
-            live: list[NormalizedFixture] = []
-            today: list[NormalizedFixture] = []
-            upcoming: list[NormalizedFixture] = []
-            try:
-                today_local = now_utc.astimezone(ZoneInfo(self.config.display_timezone)).date()
-                live = self.fixture_provider.get_live_fixtures()
-                if include_schedule:
-                    today = self.fixture_provider.get_fixtures_for_date(today_local)
-                    next_local_day = today_local + timedelta(days=1)
-                    upcoming_start = (
-                        datetime.combine(next_local_day, time.min, tzinfo=ZoneInfo(self.config.display_timezone))
-                        .astimezone(timezone.utc)
+        async with self._sync_lock:
+            now_utc = datetime.now(timezone.utc)
+            attempted_at = utc_now_iso()
+            sync_started = datetime.now(timezone.utc)
+            logger.info("fixture sync started: kind=%s include_schedule=%s", sync_kind, include_schedule)
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                self._provider_state["last_attempted_sync_at"] = attempted_at
+                self._provider_state["last_sync_kind"] = sync_kind
+                self._provider_state["next_scheduled_refresh_at"] = self._next_scheduled_refresh_at(from_now=now_utc)
+                if not self.fixture_provider.configured():
+                    self._provider_state.update(
+                        {
+                            "configured": False,
+                            "state": "NOT_CONFIGURED",
+                            "last_sync_at": attempted_at,
+                            "last_error": "FIXTURE PROVIDER NOT CONFIGURED",
+                            "sync_diagnostics": None,
+                            "last_sync_duration_seconds": round(
+                                (datetime.now(timezone.utc) - sync_started).total_seconds(),
+                                3,
+                            ),
+                        }
                     )
-                    upcoming_end = now_utc + timedelta(days=self.config.upcoming_horizon_days)
-                    if upcoming_start <= upcoming_end:
-                        upcoming = self.fixture_provider.get_upcoming_fixtures(
-                            from_utc=upcoming_start,
-                            to_utc=upcoming_end,
+                    storage.put_runtime_state(
+                        conn,
+                        state_key="provider_state",
+                        state_value=self._provider_state,
+                        updated_at=attempted_at,
+                    )
+                    logger.info("fixture sync skipped: fixture provider not configured")
+                    return self._provider_state
+
+                self._provider_reset_sync_diagnostics()
+                self._prediction_state["state"] = "RUNNING" if self.snapshot is not None else "BLOCKED"
+
+                live: list[NormalizedFixture] = []
+                today: list[NormalizedFixture] = []
+                upcoming: list[NormalizedFixture] = []
+                try:
+                    today_local = now_utc.astimezone(ZoneInfo(self.config.display_timezone)).date()
+                    live = self.fixture_provider.get_live_fixtures()
+                    if include_schedule:
+                        today = self.fixture_provider.get_fixtures_for_date(today_local)
+                        next_local_day = today_local + timedelta(days=1)
+                        upcoming_start = (
+                            datetime.combine(next_local_day, time.min, tzinfo=ZoneInfo(self.config.display_timezone))
+                            .astimezone(timezone.utc)
                         )
-            except FixtureProviderNotConfiguredError as exc:
-                self._provider_state.update(
+                        upcoming_end = now_utc + timedelta(days=self.config.upcoming_horizon_days)
+                        if upcoming_start <= upcoming_end:
+                            upcoming = self.fixture_provider.get_upcoming_fixtures(
+                                from_utc=upcoming_start,
+                                to_utc=upcoming_end,
+                            )
+                except FixtureProviderNotConfiguredError as exc:
+                    self._provider_state.update(
+                        {
+                            "configured": False,
+                            "state": "NOT_CONFIGURED",
+                            "last_sync_at": attempted_at,
+                            "last_error": str(exc),
+                            "sync_diagnostics": self._provider_sync_diagnostics(),
+                            "last_sync_duration_seconds": round(
+                                (datetime.now(timezone.utc) - sync_started).total_seconds(),
+                                3,
+                            ),
+                        }
+                    )
+                    storage.put_runtime_state(
+                        conn,
+                        state_key="provider_state",
+                        state_value=self._provider_state,
+                        updated_at=attempted_at,
+                    )
+                    logger.warning("fixture sync not configured: %s", exc)
+                    return self._provider_state
+                except FixtureProviderError as exc:
+                    self._provider_state.update(
+                        {
+                            "configured": True,
+                            "state": "DEGRADED",
+                            "last_sync_at": attempted_at,
+                            "last_error": str(exc),
+                            "sync_diagnostics": self._provider_sync_diagnostics(),
+                            "last_sync_duration_seconds": round(
+                                (datetime.now(timezone.utc) - sync_started).total_seconds(),
+                                3,
+                            ),
+                        }
+                    )
+                    storage.put_runtime_state(
+                        conn,
+                        state_key="provider_state",
+                        state_value=self._provider_state,
+                        updated_at=attempted_at,
+                    )
+                    logger.warning("fixture sync degraded: %s", exc)
+                    return self._provider_state
+
+                fixture_map = {fixture.fixture_id: fixture for fixture in [*live, *today, *upcoming]}
+                sync_fixtures = sorted(fixture_map.values(), key=lambda item: (item.kickoff_utc, item.fixture_id))
+                if sync_fixtures:
+                    storage.upsert_fixtures(conn, sync_fixtures, updated_at=attempted_at)
+
+                for fixture in sync_fixtures:
+                    if fixture.status in FIXTURE_TERMINAL_STATUSES:
+                        continue
+                    self.ensure_prediction(conn, fixture)
+
+                fixture_rows = storage.fetch_all_fixtures(conn)
+                predictions = storage.fetch_all_predictions(conn)
+                prediction_map = {
+                    str(prediction["fixture_id"]): self._decorate_prediction_runtime(prediction)
+                    for prediction in predictions
+                }
+                rows_with_predictions = [
                     {
-                        "configured": False,
-                        "state": "NOT_CONFIGURED",
-                        "last_sync_at": attempted_at,
-                        "last_error": str(exc),
-                        "sync_diagnostics": self._provider_sync_diagnostics(),
+                        **fixture_row,
+                        "prediction": prediction_map.get(str(fixture_row["fixture_id"])),
                     }
+                    for fixture_row in fixture_rows
+                ]
+
+                provider_diagnostics = self._provider_sync_diagnostics()
+                current_counts = self._counts_for_rows(rows_with_predictions)
+                current_counts["provider_raw"] = sum(
+                    int(query.get("raw_fixture_count") or 0)
+                    for query in provider_diagnostics.get("queries") or []
                 )
-                storage.put_runtime_state(
-                    conn,
-                    state_key="provider_state",
-                    state_value=self._provider_state,
-                    updated_at=attempted_at,
+                current_counts["normalized"] = len(sync_fixtures)
+                current_counts["next"] = len(self._future_fixture_rows(rows_with_predictions)[:8])
+                current_counts["supported"] = sum(
+                    1
+                    for row in rows_with_predictions
+                    if self.snapshot is not None and str(row["competition_id"]) in self.snapshot.supported_competitions
                 )
-                return self._provider_state
-            except FixtureProviderError as exc:
+                current_counts["unsupported_competition"] = sum(
+                    1
+                    for row in rows_with_predictions
+                    if self.snapshot is not None and str(row["competition_id"]) not in self.snapshot.supported_competitions
+                )
+                current_counts["unresolved_team"] = sum(
+                    1
+                    for row in rows_with_predictions
+                    if self._prediction_eligibility_status(row.get("prediction")) == "TEAM_IDENTITY_UNRESOLVED"
+                )
+                current_counts["discarded_malformed"] = 0
+                current_counts["candidates_available"] = 0
+
+                provider_error_text = self._provider_error_text(provider_diagnostics)
+                provider_state = "DEGRADED" if provider_diagnostics.get("has_errors") else "CONNECTED"
+                if provider_state == "CONNECTED":
+                    self._provider_state["last_successful_sync_at"] = attempted_at
+
+                nearest_supported_fixture = self._nearest_supported_fixture(rows_with_predictions)
                 self._provider_state.update(
                     {
                         "configured": True,
-                        "state": "DEGRADED",
+                        "state": provider_state,
                         "last_sync_at": attempted_at,
-                        "last_error": str(exc),
-                        "sync_diagnostics": self._provider_sync_diagnostics(),
+                        "last_error": provider_error_text,
+                        "sync_diagnostics": provider_diagnostics,
+                        "nearest_supported_fixture": nearest_supported_fixture,
+                        "team_resolution_counts": self._team_resolution_counts(rows_with_predictions),
+                        "last_counts": current_counts,
+                        "last_sync_duration_seconds": round(
+                            (datetime.now(timezone.utc) - sync_started).total_seconds(),
+                            3,
+                        ),
                     }
                 )
+                self._update_prediction_state(rows_with_predictions)
+                self._sync_current_market_state(rows_with_predictions)
                 storage.put_runtime_state(
                     conn,
                     state_key="provider_state",
                     state_value=self._provider_state,
                     updated_at=attempted_at,
                 )
-                return self._provider_state
-
-            fixture_map = {fixture.fixture_id: fixture for fixture in [*live, *today, *upcoming]}
-            sync_fixtures = sorted(fixture_map.values(), key=lambda item: (item.kickoff_utc, item.fixture_id))
-            if sync_fixtures:
-                storage.upsert_fixtures(conn, sync_fixtures, updated_at=attempted_at)
-
-            for fixture in sync_fixtures:
-                if fixture.status in FIXTURE_TERMINAL_STATUSES:
-                    continue
-                self.ensure_prediction(conn, fixture)
-
-            fixture_rows = storage.fetch_all_fixtures(conn)
-            predictions = storage.fetch_all_predictions(conn)
-            prediction_map = {
-                str(prediction["fixture_id"]): self._decorate_prediction_runtime(prediction)
-                for prediction in predictions
-            }
-            rows_with_predictions = [
-                {
-                    **fixture_row,
-                    "prediction": prediction_map.get(str(fixture_row["fixture_id"])),
-                }
-                for fixture_row in fixture_rows
-            ]
-
-            provider_diagnostics = self._provider_sync_diagnostics()
-            current_counts = self._counts_for_rows(rows_with_predictions)
-            current_counts["provider_raw"] = sum(
-                int(query.get("raw_fixture_count") or 0)
-                for query in provider_diagnostics.get("queries") or []
+                storage.put_runtime_state(
+                    conn,
+                    state_key="prediction_state",
+                    state_value=self._prediction_state,
+                    updated_at=attempted_at,
+                )
+                storage.put_runtime_state(
+                    conn,
+                    state_key="market_runtime_state",
+                    state_value=self._market_runtime_state,
+                    updated_at=attempted_at,
+                )
+            logger.info(
+                "fixture sync completed: kind=%s state=%s discovered=%s live=%s today=%s upcoming=%s predictions_ready=%s blocked=%s",
+                sync_kind,
+                self._provider_state["state"],
+                self._provider_state["last_counts"]["normalized"],
+                self._provider_state["last_counts"]["live"],
+                self._provider_state["last_counts"]["today"],
+                self._provider_state["last_counts"]["upcoming"],
+                self._prediction_state["ready_fixture_count"],
+                self._prediction_state["blocked_fixture_count"],
             )
-            current_counts["normalized"] = len(sync_fixtures)
-            current_counts["supported"] = sum(
-                1
-                for row in rows_with_predictions
-                if self._prediction_eligibility_status(row.get("prediction"))
-                not in {"MODEL_NOT_AVAILABLE", "PREDICTION_PENDING"}
-            )
-            current_counts["unsupported_competition"] = sum(
-                1
-                for row in rows_with_predictions
-                if self._prediction_eligibility_status(row.get("prediction")) == "MODEL_NOT_AVAILABLE"
-            )
-            current_counts["unresolved_team"] = sum(
-                1
-                for row in rows_with_predictions
-                if self._prediction_eligibility_status(row.get("prediction")) == "TEAM_IDENTITY_UNRESOLVED"
-            )
-            current_counts["discarded_malformed"] = 0
-            current_counts["candidates_available"] = 0
-
-            provider_error_text = self._provider_error_text(provider_diagnostics)
-            provider_state = "DEGRADED" if provider_diagnostics.get("has_errors") else "CONNECTED"
-            if provider_state == "CONNECTED":
-                self._provider_state["last_successful_sync_at"] = attempted_at
-
-            nearest_supported_fixture = self._nearest_supported_fixture(rows_with_predictions)
-            self._provider_state.update(
-                {
-                    "configured": True,
-                    "state": provider_state,
-                    "last_sync_at": attempted_at,
-                    "last_error": provider_error_text,
-                    "sync_diagnostics": provider_diagnostics,
-                    "nearest_supported_fixture": nearest_supported_fixture,
-                    "last_counts": current_counts,
-                }
-            )
-            self._update_prediction_state(rows_with_predictions)
-            self._sync_current_market_state(rows_with_predictions)
-            storage.put_runtime_state(
-                conn,
-                state_key="provider_state",
-                state_value=self._provider_state,
-                updated_at=attempted_at,
-            )
-            storage.put_runtime_state(
-                conn,
-                state_key="prediction_state",
-                state_value=self._prediction_state,
-                updated_at=attempted_at,
-            )
-            storage.put_runtime_state(
-                conn,
-                state_key="market_runtime_state",
-                state_value=self._market_runtime_state,
-                updated_at=attempted_at,
-            )
-        return self._provider_state
+            return self._provider_state
 
     def _latest_closing_snapshot(
         self,
@@ -1070,6 +1191,29 @@ class DashboardServices:
                 counts["predictions_blocked"] += 1
         return counts
 
+    def _team_resolution_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
+        resolved = 0
+        unresolved = 0
+        for row in rows:
+            prediction = row.get("prediction") or {}
+            team_resolution = prediction.get("team_resolution") or {}
+            if isinstance(team_resolution, dict) and team_resolution:
+                for side in ("home", "away"):
+                    resolution = team_resolution.get(side)
+                    if not isinstance(resolution, dict):
+                        continue
+                    if resolution.get("canonical_team_id"):
+                        resolved += 1
+                    else:
+                        unresolved += 1
+                continue
+            if self._prediction_eligibility_status(prediction) == "PREDICTION_READY":
+                resolved += 2
+        return {
+            "resolved": resolved,
+            "unresolved": unresolved,
+        }
+
     def _future_fixture_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         now_utc = datetime.now(timezone.utc)
         return sorted(
@@ -1083,17 +1227,29 @@ class DashboardServices:
         )
 
     def _update_prediction_state(self, rows_with_predictions: list[dict[str, Any]]) -> None:
-        generated_times = [
-            str(prediction["generated_at"])
-            for row in rows_with_predictions
-            for prediction in [row.get("prediction")]
-            if isinstance(prediction, dict) and prediction.get("generated_at")
-        ]
+        generated_times = []
+        successful_times = []
+        latest_error: str | None = None
+        latest_error_generated_at: str | None = None
         ready_count = 0
         blocked_count = 0
         pending_count = 0
         for row in rows_with_predictions:
-            eligibility = self._prediction_eligibility_status(row.get("prediction"))
+            prediction = row.get("prediction")
+            if isinstance(prediction, dict) and prediction.get("generated_at"):
+                generated_times.append(str(prediction["generated_at"]))
+                if str(prediction.get("prediction_status")) == PREDICTION_STATUS_READY:
+                    successful_times.append(str(prediction["generated_at"]))
+                elif prediction.get("warnings") or prediction.get("blockers"):
+                    generated_at = str(prediction["generated_at"])
+                    if latest_error_generated_at is None or generated_at >= latest_error_generated_at:
+                        latest_error_generated_at = generated_at
+                        latest_error = ", ".join(
+                            str(value)
+                            for value in [*(prediction.get("blockers") or []), *(prediction.get("warnings") or [])]
+                            if value
+                        ) or str(prediction.get("prediction_status") or "PREDICTION_BLOCKED")
+            eligibility = self._prediction_eligibility_status(prediction)
             if eligibility == "PREDICTION_READY":
                 ready_count += 1
             elif eligibility == "PREDICTION_PENDING":
@@ -1104,11 +1260,44 @@ class DashboardServices:
             {
                 "state": "READY" if self.snapshot is not None else "BLOCKED",
                 "last_prediction_generated_at": None if not generated_times else max(generated_times),
+                "last_successful_prediction_at": None if not successful_times else max(successful_times),
+                "last_prediction_error": latest_error,
                 "pending_fixture_count": pending_count,
                 "blocked_fixture_count": blocked_count,
                 "ready_fixture_count": ready_count,
             }
         )
+
+    def _database_reachable(self, path: Path, *, initialize_schema: bool) -> bool:
+        try:
+            if initialize_schema:
+                with storage.connect(path) as conn:
+                    storage.ensure_schema(conn)
+            else:
+                with football_paper_trading.connect(path) as conn:
+                    football_paper_trading.ensure_schema(conn)
+            return True
+        except Exception:
+            return False
+
+    def _storage_status(self) -> dict[str, Any]:
+        dashboard_db_reachable = self._database_reachable(self.config.dashboard_db_path, initialize_schema=True)
+        paper_trading_db_reachable = self._database_reachable(self.config.paper_trading_db_path, initialize_schema=False)
+        research_db_reachable = Path(self.config.research_db_path).exists()
+        return {
+            "mode": self.config.storage_mode,
+            "data_directory": str(self.config.operational_data_dir),
+            "data_directory_exists": self.config.operational_data_dir.exists(),
+            "persistent_path_configured": "YES" if self.config.persistent_data_dir_configured else "NO",
+            "dashboard_db_path": str(self.config.dashboard_db_path),
+            "dashboard_db_reachable": dashboard_db_reachable,
+            "paper_trading_db_path": str(self.config.paper_trading_db_path),
+            "paper_trading_db_reachable": paper_trading_db_reachable,
+            "research_db_path": str(self.config.research_db_path),
+            "research_db_reachable": research_db_reachable,
+            "mutable_storage_class": "OPERATIONAL_RUNTIME",
+            "immutable_storage_class": "RESEARCH_REFERENCE",
+        }
 
     def _nearest_supported_fixture(self, rows_with_predictions: list[dict[str, Any]]) -> dict[str, Any] | None:
         now_utc = datetime.now(timezone.utc)
@@ -1398,6 +1587,7 @@ class DashboardServices:
         summary_payload = self._load_json_file(self._performance_summary_path())
         _, paper_status = self._paper_positions()
         performance_status = self._performance_status(summary_payload, paper_status)
+        storage_state = self._storage_status()
         return {
             "current_time_utc": utc_now_iso(),
             "current_time_local": datetime.now(timezone.utc)
@@ -1414,6 +1604,7 @@ class DashboardServices:
                 "last_sync_kind": self._provider_state["last_sync_kind"],
                 "last_error": self._provider_state["last_error"],
                 "next_scheduled_refresh_at": self._provider_state["next_scheduled_refresh_at"],
+                "last_sync_duration_seconds": self._provider_state["last_sync_duration_seconds"],
                 "counts": self._provider_state["last_counts"],
                 "sync_diagnostics": self._provider_state["sync_diagnostics"],
                 "nearest_supported_fixture": self._provider_state["nearest_supported_fixture"],
@@ -1427,9 +1618,20 @@ class DashboardServices:
                     "manual_refresh_cooldown_seconds": int(self.config.manual_refresh_cooldown_seconds),
                 },
             },
+            "current_fixture_state": {
+                "fixtures_discovered": int(self._provider_state["last_counts"]["normalized"]),
+                "supported_fixtures": int(self._provider_state["last_counts"]["supported"]),
+                "live_count": int(self._provider_state["last_counts"]["live"]),
+                "today_count": int(self._provider_state["last_counts"]["today"]),
+                "upcoming_count": int(self._provider_state["last_counts"]["upcoming"]),
+                "next_count": int(self._provider_state["last_counts"]["next"]),
+            },
+            "team_resolution": dict(self._provider_state.get("team_resolution_counts") or {"resolved": 0, "unresolved": 0}),
             "prediction_engine": {
                 "state": self._prediction_state["state"],
                 "last_prediction_generated_at": self._prediction_state["last_prediction_generated_at"],
+                "last_successful_prediction_at": self._prediction_state["last_successful_prediction_at"],
+                "last_prediction_error": self._prediction_state["last_prediction_error"],
                 "pending_fixture_count": self._prediction_state["pending_fixture_count"],
                 "blocked_fixture_count": self._prediction_state["blocked_fixture_count"],
                 "ready_fixture_count": self._prediction_state["ready_fixture_count"],
@@ -1449,6 +1651,7 @@ class DashboardServices:
                 "provider": market_state["provider"],
                 "reason": market_state["reason"],
             },
+            "storage": storage_state,
             "market_sync": dict(self._market_runtime_state),
             "xg": {
                 "state": "AVAILABLE" if self.config.current_xg_connected else "MISSING",
@@ -1461,6 +1664,13 @@ class DashboardServices:
             "dashboard_ui_ready": "YES",
             "historical_validation": performance_status["historical_validation"],
             "market_provider": market_state,
+            "paper_tracking": {
+                "ledger_ready": "YES" if performance_status["paper_ledger"]["state"] == "READY" else "NO",
+                "waiting_for_market_provider": "YES" if not market_state["configured"] else "NO",
+                "paper_bets": performance_status["paper_ledger"]["paper_bets"],
+                "open_positions": performance_status["paper_ledger"]["open_positions"],
+                "settled_positions": performance_status["paper_ledger"]["settled_positions"],
+            },
             "paper_ledger": performance_status["paper_ledger"],
             "closing_price_tracking": performance_status["closing_price_tracking"],
             "clv": performance_status["clv"],
@@ -1479,4 +1689,17 @@ class DashboardServices:
             "live_paper_pipeline_ready": "YES"
             if market_state["configured"] and self._provider_state["configured"] and self.config.current_xg_connected
             else "NO",
+        }
+
+    def get_health_payload(self) -> dict[str, Any]:
+        storage_state = self._storage_status()
+        snapshot_ready = self.snapshot is not None
+        return {
+            "status": "ok",
+            "timestamp_utc": utc_now_iso(),
+            "fixture_provider_state": self._provider_state["state"],
+            "prediction_snapshot_ready": snapshot_ready,
+            "dashboard_db_reachable": storage_state["dashboard_db_reachable"],
+            "paper_trading_db_reachable": storage_state["paper_trading_db_reachable"],
+            "persistent_path_configured": storage_state["persistent_path_configured"],
         }

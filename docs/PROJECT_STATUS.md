@@ -5,13 +5,14 @@ Last updated: Thursday, August 20, 2026
 ## Current phase
 
 Thursday, August 20, 2026 implementation state is now updated through the football validation
-build, historical performance benchmark, provider-independent current market contract, and
-paper-trading foundation. The accepted football model path remains closed through Day 11A, with
-Day 12 still implemented as an honest `PARTIAL` for the currently loaded football scope.
+build, historical performance benchmark, provider-independent current market contract, immutable
+paper-trading foundation, and football production hardening. The accepted football model path
+remains closed through Day 11A, with Day 12 still implemented as an honest `PARTIAL` for the
+currently loaded football scope.
 
 The current user-directed product milestone is now:
 
-- `CURRENT PRODUCT MILESTONE = FOOTBALL VALIDATION + CURRENT MARKET/PAPER TRACKING FOUNDATION`
+- `CURRENT PRODUCT MILESTONE = FOOTBALL PRODUCTION HARDENING`
 - `TENNIS DEVELOPMENT = PAUSED`
 
 The repository remains the active migration workspace under the August 2026 PDF-first football and
@@ -27,11 +28,41 @@ closed through:
 
 The current bounded product boundary is now:
 
-`frozen historical football outputs -> benchmark + audit -> current market-provider contract -> immutable paper ledger -> performance dashboard`
+`football-data.org fixtures -> automated frozen pre-match prediction generation -> Day 10 fair prices -> persistent operational storage -> dashboard/status/health surfaces -> optional future market provider plug-in`
 
 It is still not:
 
 `live betting system ready`
+
+## Football Production Hardening
+
+The active football milestone is now production hardening rather than model expansion.
+
+Real local verification on Thursday, August 20, 2026:
+
+- full suite baseline before production-hardening changes: `207 passed in 73.01s`
+- current full suite after the production-hardening build: `210 passed in 41.71s`
+- mutable operational storage now resolves through `SPORTS_AI_DATA_DIR` when configured
+- startup-safe automatic fixture sync remains built into the dashboard runtime
+- `/health` now exists as a lightweight readiness route
+- `/status` and `/api/system/status` now expose storage, current fixture, team-resolution,
+  prediction, and paper-tracking diagnostics more explicitly
+
+Current operational truths on Thursday, August 20, 2026:
+
+- `HISTORICAL_BENCHMARK = COMPLETE`
+- `FIXTURE_FEED = football-data.org`
+- `CURRENT_PREDICTION_PIPELINE = READY`
+- `MARKET_PROVIDER = awaiting client choice`
+- `PAPER_LEDGER = READY`
+- `LIVE_PAPER_TRACKING = WAITING FOR CURRENT BOOKMAKER ODDS`
+- `RAILWAY_PERSISTENT_STORAGE = READY WHEN SPORTS_AI_DATA_DIR IS SET`
+
+Current blocker for real current-fixture validation:
+
+- the verified local environment still does not provide `SPORTS_AI_FOOTBALL_DATA_TOKEN`
+- therefore the code path is ready, but a genuine football-data.org current-fixture-to-prediction
+  validation could not be completed from this machine on Thursday, August 20, 2026
 
 ## Football Validation Build
 

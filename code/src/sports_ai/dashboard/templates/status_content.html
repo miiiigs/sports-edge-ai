@@ -22,7 +22,13 @@
       <div class="metric-tile">
         <span class="status-label">Market State</span>
         <strong>{{ payload.system_status.odds_feed.state }}</strong>
-        <p>{{ payload.system_status.market_sync.decision_count }} decisions across {{ payload.system_status.market_sync.fixtures_matched }} matched fixtures</p>
+        <p>
+          {% if payload.system_status.odds_feed.state == 'NOT_CONFIGURED' %}
+            Waiting for client-approved odds provider
+          {% else %}
+            {{ payload.system_status.market_sync.decision_count }} decisions across {{ payload.system_status.market_sync.fixtures_matched }} matched fixtures
+          {% endif %}
+        </p>
       </div>
       <div class="metric-tile">
         <span class="status-label">Safeguards</span>
@@ -67,6 +73,8 @@
     <div class="data-list">
       <div><span>State</span><strong>{{ payload.system_status.prediction_engine.state }}</strong></div>
       <div><span>Last Prediction</span><strong>{{ payload.system_status.prediction_engine.last_prediction_generated_at or 'N/A' }}</strong></div>
+      <div><span>Last Successful</span><strong>{{ payload.system_status.prediction_engine.last_successful_prediction_at or 'N/A' }}</strong></div>
+      <div><span>Last Error</span><strong>{{ payload.system_status.prediction_engine.last_prediction_error or 'None' }}</strong></div>
       <div><span>Snapshot ID</span><strong>{{ payload.system_status.current_model_snapshot.snapshot_id or 'N/A' }}</strong></div>
       <div><span>Model As Of</span><strong>{{ payload.system_status.current_model_snapshot.model_as_of or 'N/A' }}</strong></div>
       <div><span>Pending Fixtures</span><strong>{{ payload.system_status.prediction_engine.pending_fixture_count }}</strong></div>
@@ -79,6 +87,8 @@
     <h3>Decision Readiness</h3>
     <div class="data-list">
       <div><span>Odds Feed</span><strong>{{ payload.system_status.odds_feed.state }}</strong></div>
+      <div><span>Provider</span><strong>{{ payload.system_status.odds_feed.provider }}</strong></div>
+      <div><span>Reason</span><strong>{{ payload.system_status.odds_feed.reason or 'None' }}</strong></div>
       <div><span>Market Decision Ready</span><strong>{{ payload.system_status.current_market_decision_ready }}</strong></div>
       <div><span>Fixture Feed Ready</span><strong>{{ payload.system_status.current_fixture_feed_ready }}</strong></div>
       <div><span>Prediction Pipeline Ready</span><strong>{{ payload.system_status.current_prediction_pipeline_ready }}</strong></div>
@@ -97,6 +107,58 @@
       <div><span>xG Availability</span><strong>{{ payload.system_status.safeguards.xg_availability }}</strong></div>
       <div><span>Blocked Reason</span><strong>{{ payload.system_status.safeguards.blocked_reason or 'None' }}</strong></div>
       <div><span>Live Paper Pipeline</span><strong>{{ payload.system_status.live_paper_pipeline_ready }}</strong></div>
+    </div>
+  </article>
+</section>
+
+<section class="ops-grid">
+  <article class="detail-card">
+    <p class="eyebrow">Current Slate</p>
+    <h3>Fixture Diagnostics</h3>
+    <div class="data-list">
+      <div><span>Discovered</span><strong>{{ payload.system_status.current_fixture_state.fixtures_discovered }}</strong></div>
+      <div><span>Supported</span><strong>{{ payload.system_status.current_fixture_state.supported_fixtures }}</strong></div>
+      <div><span>Live</span><strong>{{ payload.system_status.current_fixture_state.live_count }}</strong></div>
+      <div><span>Today</span><strong>{{ payload.system_status.current_fixture_state.today_count }}</strong></div>
+      <div><span>Upcoming</span><strong>{{ payload.system_status.current_fixture_state.upcoming_count }}</strong></div>
+      <div><span>Next</span><strong>{{ payload.system_status.current_fixture_state.next_count }}</strong></div>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Team Resolution</p>
+    <h3>Mapping State</h3>
+    <div class="data-list">
+      <div><span>Resolved</span><strong>{{ payload.system_status.team_resolution.resolved }}</strong></div>
+      <div><span>Unresolved</span><strong>{{ payload.system_status.team_resolution.unresolved }}</strong></div>
+      <div><span>Predictions Ready</span><strong>{{ payload.system_status.prediction_engine.ready_fixture_count }}</strong></div>
+      <div><span>Predictions Blocked</span><strong>{{ payload.system_status.prediction_engine.blocked_fixture_count }}</strong></div>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Storage</p>
+    <h3>Operational Persistence</h3>
+    <div class="data-list">
+      <div><span>Mode</span><strong>{{ payload.system_status.storage.mode }}</strong></div>
+      <div><span>Data Directory</span><strong>{{ payload.system_status.storage.data_directory }}</strong></div>
+      <div><span>Persistent Path</span><strong>{{ payload.system_status.storage.persistent_path_configured }}</strong></div>
+      <div><span>Dashboard DB</span><strong>{{ 'READY' if payload.system_status.storage.dashboard_db_reachable else 'ERROR' }}</strong></div>
+      <div><span>Paper DB</span><strong>{{ 'READY' if payload.system_status.storage.paper_trading_db_reachable else 'ERROR' }}</strong></div>
+      <div><span>Research DB</span><strong>{{ 'READY' if payload.system_status.storage.research_db_reachable else 'ERROR' }}</strong></div>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Paper Tracking</p>
+    <h3>Ledger / Market Waiting State</h3>
+    <div class="data-list">
+      <div><span>Ledger Ready</span><strong>{{ payload.system_status.paper_tracking.ledger_ready }}</strong></div>
+      <div><span>Waiting For Odds</span><strong>{{ payload.system_status.paper_tracking.waiting_for_market_provider }}</strong></div>
+      <div><span>Paper Bets</span><strong>{{ payload.system_status.paper_tracking.paper_bets }}</strong></div>
+      <div><span>Open Positions</span><strong>{{ payload.system_status.paper_tracking.open_positions }}</strong></div>
+      <div><span>Settled Positions</span><strong>{{ payload.system_status.paper_tracking.settled_positions }}</strong></div>
+      <div><span>CLV</span><strong>{{ payload.system_status.clv.state }}</strong></div>
     </div>
   </article>
 </section>

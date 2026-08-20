@@ -9,7 +9,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from sports_ai.dashboard.app import create_app
-from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FootballDataOrgFixtureProvider
+from sports_ai.dashboard import storage as dashboard_storage
+from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FixtureProviderError, FootballDataOrgFixtureProvider
 from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
@@ -124,6 +125,18 @@ class FakeMarketProvider:
         }
 
 
+class FlakyFixtureProvider(FakeFixtureProvider):
+    def __init__(self, fixtures: list[NormalizedFixture]) -> None:
+        super().__init__(fixtures)
+        self.fail_next = True
+
+    def get_live_fixtures(self) -> list[NormalizedFixture]:
+        if self.fail_next:
+            self.fail_next = False
+            raise FixtureProviderError("transient provider failure")
+        return super().get_live_fixtures()
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -179,6 +192,9 @@ def _dashboard_config(tmp_path: Path) -> DashboardConfig:
         dashboard_db_path=tmp_path / "football_dashboard.sqlite",
         paper_trading_db_path=tmp_path / "football_paper_trading.sqlite",
         performance_output_dir=performance_dir,
+        operational_data_dir=tmp_path,
+        storage_mode="test_tmpdir",
+        persistent_data_dir_configured=False,
         display_timezone="Asia/Manila",
         upcoming_horizon_days=3,
         scheduler_interval_seconds=9999,
@@ -360,6 +376,17 @@ def test_dashboard_services_generate_prediction_and_ignore_live_score(tmp_path: 
     asyncio.run(services.shutdown())
 
 
+def test_dashboard_config_default_uses_configured_data_dir(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("SPORTS_AI_DATA_DIR", str(tmp_path))
+    config = DashboardConfig.default()
+
+    assert config.operational_data_dir == tmp_path
+    assert config.dashboard_db_path == tmp_path / "football_dashboard.sqlite"
+    assert config.paper_trading_db_path == tmp_path / "football_paper_trading.sqlite"
+    assert config.storage_mode == "configured_data_dir"
+    assert config.persistent_data_dir_configured is True
+
+
 def test_dashboard_services_block_unresolved_team_identity(tmp_path: Path):
     fixture = _fixture(home_team_name="Unknown Town")
     services = DashboardServices(
@@ -475,6 +502,10 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         assert performance_response.status_code == 200
         assert performance_response.json()["summary"]["MODEL_VALIDATION"] == "PROMISING"
 
+        health_response = client.get("/health")
+        assert health_response.status_code == 200
+        assert health_response.json()["status"] == "ok"
+
         prediction_response = client.get(f"/api/predictions/{fixture.fixture_id}")
         assert prediction_response.status_code == 200
         assert prediction_response.json()["prediction_status"] == "READY"
@@ -497,6 +528,7 @@ def test_dashboard_routes_surface_provider_not_configured(tmp_path: Path):
         payload = status_response.json()
         assert payload["fixture_feed"]["state"] == "NOT_CONFIGURED"
         assert payload["current_fixture_feed_ready"] == "NO"
+        assert payload["storage"]["persistent_path_configured"] == "NO"
 
 
 def test_dashboard_routes_surface_provider_diagnostics_errors(tmp_path: Path):
@@ -524,6 +556,56 @@ def test_dashboard_routes_surface_provider_diagnostics_errors(tmp_path: Path):
         payload = client.get("/api/system/status").json()
         assert payload["fixture_feed"]["state"] == "DEGRADED"
         assert "current season unavailable on this plan" in payload["fixture_feed"]["last_error"]
+
+
+def test_dashboard_services_restart_preserves_prediction_without_duplicates(tmp_path: Path):
+    fixture = _fixture()
+    config = _dashboard_config(tmp_path)
+
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    asyncio.run(services.initialize())
+    asyncio.run(services.shutdown())
+
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    asyncio.run(services.initialize())
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        predictions = dashboard_storage.fetch_all_predictions(conn)
+        assert len(predictions) == 1
+        assert predictions[0]["prediction_status"] == "READY"
+    status = services.get_system_status()
+    assert status["storage"]["dashboard_db_reachable"] is True
+    assert status["prediction_engine"]["last_successful_prediction_at"] is not None
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_recovers_after_provider_failure(tmp_path: Path):
+    fixture = _fixture()
+    provider = FlakyFixtureProvider([fixture])
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=provider,
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+    first_status = services.get_system_status()
+    assert first_status["fixture_feed"]["state"] == "DEGRADED"
+    assert "transient provider failure" in (first_status["fixture_feed"]["last_error"] or "")
+
+    asyncio.run(services.sync_once())
+    second_status = services.get_system_status()
+    assert second_status["fixture_feed"]["state"] == "CONNECTED"
+    assert second_status["current_fixture_state"]["fixtures_discovered"] == 1
+    asyncio.run(services.shutdown())
 
 
 def test_dashboard_services_current_market_candidate_creates_idempotent_paper_entry(tmp_path: Path):

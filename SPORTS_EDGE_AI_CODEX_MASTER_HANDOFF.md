@@ -38,20 +38,30 @@ Current active build state:
 
 - football Day 7 through Day 11A remain accepted for the currently loaded scope
 - football Day 12 remains honestly `PARTIAL`
-- `CURRENT PRODUCT MILESTONE = FOOTBALL DASHBOARD V1.1 CURRENT RUNTIME VALIDATION`
+- `CURRENT PRODUCT MILESTONE = FOOTBALL PRODUCTION HARDENING`
 - `TENNIS DEVELOPMENT = PAUSED`
-- current suite baseline: `202 passed`
+- current suite baseline before the hardening build: `207 passed`
 
-Current operational dashboard status verified locally on Wednesday, August 19, 2026:
+Current operational dashboard status verified locally on Thursday, August 20, 2026:
 
 - dashboard route booted successfully
-- current fixture feed state: `DEGRADED`
+- current fixture feed state: `NOT_CONFIGURED` in the currently verified local environment
 - current prediction engine state: `READY`
 - current model snapshot state: `READY`
 - current market decision state: `NO`
-- `CURRENT_FIXTURE_FEED_READY = NO`
+- `CURRENT_FIXTURE_FEED_READY = NO` without `SPORTS_AI_FOOTBALL_DATA_TOKEN`
 - `CURRENT_PREDICTION_PIPELINE_READY = YES`
+- `PAPER_TRADING_LEDGER_READY = YES`
 - `LIVE_PAPER_PIPELINE_READY = NO`
+
+Current production-hardening additions:
+
+- mutable operational storage now supports `SPORTS_AI_DATA_DIR`
+- Railway volume path `/data` is now the intended persistent mount target
+- startup-safe automatic sync remains built in
+- `/health` now exists as a lightweight readiness route
+- `/status` and `/api/system/status` now expose storage, fixture, team-resolution, prediction,
+  and paper-tracking diagnostics more explicitly
 
 Important product boundary:
 
@@ -60,15 +70,12 @@ Important product boundary:
 - the dashboard must not reinterpret the current pre-match model as an in-play model
 - the dashboard must not fabricate current or upcoming fixtures if the provider returns none
 
-Real provider verification note:
+Real current-fixture verification note:
 
-- during the Wednesday, August 19, 2026 verification window, the configured in-scope API-Football
-  season identifier for the current football window was correctly validated as `2026`
-- the provider authenticated successfully, but the configured plan blocked current-season fixture
-  rows for the scoped leagues with:
-  - `Free plans do not have access to this season, try from 2022 to 2024.`
-- Dashboard V1.1 therefore now reports the fixture feed as degraded rather than treating the Aug
-  19-26 empty slate as a clean "no fixtures exist" result
+- during the Thursday, August 20, 2026 production-hardening pass, the verified local environment
+  did not contain `SPORTS_AI_FOOTBALL_DATA_TOKEN`
+- therefore real football-data.org current-fixture sync and first genuine current-prediction
+  validation remained blocked by missing credentials rather than by the production automation path
 
 ---
 

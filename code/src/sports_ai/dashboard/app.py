@@ -187,6 +187,10 @@ def create_app(
     async def api_system_status():
         return JSONResponse(resolved_services.get_system_status())
 
+    @app.get("/health")
+    async def api_health():
+        return JSONResponse(resolved_services.get_health_payload())
+
     @app.post("/api/fixtures/refresh")
     async def api_refresh_fixtures():
         payload = await resolved_services.manual_refresh()
