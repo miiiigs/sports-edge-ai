@@ -125,3 +125,72 @@ def test_paper_trading_store_prevents_duplicate_entry_signatures(tmp_path):
         record_paper_trade_entry(conn, entry)
         with pytest.raises(sqlite3.IntegrityError):
             record_paper_trade_entry(conn, entry)
+
+
+def test_market_snapshot_dedup_identical(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    snapshot = StoredMarketSnapshot(
+        fixture_id="evt_fixture_1",
+        provider="the-odds-api",
+        bookmaker="pinnacle",
+        market="1x2",
+        selection="HOME",
+        odds=2.2,
+        ingestion_version="v1",
+        provider_market_id="mkt_1",
+        provider_timestamp="2026-08-20T09:00:00+00:00",
+        provider_fixture_id="epl_event_123",
+    )
+    with connect(db_path) as conn:
+        first_id = record_market_snapshot(conn, snapshot)
+        second_id = record_market_snapshot(conn, snapshot)
+        snapshots = fetch_market_snapshots(conn, fixture_id="evt_fixture_1")
+
+    assert first_id == second_id
+    assert len(snapshots) == 1
+
+
+def test_market_snapshot_preserves_price_movement(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    base = dict(
+        fixture_id="evt_fixture_1",
+        provider="the-odds-api",
+        bookmaker="pinnacle",
+        market="1x2",
+        selection="HOME",
+        ingestion_version="v1",
+        provider_market_id="mkt_1",
+        provider_fixture_id="epl_event_123",
+    )
+    first = StoredMarketSnapshot(odds=2.2, provider_timestamp="2026-08-20T09:00:00+00:00", **base)
+    second = StoredMarketSnapshot(odds=2.1, provider_timestamp="2026-08-20T09:10:00+00:00", **base)
+    with connect(db_path) as conn:
+        record_market_snapshot(conn, first)
+        record_market_snapshot(conn, second)
+        snapshots = fetch_market_snapshots(conn, fixture_id="evt_fixture_1")
+
+    assert len(snapshots) == 2
+    assert [snapshot["odds"] for snapshot in snapshots] == [2.2, 2.1]
+
+
+def test_market_snapshot_preserves_update_change(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    base = dict(
+        fixture_id="evt_fixture_1",
+        provider="the-odds-api",
+        bookmaker="pinnacle",
+        market="1x2",
+        selection="HOME",
+        odds=2.2,
+        ingestion_version="v1",
+        provider_market_id="mkt_1",
+        provider_fixture_id="epl_event_123",
+    )
+    first = StoredMarketSnapshot(provider_timestamp="2026-08-20T09:00:00+00:00", **base)
+    second = StoredMarketSnapshot(provider_timestamp="2026-08-20T09:10:00+00:00", **base)
+    with connect(db_path) as conn:
+        record_market_snapshot(conn, first)
+        record_market_snapshot(conn, second)
+        snapshots = fetch_market_snapshots(conn, fixture_id="evt_fixture_1")
+
+    assert len(snapshots) == 2

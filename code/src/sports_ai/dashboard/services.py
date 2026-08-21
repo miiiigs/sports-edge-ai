@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ..market_data.api_football import ApiFootballOddsProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
+from ..market_data.the_odds_api import TheOddsApiProvider
 from ..storage import football_paper_trading
 from . import storage
 from .current_market import build_fixture_market_evaluation
@@ -50,6 +50,7 @@ DEFAULT_MANUAL_REFRESH_COOLDOWN_ENV_VAR = "SPORTS_AI_MANUAL_REFRESH_COOLDOWN_SEC
 DEFAULT_UPCOMING_HORIZON_ENV_VAR = "SPORTS_AI_UPCOMING_HORIZON_DAYS"
 DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_XG_CONNECTED"
 DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_ODDS_CONNECTED"
+DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_ODDS_SYNC"
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,8 @@ logger = logging.getLogger(__name__)
 def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
     if not config.current_odds_connected:
         return NotConfiguredMarketProvider(provider_label="waiting-for-approved-odds-provider")
-    provider = ApiFootballOddsProvider()
-    return provider if provider.configured() else NotConfiguredMarketProvider()
+    provider = TheOddsApiProvider()
+    return provider if provider.configured() else NotConfiguredMarketProvider(provider_label="no-odds-provider-key")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -101,6 +102,7 @@ class DashboardConfig:
     manual_refresh_cooldown_seconds: int = 30
     enable_scheduler: bool = True
     current_odds_connected: bool = False
+    enable_odds_sync: bool = False
     current_xg_connected: bool = False
 
     @classmethod
@@ -123,6 +125,7 @@ class DashboardConfig:
             manual_refresh_cooldown_seconds=_env_int(DEFAULT_MANUAL_REFRESH_COOLDOWN_ENV_VAR, 30),
             enable_scheduler=_env_bool(DEFAULT_ENABLE_AUTOMATED_SYNC_ENV_VAR, True),
             current_odds_connected=_env_bool(DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR, False),
+            enable_odds_sync=_env_bool(DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR, False),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
         )
 
@@ -178,6 +181,7 @@ class DashboardServices:
         }
         self._market_runtime_state: dict[str, Any] = {
             "state": "NOT_CONFIGURED" if not self.market_provider.configured() else "CONNECTED",
+            "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
             "last_sync_at": None,
             "last_successful_snapshot_at": None,
             "last_error": None,
@@ -379,6 +383,8 @@ class DashboardServices:
             ),
             "reason": diagnostics.get("reason"),
             "captured_at": diagnostics.get("captured_at"),
+            "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
+            "quota": diagnostics.get("quota"),
         }
 
     def _performance_summary_path(self) -> Path:
@@ -870,8 +876,32 @@ class DashboardServices:
             self._market_runtime_state.update(
                 {
                     "state": "NOT_CONFIGURED",
+                    "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
                     "last_sync_at": utc_now_iso(),
                     "last_error": market_state["reason"],
+                    "fixtures_considered": 0,
+                    "fixtures_matched": 0,
+                    "market_snapshots": 0,
+                    "markets_covered": [],
+                    "freshness": "UNKNOWN",
+                    "unresolved_fixture_count": 0,
+                    "stale_market_count": 0,
+                    "candidate_count": 0,
+                    "paper_entry_count": 0,
+                    "settlement_queue_count": 0,
+                    "decision_count": 0,
+                    "evaluations": {},
+                }
+            )
+            return
+
+        if not self.config.enable_odds_sync:
+            self._market_runtime_state.update(
+                {
+                    "state": market_state["state"],
+                    "automatic_odds_sync": "DISABLED",
+                    "last_sync_at": utc_now_iso(),
+                    "last_error": None,
                     "fixtures_considered": 0,
                     "fixtures_matched": 0,
                     "market_snapshots": 0,
@@ -1029,6 +1059,7 @@ class DashboardServices:
         self._market_runtime_state.update(
             {
                 "state": market_state["state"],
+                "automatic_odds_sync": "ENABLED",
                 "last_sync_at": utc_now_iso(),
                 "last_successful_snapshot_at": last_successful_snapshot_at,
                 "last_error": market_state.get("last_error") or market_state.get("reason"),

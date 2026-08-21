@@ -235,8 +235,52 @@ class PaperTradeUpdate:
         json.loads(self.payload_json)
 
 
+def find_identical_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnapshot) -> int | None:
+    """Return the snapshot_id of an identical stored snapshot, or None.
+
+    Identical means the same immutable price state for the same provider event
+    and bookmaker selection: same fixture, provider, provider event id,
+    bookmaker, market, selection, line, odds, and provider update timestamp.
+    """
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT snapshot_id
+        FROM market_snapshots
+        WHERE fixture_id = ?
+          AND provider = ?
+          AND bookmaker = ?
+          AND market = ?
+          AND selection = ?
+          AND line IS ?
+          AND odds = ?
+          AND provider_timestamp IS ?
+          AND provider_fixture_id IS ?
+          AND is_pre_match = ?
+        ORDER BY snapshot_id DESC
+        LIMIT 1
+        """,
+        (
+            snapshot.fixture_id,
+            snapshot.provider,
+            snapshot.bookmaker,
+            snapshot.market,
+            snapshot.selection,
+            snapshot.line,
+            snapshot.odds,
+            snapshot.provider_timestamp,
+            snapshot.provider_fixture_id,
+            1 if snapshot.is_pre_match else 0,
+        ),
+    ).fetchone()
+    return None if row is None else int(row["snapshot_id"])
+
+
 def record_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnapshot) -> int:
     ensure_schema(conn)
+    existing = find_identical_market_snapshot(conn, snapshot)
+    if existing is not None:
+        return existing
     with conn:
         result = conn.execute(
             """
