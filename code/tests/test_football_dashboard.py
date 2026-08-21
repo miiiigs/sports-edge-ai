@@ -387,6 +387,33 @@ def test_dashboard_config_default_uses_configured_data_dir(monkeypatch, tmp_path
     assert config.persistent_data_dir_configured is True
 
 
+def test_dashboard_services_odds_sync_disabled_makes_no_provider_calls(tmp_path: Path):
+    fixture = _fixture()
+    calls = {"count": 0}
+
+    class RecordingMarketProvider(FakeMarketProvider):
+        def get_market_snapshot(
+            self,
+            fixture_id: str,
+            *,
+            fixture_context: dict | None = None,
+        ) -> list[NormalizedMarketSnapshot]:
+            calls["count"] += 1
+            return []
+
+    config = replace(_dashboard_config(tmp_path), current_odds_connected=True, enable_odds_sync=False)
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=RecordingMarketProvider(),
+    )
+
+    asyncio.run(services.initialize())
+    asyncio.run(services.sync_once())
+    assert calls["count"] == 0
+    asyncio.run(services.shutdown())
+
+
 def test_dashboard_services_block_unresolved_team_identity(tmp_path: Path):
     fixture = _fixture(home_team_name="Unknown Town")
     services = DashboardServices(
@@ -781,7 +808,7 @@ def test_dashboard_services_recovers_after_provider_failure(tmp_path: Path):
 
 def test_dashboard_services_current_market_candidate_creates_idempotent_paper_entry(tmp_path: Path):
     fixture = _fixture()
-    config = replace(_dashboard_config(tmp_path), current_xg_connected=True)
+    config = replace(_dashboard_config(tmp_path), current_xg_connected=True, enable_odds_sync=True)
     market_provider = FakeMarketProvider()
     services = DashboardServices(
         config=config,
