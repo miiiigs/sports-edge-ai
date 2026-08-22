@@ -1,9 +1,11 @@
-"""The Odds API current market provider (soccer 1X2 / h2h).
+"""The Odds API current market provider (soccer h2h + totals).
 
 Free-tier-safe foundation:
 
 - Credential is read from ``SPORTS_AI_THE_ODDS_API_KEY`` and never logged.
-- Only CURRENT h2h (soccer 1X2) decimal odds are supported.
+- CURRENT h2h (soccer 1X2) and totals (goals Over/Under) decimal odds are
+  supported. Totals normalize to the ``goals_total`` market family with exact
+  provider point lines (no rounding or approximation).
 - One bookmaker region via ``SPORTS_AI_ODDS_REGION``.
 - Events are fetched once per sport key and reused through a short in-process
   cache so repeated fixture matching does not repeat provider requests.
@@ -16,6 +18,7 @@ elsewhere (``SPORTS_AI_ENABLE_ODDS_SYNC``).
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -34,6 +37,14 @@ THE_ODDS_API_INGESTION_VERSION = "the_odds_api_current_market_provider_v1"
 THE_ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 
 THE_ODDS_MARKET_H2H = "h2h"
+THE_ODDS_MARKET_TOTALS = "totals"
+THE_ODDS_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_H2H},{THE_ODDS_MARKET_TOTALS}"
+_SUPPORTED_MARKET_KEYS = frozenset({THE_ODDS_MARKET_H2H, THE_ODDS_MARKET_TOTALS})
+
+MARKET_1X2 = "1x2"
+MARKET_GOALS_TOTAL = "goals_total"
+TOTALS_SELECTION_OVER = "OVER"
+TOTALS_SELECTION_UNDER = "UNDER"
 
 STATE_NOT_CONFIGURED = "NOT_CONFIGURED"
 STATE_IDLE = "IDLE"
@@ -353,7 +364,7 @@ class TheOddsApiProvider:
             endpoint=f"sports/{sport_key}/odds",
             params={
                 "regions": self._region(),
-                "markets": THE_ODDS_MARKET_H2H,
+                "markets": THE_ODDS_MARKETS_REQUESTED,
                 "oddsFormat": "decimal",
             },
         )
@@ -402,6 +413,36 @@ class TheOddsApiProvider:
             return "AWAY"
         return None
 
+    @staticmethod
+    def _classify_totals_selection(outcome_name: str) -> str | None:
+        normalized = normalize_text_key(outcome_name)
+        if normalized == "over":
+            return TOTALS_SELECTION_OVER
+        if normalized == "under":
+            return TOTALS_SELECTION_UNDER
+        return None
+
+    @staticmethod
+    def _normalize_totals_line(point: Any) -> float | None:
+        """Return a canonical totals line, or None to fail closed.
+
+        A totals line must be numeric, finite, non-negative, and expressed on an
+        integer / half / quarter step so the exact line identity Day 11 requires
+        is preserved. Missing, malformed, negative, or non-canonical points are
+        dropped instead of being emitted as an unsafe snapshot.
+        """
+        if point is None:
+            return None
+        try:
+            line = float(point)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(line) or line < 0:
+            return None
+        if not (line * 4).is_integer():
+            return None
+        return line
+
     def _freshness_state(
         self,
         *,
@@ -445,7 +486,7 @@ class TheOddsApiProvider:
 
             for market in bookmaker.get("markets") or []:
                 market_key = str(market.get("key") or "").strip()
-                if market_key != THE_ODDS_MARKET_H2H:
+                if market_key not in _SUPPORTED_MARKET_KEYS:
                     continue
                 source_timestamp = (
                     str(market.get("last_update") or "").strip()
@@ -463,9 +504,25 @@ class TheOddsApiProvider:
                         continue
                     if price <= 1.0:
                         continue
-                    selection = self._classify_h2h_selection(home_team, away_team, outcome_name)
-                    if selection is None:
-                        continue
+                    if market_key == THE_ODDS_MARKET_TOTALS:
+                        selection = self._classify_totals_selection(outcome_name)
+                        if selection is None:
+                            continue
+                        snapshot_line = self._normalize_totals_line(outcome.get("point"))
+                        if snapshot_line is None:
+                            continue
+                        snapshot_market = MARKET_GOALS_TOTAL
+                        snapshot_selection = selection
+                    else:
+                        selection = self._classify_h2h_selection(home_team, away_team, outcome_name)
+                        if selection is None:
+                            continue
+                        snapshot_market = MARKET_1X2
+                        snapshot_selection = selection
+                        snapshot_line = None
+                    provider_market_id = f"{event_id}:{key_lower}:{market_key}:{snapshot_selection}"
+                    if snapshot_line is not None:
+                        provider_market_id = f"{provider_market_id}:{snapshot_line}"
                     snapshots.append(
                         NormalizedMarketSnapshot(
                             provider=self.provider_name(),
@@ -473,13 +530,13 @@ class TheOddsApiProvider:
                             provider_fixture_id=event_id,
                             captured_at=captured_at,
                             source_timestamp=source_timestamp,
-                            market="1x2",
-                            selection=selection,
-                            line=None,
+                            market=snapshot_market,
+                            selection=snapshot_selection,
+                            line=snapshot_line,
                             decimal_odds=price,
                             bookmaker=key_lower,
                             ingestion_version=THE_ODDS_API_INGESTION_VERSION,
-                            provider_market_id=f"{event_id}:{key_lower}:{market_key}:{selection}",
+                            provider_market_id=provider_market_id,
                             is_pre_match=True,
                             home_team_name=str(fixture_context.get("home_team_name") or ""),
                             away_team_name=str(fixture_context.get("away_team_name") or ""),
