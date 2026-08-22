@@ -11,6 +11,7 @@ from ..experiments.football_day11_manager_core import (
     DECISION_PRELIMINARY_CANDIDATE,
     DECISION_REJECTED_RULE,
     DECISION_STALE_MARKET,
+    FRESHNESS_STATE_FRESH,
     REASON_INCOMPLETE_REFERENCE_MARKET,
     REASON_MISSING_REFERENCE_MARKET,
     apply_day11_manager_rules,
@@ -35,7 +36,9 @@ from ..experiments.football_day12_safeguards import (
 )
 from ..locking import canonical_hash
 from ..market_data.providers import NormalizedMarketSnapshot
+from ..market_data.the_odds_api import classify_freshness_state, resolve_market_max_age_minutes
 from .day12_rolling_xg import XgRowsByRole, missing_xg_inspection
+from .models import utc_now_iso
 
 XgProfileProvider = Callable[[], tuple[XgRowsByRole, dict[str, Any]]]
 
@@ -71,7 +74,7 @@ def current_snapshot_to_day11_row(
     *,
     fixture_context: dict[str, Any],
 ) -> dict[str, Any]:
-    return normalize_market_snapshot(
+    row = normalize_market_snapshot(
         {
             "fixture_id": snapshot.fixture_id,
             "event_id": snapshot.fixture_id,
@@ -98,6 +101,10 @@ def current_snapshot_to_day11_row(
             "source_snapshot_version_id": _source_snapshot_version_id(snapshot),
         }
     )
+    # Carry the raw provider update timestamp so the paper-eligibility gate can
+    # recompute freshness at decision time rather than trusting capture-time state.
+    row["source_timestamp"] = snapshot.source_timestamp
+    return row
 
 
 def _reference_market_by_bookmaker(rows: Sequence[dict[str, Any]]) -> tuple[dict[str, Any] | None, str | None]:
@@ -168,6 +175,7 @@ def build_fixture_market_evaluation(
     xg_profile_provider: XgProfileProvider | None = None,
     xg_max_abs_gap_per_team: float = DEFAULT_XG_MAX_ABS_GAP_PER_TEAM,
     xg_min_window_matches: int = DEFAULT_XG_MIN_WINDOW_MATCHES,
+    market_freshness_evaluated_at: str | None = None,
 ) -> dict[str, Any]:
     if str(prediction.get("prediction_status")) != "READY":
         return {
@@ -239,6 +247,17 @@ def build_fixture_market_evaluation(
                     available_offer_rows=available_offer_rows,
                     decision_as_of=decision_as_of,
                 )
+            best_offer = decision_payload.get("best_available_offer")
+            # Recompute freshness at decision time (not capture time) so a stored
+            # snapshot cannot retain an obsolete FRESH classification. The raw
+            # provider update timestamp of the selected best offer is authoritative.
+            market_freshness = classify_freshness_state(
+                source_timestamp=None if best_offer is None else best_offer.get("source_timestamp"),
+                evaluated_at=market_freshness_evaluated_at or utc_now_iso(),
+                threshold_minutes=resolve_market_max_age_minutes(),
+                kickoff_utc=fixture_context.get("kickoff_utc"),
+            )
+            freshness_gate_passed = market_freshness == FRESHNESS_STATE_FRESH
             day12_state = "NOT_APPLICABLE"
             paper_entry_eligible = False
             xg_rule = None
@@ -271,7 +290,11 @@ def build_fixture_market_evaluation(
                         }
                     day12_state = _day12_state_from_xg_rule(xg_rule)
                     paper_entry_eligible = xg_rule["status"] == XG_STATUS_PASS
-            best_offer = decision_payload.get("best_available_offer")
+                # Market freshness is an explicit market-quality gate: a paper entry
+                # may only ever be created against a FRESH market. STALE or UNKNOWN
+                # market data fails closed regardless of Day 12 outcome.
+                if not freshness_gate_passed:
+                    paper_entry_eligible = False
             decision_rows.append(
                 {
                     "current_decision_schema_version": CURRENT_DECISION_SCHEMA_VERSION,
@@ -313,6 +336,8 @@ def build_fixture_market_evaluation(
                     "settlement_engine_version": model_row.get("settlement_engine_version"),
                     "day12_state": day12_state,
                     "paper_entry_eligible": paper_entry_eligible,
+                    "market_freshness": market_freshness,
+                    "freshness_gate_passed": freshness_gate_passed,
                     "xg_status": None if xg_rule is None else xg_rule.get("status"),
                     "xg_reason_codes": [] if xg_rule is None else list(xg_rule.get("reason_codes") or []),
                     "xg_home_recent_for_per_match": None
@@ -333,6 +358,7 @@ def build_fixture_market_evaluation(
             for row in decision_rows
             if row["decision"] in {DECISION_MISSING_REQUIRED_MARKET_DATA, DECISION_REJECTED_RULE, DECISION_STALE_MARKET}
             or row["day12_state"] == DAY12_BLOCKED_MISSING_XG_DATA
+            or (row["decision"] == DECISION_PRELIMINARY_CANDIDATE and not row["freshness_gate_passed"])
         ),
         "passed_safeguards": sum(1 for row in decision_rows if row["paper_entry_eligible"]),
     }
