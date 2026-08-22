@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from ..experiments.football_day11_manager_core import (
     DECISION_MISSING_REQUIRED_MARKET_DATA,
@@ -19,9 +19,25 @@ from ..experiments.football_day11_manager_core import (
     normalize_market_snapshot,
     validate_reference_market_rows,
 )
-from ..experiments.football_day12_safeguards import DAY12_BLOCKED_MISSING_XG_DATA, XG_APPLICABLE_COMPETITIONS
+from ..experiments.football_day12_safeguards import (
+    DAY12_BLOCKED_MISSING_XG_DATA,
+    DAY12_REJECTED_BY_XG_VETO,
+    DAY12_REVIEW_REQUIRED,
+    DEFAULT_XG_MAX_ABS_GAP_PER_TEAM,
+    DEFAULT_XG_MIN_WINDOW_MATCHES,
+    XG_APPLICABLE_COMPETITIONS,
+    XG_STATUS_MISSING,
+    XG_STATUS_NOT_APPLICABLE,
+    XG_STATUS_PASS,
+    XG_STATUS_REVIEW,
+    XG_STATUS_VETO,
+    evaluate_xg_rule,
+)
 from ..locking import canonical_hash
 from ..market_data.providers import NormalizedMarketSnapshot
+from .day12_rolling_xg import XgRowsByRole, missing_xg_inspection
+
+XgProfileProvider = Callable[[], tuple[XgRowsByRole, dict[str, Any]]]
 
 CURRENT_INPUT_LABEL = "CURRENT MARKET INPUT"
 CURRENT_DECISION_SCHEMA_VERSION = "football_current_market_decision_v1"
@@ -149,6 +165,9 @@ def build_fixture_market_evaluation(
     prediction: dict[str, Any],
     snapshots: Sequence[NormalizedMarketSnapshot],
     current_xg_connected: bool,
+    xg_profile_provider: XgProfileProvider | None = None,
+    xg_max_abs_gap_per_team: float = DEFAULT_XG_MAX_ABS_GAP_PER_TEAM,
+    xg_min_window_matches: int = DEFAULT_XG_MIN_WINDOW_MATCHES,
 ) -> dict[str, Any]:
     if str(prediction.get("prediction_status")) != "READY":
         return {
@@ -185,6 +204,13 @@ def build_fixture_market_evaluation(
     grouped_current_rows = _group_current_rows(current_rows)
     model_rows = list(prediction.get("market_rows") or [])
     model_index = _index_model_rows(model_rows)
+    fixture_competition_id = str(fixture_context.get("competition_id") or "")
+    fixture_xg: tuple[XgRowsByRole, dict[str, Any]] | None = None
+    if current_xg_connected and fixture_competition_id in XG_APPLICABLE_COMPETITIONS:
+        if xg_profile_provider is not None:
+            fixture_xg = xg_profile_provider()
+        else:
+            fixture_xg = ({}, missing_xg_inspection())
     decision_rows: list[dict[str, Any]] = []
     market_provider_fixture_id = next((snapshot.provider_fixture_id for snapshot in snapshots if snapshot.provider_fixture_id), None)
     for group_key, group_rows in sorted(grouped_current_rows.items()):
@@ -215,12 +241,36 @@ def build_fixture_market_evaluation(
                 )
             day12_state = "NOT_APPLICABLE"
             paper_entry_eligible = False
+            xg_rule = None
             if decision_payload["decision"] == DECISION_PRELIMINARY_CANDIDATE:
-                if not current_xg_connected and str(model_row["competition_id"]) in XG_APPLICABLE_COMPETITIONS:
-                    day12_state = DAY12_BLOCKED_MISSING_XG_DATA
-                else:
+                if fixture_competition_id not in XG_APPLICABLE_COMPETITIONS:
                     day12_state = "PASSED"
                     paper_entry_eligible = True
+                elif not current_xg_connected:
+                    day12_state = DAY12_BLOCKED_MISSING_XG_DATA
+                else:
+                    xg_rows, xg_inspection = fixture_xg or ({}, missing_xg_inspection())
+                    try:
+                        xg_rule = evaluate_xg_rule(
+                            candidate={
+                                "competition_id": str(model_row["competition_id"]),
+                                "fixture_id": str(model_row["fixture_id"]),
+                                "decision_as_of": decision_as_of,
+                            },
+                            fixture_support=_live_fixture_support(prediction),
+                            xg_rows_by_fixture_role=xg_rows,
+                            xg_input_inspection=xg_inspection,
+                            max_abs_gap_per_team=xg_max_abs_gap_per_team,
+                            min_window_matches=xg_min_window_matches,
+                        )
+                    except Exception:
+                        xg_rule = {
+                            "status": XG_STATUS_MISSING,
+                            "reason_codes": ["XG_EVALUATION_FAILED"],
+                            "required": True,
+                        }
+                    day12_state = _day12_state_from_xg_rule(xg_rule)
+                    paper_entry_eligible = xg_rule["status"] == XG_STATUS_PASS
             best_offer = decision_payload.get("best_available_offer")
             decision_rows.append(
                 {
@@ -263,6 +313,14 @@ def build_fixture_market_evaluation(
                     "settlement_engine_version": model_row.get("settlement_engine_version"),
                     "day12_state": day12_state,
                     "paper_entry_eligible": paper_entry_eligible,
+                    "xg_status": None if xg_rule is None else xg_rule.get("status"),
+                    "xg_reason_codes": [] if xg_rule is None else list(xg_rule.get("reason_codes") or []),
+                    "xg_home_recent_for_per_match": None
+                    if xg_rule is None
+                    else xg_rule.get("home_recent_xg_for_per_match"),
+                    "xg_away_recent_for_per_match": None
+                    if xg_rule is None
+                    else xg_rule.get("away_recent_xg_for_per_match"),
                 }
             )
 
@@ -292,3 +350,30 @@ def build_fixture_market_evaluation(
         "display_rows": _best_display_rows(decision_rows),
         "counts": counts,
     }
+
+
+def _live_fixture_support(prediction: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the minimal Day 12 fixture_support from a live prediction."""
+    expected_home = prediction.get("expected_home_goals", prediction.get("expected_goals_home"))
+    expected_away = prediction.get("expected_away_goals", prediction.get("expected_goals_away"))
+    if expected_home is None or expected_away is None:
+        return None
+    return {
+        "expected_goals_home": float(expected_home),
+        "expected_goals_away": float(expected_away),
+    }
+
+
+def _day12_state_from_xg_rule(xg_rule: dict[str, Any]) -> str:
+    status = str(xg_rule.get("status") or "")
+    if status == XG_STATUS_PASS:
+        return "PASSED"
+    if status == XG_STATUS_VETO:
+        return DAY12_REJECTED_BY_XG_VETO
+    if status == XG_STATUS_REVIEW:
+        return DAY12_REVIEW_REQUIRED
+    if status == XG_STATUS_MISSING:
+        return DAY12_BLOCKED_MISSING_XG_DATA
+    if status == XG_STATUS_NOT_APPLICABLE:
+        return "NOT_APPLICABLE"
+    return DAY12_BLOCKED_MISSING_XG_DATA

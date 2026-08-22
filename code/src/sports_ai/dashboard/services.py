@@ -20,6 +20,7 @@ from ..market_data.the_odds_api import TheOddsApiProvider
 from ..storage import football_paper_trading
 from . import storage
 from .current_market import build_fixture_market_evaluation
+from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
 from .fixture_provider import (
     FootballDataOrgFixtureProvider,
     FixtureProvider,
@@ -139,10 +140,12 @@ class DashboardServices:
         *,
         fixture_provider: FixtureProvider | None = None,
         market_provider: CurrentMarketProvider | None = None,
+        xg_profile_factory: Any | None = None,
     ):
         self.config = DashboardConfig.default() if config is None else config
         self.fixture_provider = fixture_provider or FootballDataOrgFixtureProvider()
         self.market_provider = market_provider or _default_market_provider(self.config)
+        self._xg_profile_factory = xg_profile_factory
         self.snapshot: CurrentFootballModelSnapshot | None = None
         self.snapshot_error: str | None = None
         self._background_task: asyncio.Task[None] | None = None
@@ -868,6 +871,48 @@ class DashboardServices:
                     ),
                 )
 
+    def _xg_profile_provider(self, row: dict[str, Any], prediction: dict[str, Any], snapshots: list[Any]):
+        """Return a zero-arg provider building point-in-time xG rows for one fixture."""
+        if self._xg_profile_factory is not None:
+            return self._xg_profile_factory(row, prediction, snapshots)
+        competition_id = str(row.get("competition_id") or "")
+        research_db_path = self.config.research_db_path
+        snapshot = self.snapshot
+        team_resolution = prediction.get("team_resolution") or {}
+        home_team = str(
+            (team_resolution.get("home") or {}).get("canonical_team_name") or row.get("home_team_name") or ""
+        )
+        away_team = str(
+            (team_resolution.get("away") or {}).get("canonical_team_name") or row.get("away_team_name") or ""
+        )
+
+        def build():
+            try:
+                if snapshot is None:
+                    return {}, missing_xg_inspection()
+                coefficients = (snapshot.conversion_coefficients or {}).get(competition_id)
+                if not coefficients:
+                    return {}, missing_xg_inspection()
+                model_as_of = str(prediction.get("model_as_of") or "")
+                decision_as_of = max(
+                    model_as_of,
+                    max((str(snapshot_row.captured_at) for snapshot_row in snapshots), default=model_as_of),
+                )
+                return build_fixture_xg_rows(
+                    db_path=research_db_path,
+                    competition_id=competition_id,
+                    fixture_id=str(row.get("fixture_id") or ""),
+                    home_team=home_team,
+                    away_team=away_team,
+                    decision_as_of=decision_as_of,
+                    coefficients=coefficients,
+                    min_window_matches=DEFAULT_XG_MIN_WINDOW_MATCHES,
+                )
+            except Exception:
+                return {}, missing_xg_inspection()
+
+        return build
+
     def _sync_current_market_state(self, rows_with_predictions: list[dict[str, Any]]) -> None:
         market_state = self._market_provider_state()
         now_utc = datetime.now(timezone.utc)
@@ -1037,6 +1082,9 @@ class DashboardServices:
                     prediction=prediction,
                     snapshots=snapshots,
                     current_xg_connected=self.config.current_xg_connected,
+                    xg_profile_provider=self._xg_profile_provider(row, prediction, snapshots)
+                    if self.config.current_xg_connected
+                    else None,
                 )
                 for decision_row in evaluation.get("decision_rows") or []:
                     provider_market_id = decision_row.get("best_available_provider_market_id")
