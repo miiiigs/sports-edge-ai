@@ -65,6 +65,44 @@ EVENT = {
 QUOTA_HEADERS = {"x-requests-remaining": "495", "x-requests-used": "5", "x-requests-last": "1"}
 
 
+TOTALS_MARKET_2_5 = {
+    "key": "totals",
+    "last_update": "2026-08-22T12:00:00+00:00",
+    "outcomes": [
+        {"name": "Over", "price": 1.95, "point": 2.5},
+        {"name": "Under", "price": 1.91, "point": 2.5},
+    ],
+}
+
+EVENT_WITH_TOTALS = {
+    "id": "epl_event_123",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": KICKOFF,
+    "home_team": "Manchester United",
+    "away_team": "Liverpool",
+    "bookmakers": [
+        {
+            "key": "pinnacle",
+            "title": "Pinnacle",
+            "last_update": "2026-08-22T12:00:00+00:00",
+            "markets": [
+                {
+                    "key": "h2h",
+                    "last_update": "2026-08-22T12:00:00+00:00",
+                    "outcomes": [
+                        {"name": "Manchester United", "price": 2.10},
+                        {"name": "Draw", "price": 3.50},
+                        {"name": "Liverpool", "price": 3.20},
+                    ],
+                },
+                TOTALS_MARKET_2_5,
+            ],
+        }
+    ],
+}
+
+
 def _make_provider(handler, config=None):
     transport = httpx.MockTransport(handler)
     client = httpx.Client(transport=transport)
@@ -185,7 +223,7 @@ def test_one_region_configuration(monkeypatch):
     provider = _make_provider(handler)
     provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
     assert captured["regions"] == "eu"
-    assert captured["markets"] == "h2h"
+    assert captured["markets"] == "h2h,totals"
     assert captured["oddsFormat"] == "decimal"
 
 
@@ -325,6 +363,319 @@ def test_unverified_competition_raises(monkeypatch):
     with pytest.raises(MarketProviderError) as exc:
         provider.get_market_snapshot(FIXTURE_ID, fixture_context=context)
     assert "UNVERIFIED" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Goals totals normalization
+# ---------------------------------------------------------------------------
+
+
+def test_request_includes_h2h_and_totals(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    captured = {}
+
+    def handler(request):
+        captured["markets"] = request.url.params.get("markets")
+        return httpx.Response(200, json=[EVENT_WITH_TOTALS], headers=QUOTA_HEADERS, request=request)
+
+    provider = _make_provider(handler)
+    provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    assert captured["markets"] == "h2h,totals"
+
+
+def test_h2h_and_totals_coexist(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    provider = _make_provider(_odds_handler({"count": 0}, events=[EVENT_WITH_TOTALS]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    by_market = {snapshot.market: [s for s in snapshots if s.market == snapshot.market] for snapshot in snapshots}
+    assert set(by_market) == {"1x2", "goals_total"}
+    assert {s.selection for s in by_market["1x2"]} == {"HOME", "DRAW", "AWAY"}
+    assert {s.selection for s in by_market["goals_total"]} == {"OVER", "UNDER"}
+
+
+def test_totals_over_normalization(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    provider = _make_provider(_odds_handler({"count": 0}, events=[EVENT_WITH_TOTALS]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    over = [s for s in snapshots if s.market == "goals_total" and s.selection == "OVER"]
+    assert len(over) == 1
+    assert over[0].line == 2.5
+    assert over[0].decimal_odds == pytest.approx(1.95)
+    assert over[0].bookmaker == "pinnacle"
+    assert over[0].provider == "the-odds-api"
+
+
+def test_totals_under_normalization(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    provider = _make_provider(_odds_handler({"count": 0}, events=[EVENT_WITH_TOTALS]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    under = [s for s in snapshots if s.market == "goals_total" and s.selection == "UNDER"]
+    assert len(under) == 1
+    assert under[0].line == 2.5
+    assert under[0].decimal_odds == pytest.approx(1.91)
+    assert under[0].bookmaker == "pinnacle"
+
+
+def test_totals_distinct_lines_remain_distinct(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [
+                            {"name": "Over", "price": 1.95, "point": 2.5},
+                            {"name": "Over", "price": 1.80, "point": 3.5},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    overs = [s for s in snapshots if s.market == "goals_total" and s.selection == "OVER"]
+    assert sorted(s.line for s in overs) == [2.5, 3.5]
+    ids = {s.provider_market_id for s in overs}
+    assert len(ids) == 2
+    assert any("2.5" in market_id for market_id in ids)
+    assert any("3.5" in market_id for market_id in ids)
+
+
+def test_totals_integer_line_preserved(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [{"name": "Over", "price": 2.02, "point": 3}],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    over = [s for s in snapshots if s.market == "goals_total" and s.selection == "OVER"]
+    assert len(over) == 1
+    assert over[0].line == 3.0
+    assert over[0].decimal_odds == pytest.approx(2.02)
+
+
+def test_totals_bookmaker_identity_preserved(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [
+                            {"name": "Over", "price": 1.95, "point": 2.5},
+                            {"name": "Under", "price": 1.91, "point": 2.5},
+                        ],
+                    },
+                ],
+            },
+            {
+                "key": "bet365",
+                "title": "Bet365",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [
+                            {"name": "Over", "price": 2.00, "point": 2.5},
+                            {"name": "Under", "price": 1.85, "point": 2.5},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    goals = [s for s in snapshots if s.market == "goals_total"]
+    assert {s.bookmaker for s in goals} == {"pinnacle", "bet365"}
+
+
+def test_totals_timestamps_preserved(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    provider = _make_provider(_odds_handler({"count": 0}, events=[EVENT_WITH_TOTALS]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    goals = [s for s in snapshots if s.market == "goals_total"]
+    assert all(s.source_timestamp == "2026-08-22T12:00:00+00:00" for s in goals)
+    assert len({s.captured_at for s in goals}) == 1
+    assert all(s.captured_at for s in goals)
+
+
+def test_totals_missing_point_fails_safely(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [{"name": "Over", "price": 1.95}],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    assert not any(s.market == "goals_total" for s in snapshots)
+
+
+def test_totals_malformed_point_fails_safely(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [{"name": "Over", "price": 1.95, "point": "not-a-number"}],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    assert not any(s.market == "goals_total" for s in snapshots)
+
+
+def test_totals_negative_point_fails_safely(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [{"name": "Over", "price": 1.95, "point": -2.5}],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    assert not any(s.market == "goals_total" for s in snapshots)
+
+
+def test_totals_non_quarter_step_line_skipped(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [{"name": "Over", "price": 1.95, "point": 2.7}],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    assert not any(s.market == "goals_total" for s in snapshots)
+
+
+def test_totals_unknown_outcome_ignored(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [
+                            {"name": "Over", "price": 1.95, "point": 2.5},
+                            {"name": "Draw", "price": 4.50, "point": 2.5},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    goals = [s for s in snapshots if s.market == "goals_total"]
+    assert {s.selection for s in goals} == {"OVER"}
+
+
+def test_totals_incomplete_pair_not_fabricated(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **EVENT_WITH_TOTALS,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [{"name": "Over", "price": 1.95, "point": 2.5}],
+                    },
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_odds_handler({"count": 0}, events=[event]))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    goals = [s for s in snapshots if s.market == "goals_total"]
+    assert {s.selection for s in goals} == {"OVER"}
+    assert not any(s.selection == "UNDER" for s in goals)
 
 
 def test_day12_constants_unchanged():
