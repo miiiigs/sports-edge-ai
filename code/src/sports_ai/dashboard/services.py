@@ -743,6 +743,8 @@ class DashboardServices:
         for row in evaluation.get("decision_rows") or []:
             if not row.get("paper_entry_eligible"):
                 continue
+            if str(row.get("market_freshness") or "UNKNOWN") != "FRESH":
+                continue
             existing = football_paper_trading.find_existing_paper_trade_entry(
                 conn,
                 prediction_id=str(prediction["prediction_id"]),

@@ -63,6 +63,54 @@ def _parse_env_list(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def resolve_market_max_age_minutes(env_var: str = "SPORTS_AI_MARKET_MAX_AGE_MINUTES") -> int | None:
+    """Return the configured market max-age threshold in minutes, or None.
+
+    Unset, non-numeric, zero, or negative values fail closed to None (UNKNOWN).
+    """
+    raw = os.environ.get(env_var, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def classify_freshness_state(
+    *,
+    source_timestamp: str | None,
+    evaluated_at: str,
+    threshold_minutes: int | None,
+    kickoff_utc: str | None = None,
+) -> str:
+    """Deterministically classify market freshness.
+
+    FRESH when 0 <= age <= threshold; STALE when age > threshold (or source is
+    post-kickoff); UNKNOWN when the source timestamp is missing, malformed, or
+    in the future, or when no threshold is configured. Never classifies a
+    missing/future source as FRESH.
+    """
+    if source_timestamp is None or threshold_minutes is None:
+        return FRESHNESS_STATE_UNKNOWN
+    try:
+        source_dt = parse_iso_datetime(source_timestamp)
+        evaluated_dt = parse_iso_datetime(evaluated_at)
+    except ValueError:
+        return FRESHNESS_STATE_UNKNOWN
+    if source_dt > evaluated_dt:
+        return FRESHNESS_STATE_UNKNOWN
+    if kickoff_utc is not None:
+        try:
+            if source_dt > parse_iso_datetime(kickoff_utc):
+                return FRESHNESS_STATE_STALE
+        except ValueError:
+            pass
+    age_minutes = (evaluated_dt - source_dt).total_seconds() / 60.0
+    return FRESHNESS_STATE_FRESH if age_minutes <= threshold_minutes else FRESHNESS_STATE_STALE
+
+
 @dataclass(frozen=True)
 class OddsSportMapping:
     """A Sports Edge competition mapped to a The Odds API sport key."""
@@ -188,16 +236,7 @@ class TheOddsApiProvider:
         return tuple(name.lower() for name in _parse_env_list(raw))
 
     def _freshness_threshold_minutes(self) -> int | None:
-        raw = os.environ.get(self._config.freshness_max_age_minutes_env_var, "").strip()
-        if not raw:
-            return None
-        try:
-            value = int(raw)
-        except ValueError as exc:  # pragma: no cover - defensive
-            raise MarketProviderError(
-                f"{self._config.freshness_max_age_minutes_env_var} must be an integer number of minutes"
-            ) from exc
-        return value if value > 0 else None
+        return resolve_market_max_age_minutes(self._config.freshness_max_age_minutes_env_var)
 
     def _set_state(self, state: str, error: str | None) -> None:
         self._state = state
@@ -370,22 +409,12 @@ class TheOddsApiProvider:
         captured_at: str,
         kickoff_utc: str | None,
     ) -> str:
-        threshold = self._freshness_threshold_minutes()
-        if source_timestamp is None or threshold is None:
-            return FRESHNESS_STATE_UNKNOWN
-        try:
-            source_dt = parse_iso_datetime(source_timestamp)
-            captured_dt = parse_iso_datetime(captured_at)
-        except ValueError:
-            return FRESHNESS_STATE_UNKNOWN
-        if kickoff_utc is not None:
-            try:
-                if source_dt > parse_iso_datetime(kickoff_utc):
-                    return FRESHNESS_STATE_STALE
-            except ValueError:
-                pass
-        age_minutes = (captured_dt - source_dt).total_seconds() / 60.0
-        return FRESHNESS_STATE_FRESH if age_minutes <= threshold else FRESHNESS_STATE_STALE
+        return classify_freshness_state(
+            source_timestamp=source_timestamp,
+            evaluated_at=captured_at,
+            threshold_minutes=self._freshness_threshold_minutes(),
+            kickoff_utc=kickoff_utc,
+        )
 
     def _snapshots_from_event(
         self,

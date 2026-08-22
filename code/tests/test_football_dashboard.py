@@ -257,7 +257,7 @@ def _market_snapshot(
         fixture_id=fixture.fixture_id,
         provider_fixture_id=fixture.provider_fixture_id,
         captured_at="2026-08-20T10:00:00+00:00",
-        source_timestamp="2026-08-20T10:00:00+00:00",
+        source_timestamp=(datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds"),
         market=market,
         selection=selection,
         line=line,
@@ -807,7 +807,8 @@ def test_dashboard_services_recovers_after_provider_failure(tmp_path: Path):
     asyncio.run(services.shutdown())
 
 
-def test_dashboard_services_current_market_candidate_creates_idempotent_paper_entry(tmp_path: Path):
+def test_dashboard_services_current_market_candidate_creates_idempotent_paper_entry(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
     fixture = _fixture()
     config = replace(_dashboard_config(tmp_path), current_xg_connected=True, enable_odds_sync=True)
     market_provider = FakeMarketProvider()

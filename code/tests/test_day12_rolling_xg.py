@@ -396,7 +396,8 @@ def test_not_applicable_xg_status_is_internally_consistent():
 # ---------------------------------------------------------------------------
 
 
-def test_valid_xg_allows_passed_and_paper_eligible():
+def test_valid_xg_allows_passed_and_paper_eligible(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
     rows = {
         (FIXTURE_ID, "HOME"): _rolling_row(FIXTURE_ID, "HOME", 1.5),
         (FIXTURE_ID, "AWAY"): _rolling_row(FIXTURE_ID, "AWAY", 1.1),
@@ -408,6 +409,7 @@ def test_valid_xg_allows_passed_and_paper_eligible():
         snapshots=_snapshots(FIXTURE_ID),
         current_xg_connected=True,
         xg_profile_provider=lambda: (rows, inspection),
+        market_freshness_evaluated_at="2026-08-23T09:00:00+00:00",
     )
     row = _home_candidate(evaluation)
     assert row is not None and row["decision"] == "PRELIMINARY_CANDIDATE"
@@ -456,12 +458,14 @@ def test_xg_disabled_behavior_unchanged():
     assert row["paper_entry_eligible"] is False
 
 
-def test_non_applicable_competition_unchanged():
+def test_non_applicable_competition_unchanged(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
     evaluation = build_fixture_market_evaluation(
         fixture_context=_fixture_context(FIXTURE_ID, competition_id="ENG3", competition_name="League One"),
         prediction=_prediction(FIXTURE_ID, competition_id="ENG3", competition_name="League One"),
         snapshots=_snapshots(FIXTURE_ID),
         current_xg_connected=False,
+        market_freshness_evaluated_at="2026-08-23T09:00:00+00:00",
     )
     row = _home_candidate(evaluation)
     assert "ENG3" not in XG_APPLICABLE_COMPETITIONS
