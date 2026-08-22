@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from sports_ai.dashboard.app import create_app
 from sports_ai.dashboard import storage as dashboard_storage
+from sports_ai.dashboard.day12_rolling_xg import SOURCE_IDENTIFIER, build_xg_inspection
 from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FixtureProviderError, FootballDataOrgFixtureProvider
 from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture, normalize_text_key
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices
@@ -810,10 +811,36 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
     fixture = _fixture()
     config = replace(_dashboard_config(tmp_path), current_xg_connected=True, enable_odds_sync=True)
     market_provider = FakeMarketProvider()
+
+    def xg_factory(row, prediction, snapshots):
+        expected_home = float(prediction["expected_home_goals"])
+        expected_away = float(prediction["expected_away_goals"])
+
+        def _row(role, recent):
+            return {
+                "fixture_id": fixture.fixture_id,
+                "team_role": role,
+                "recent_xg_for_per_match": recent,
+                "matches_in_window": 5,
+                "as_of": "2026-05-24T20:00:00+00:00",
+                "window_start_at": "2026-04-01T20:00:00+00:00",
+                "window_end_at": "2026-05-24T20:00:00+00:00",
+                "source": SOURCE_IDENTIFIER,
+                "competition_id": "ENG1",
+            }
+
+        rows = {
+            (fixture.fixture_id, "HOME"): _row("HOME", expected_home),
+            (fixture.fixture_id, "AWAY"): _row("AWAY", expected_away),
+        }
+        inspection = build_xg_inspection(rows)
+        return lambda: (rows, inspection)
+
     services = DashboardServices(
         config=config,
         fixture_provider=FakeFixtureProvider([fixture]),
         market_provider=market_provider,
+        xg_profile_factory=xg_factory,
     )
 
     asyncio.run(services.initialize())
