@@ -114,6 +114,8 @@ def _odds_handler(calls, events=None, headers=None, status=200):
         calls["count"] += 1
         if request.url.path.endswith("/sports/soccer_epl/odds"):
             return httpx.Response(status, json=events if events is not None else [EVENT], headers=headers or QUOTA_HEADERS, request=request)
+        if "/events/" in request.url.path and request.url.path.endswith("/odds"):
+            return httpx.Response(200, json={"id": "epl_event_123", "bookmakers": []}, headers=headers or QUOTA_HEADERS, request=request)
         return httpx.Response(404, request=request)
 
     return handler
@@ -215,10 +217,12 @@ def test_one_region_configuration(monkeypatch):
     captured = {}
 
     def handler(request):
-        captured["regions"] = request.url.params.get("regions")
-        captured["markets"] = request.url.params.get("markets")
-        captured["oddsFormat"] = request.url.params.get("oddsFormat")
-        return httpx.Response(200, json=[EVENT], headers=QUOTA_HEADERS, request=request)
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            captured["regions"] = request.url.params.get("regions")
+            captured["markets"] = request.url.params.get("markets")
+            captured["oddsFormat"] = request.url.params.get("oddsFormat")
+            return httpx.Response(200, json=[EVENT], headers=QUOTA_HEADERS, request=request)
+        return httpx.Response(200, json={"bookmakers": []}, headers=QUOTA_HEADERS, request=request)
 
     provider = _make_provider(handler)
     provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
@@ -263,7 +267,9 @@ def test_short_cache_prevents_duplicate_fetches(monkeypatch):
     ctx_2 = dict(FIXTURE_CONTEXT, fixture_id="football_data_fixture_2")
     provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
     provider.get_market_snapshot("football_data_fixture_2", fixture_context=ctx_2)
-    assert calls["count"] == 1
+    # One league-wide request + one BTTS event request; both cached on the second
+    # (same event) call, so no additional fetches occur.
+    assert calls["count"] == 2
 
 
 def test_auth_error_state(monkeypatch):
@@ -375,8 +381,10 @@ def test_request_includes_h2h_and_totals(monkeypatch):
     captured = {}
 
     def handler(request):
-        captured["markets"] = request.url.params.get("markets")
-        return httpx.Response(200, json=[EVENT_WITH_TOTALS], headers=QUOTA_HEADERS, request=request)
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            captured["markets"] = request.url.params.get("markets")
+            return httpx.Response(200, json=[EVENT_WITH_TOTALS], headers=QUOTA_HEADERS, request=request)
+        return httpx.Response(200, json={"bookmakers": []}, headers=QUOTA_HEADERS, request=request)
 
     provider = _make_provider(handler)
     provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
@@ -688,3 +696,198 @@ def test_day12_constants_unchanged():
     assert "ENG1" in XG_APPLICABLE_COMPETITIONS
     assert "ENG2" in XG_APPLICABLE_COMPETITIONS
     assert "ESP1" in XG_APPLICABLE_COMPETITIONS
+
+
+# ---------------------------------------------------------------------------
+# BTTS event-specific normalization
+# ---------------------------------------------------------------------------
+
+
+BTTS_MARKET = {
+    "key": "btts",
+    "last_update": "2026-08-22T12:00:00+00:00",
+    "outcomes": [
+        {"name": "Yes", "price": 1.90},
+        {"name": "No", "price": 1.85},
+    ],
+}
+
+BTTS_EVENT = {
+    "id": "epl_event_123",
+    "sport_key": "soccer_epl",
+    "commence_time": KICKOFF,
+    "home_team": "Manchester United",
+    "away_team": "Liverpool",
+    "bookmakers": [
+        {
+            "key": "pinnacle",
+            "title": "Pinnacle",
+            "last_update": "2026-08-22T12:00:00+00:00",
+            "markets": [BTTS_MARKET],
+        }
+    ],
+}
+
+
+def _btts_handler(league_events=None, btts_event=None, headers=None):
+    def handler(request):
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            return httpx.Response(200, json=league_events if league_events is not None else [EVENT], headers=headers or QUOTA_HEADERS, request=request)
+        if "/events/" in request.url.path and request.url.path.endswith("/odds"):
+            return httpx.Response(200, json=btts_event if btts_event is not None else BTTS_EVENT, headers=headers or QUOTA_HEADERS, request=request)
+        return httpx.Response(404, request=request)
+
+    return handler
+
+
+def test_btts_uses_event_specific_endpoint_and_normalizes(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    captured = {}
+
+    def handler(request):
+        if "/events/" in request.url.path:
+            captured["event_path"] = request.url.path
+            captured["markets"] = request.url.params.get("markets")
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            return httpx.Response(200, json=[EVENT], headers=QUOTA_HEADERS, request=request)
+        if "/events/" in request.url.path:
+            return httpx.Response(200, json=BTTS_EVENT, headers=QUOTA_HEADERS, request=request)
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler)
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    btts = [s for s in snapshots if s.market == "btts"]
+    assert captured["event_path"] == "/v4/sports/soccer_epl/events/epl_event_123/odds"
+    assert captured["markets"] == "btts"
+    assert {s.selection for s in btts} == {"YES", "NO"}
+    assert all(s.line is None for s in btts)
+    assert all(s.provider_fixture_id == "epl_event_123" for s in btts)
+    assert all(s.bookmaker == "pinnacle" for s in btts)
+    by_selection = {s.selection: s for s in btts}
+    assert by_selection["YES"].decimal_odds == pytest.approx(1.90)
+    assert by_selection["NO"].decimal_odds == pytest.approx(1.85)
+    assert by_selection["YES"].provider_market_id == "epl_event_123:pinnacle:btts:YES"
+
+
+def test_btts_case_insensitive_normalization(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **BTTS_EVENT,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "btts",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [
+                            {"name": "yes", "price": 1.70},
+                            {"name": "NO", "price": 2.10},
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_btts_handler(btts_event=event))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    btts = [s for s in snapshots if s.market == "btts"]
+    assert {s.selection for s in btts} == {"YES", "NO"}
+
+
+def test_btts_invalid_outcome_and_price_dropped(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event = {
+        **BTTS_EVENT,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [
+                    {
+                        "key": "btts",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "outcomes": [
+                            {"name": "Yes", "price": 1.90},
+                            {"name": "Maybe", "price": 1.50},
+                            {"name": "No", "price": None},
+                            {"name": "No", "price": "not-a-number"},
+                            {"name": "No", "price": 1.85},
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    provider = _make_provider(_btts_handler(btts_event=event))
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    btts = [s for s in snapshots if s.market == "btts"]
+    assert {s.selection for s in btts} == {"YES", "NO"}
+    assert len(btts) == 2
+
+
+def test_btts_source_timestamp_retained(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    provider = _make_provider(_btts_handler())
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    btts = [s for s in snapshots if s.market == "btts"]
+    assert all(s.source_timestamp == "2026-08-22T12:00:00+00:00" for s in btts)
+    assert all(s.kickoff_utc == KICKOFF for s in btts)
+
+
+def test_btts_event_request_failure_isolated(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    provider = _make_provider(_odds_handler({"count": 0}))  # 404s the event path
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    # h2h still returned even though the btts event request failed closed.
+    assert {s.market for s in snapshots} == {"1x2"}
+    assert not any(s.market == "btts" for s in snapshots)
+
+
+def test_btts_fan_out_cap_enforced(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    config = TheOddsApiProviderConfig(max_btts_event_requests=2)
+    event_requests = {"count": 0}
+    events = [
+        {**EVENT, "id": "epl_1", "home_team": "Arsenal", "away_team": "Chelsea", "commence_time": KICKOFF},
+        {**EVENT, "id": "epl_2", "home_team": "Spurs", "away_team": "West Ham", "commence_time": KICKOFF},
+        {**EVENT, "id": "epl_3", "home_team": "Everton", "away_team": "Leeds", "commence_time": KICKOFF},
+    ]
+
+    def handler(request):
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            return httpx.Response(200, json=events, headers=QUOTA_HEADERS, request=request)
+        if "/events/" in request.url.path:
+            event_requests["count"] += 1
+            return httpx.Response(200, json={"id": "x", "bookmakers": []}, headers=QUOTA_HEADERS, request=request)
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler, config=config)
+    for home, away in [("Arsenal", "Chelsea"), ("Spurs", "West Ham"), ("Everton", "Leeds")]:
+        ctx = dict(FIXTURE_CONTEXT, home_team_name=home, away_team_name=away)
+        provider.get_market_snapshot(FIXTURE_ID, fixture_context=ctx)
+    assert event_requests["count"] == 2
+    assert provider.diagnostics()["btts_truncated"] >= 1
+
+
+def test_btts_duplicate_event_no_duplicate_request(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    event_requests = {"count": 0}
+
+    def handler(request):
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            return httpx.Response(200, json=[EVENT], headers=QUOTA_HEADERS, request=request)
+        if "/events/" in request.url.path:
+            event_requests["count"] += 1
+            return httpx.Response(200, json=BTTS_EVENT, headers=QUOTA_HEADERS, request=request)
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler)
+    ctx_2 = dict(FIXTURE_CONTEXT, fixture_id="football_data_fixture_2")
+    provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    provider.get_market_snapshot("football_data_fixture_2", fixture_context=ctx_2)
+    # Same event ID on the second call -> cached, no duplicate btts request.
+    assert event_requests["count"] == 1
