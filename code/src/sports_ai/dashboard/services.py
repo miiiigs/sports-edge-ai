@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import json
 import logging
 import os
@@ -52,6 +53,7 @@ DEFAULT_UPCOMING_HORIZON_ENV_VAR = "SPORTS_AI_UPCOMING_HORIZON_DAYS"
 DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_XG_CONNECTED"
 DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_ODDS_CONNECTED"
 DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_ODDS_SYNC"
+DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR = "SPORTS_AI_ODDS_SYNC_ONCE_TOKEN"
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,38 @@ def _env_bool(name: str, default: bool) -> bool:
     return default
 
 
+def _env_str(name: str, default: str) -> str:
+    raw = os.environ.get(name, "").strip()
+    return raw if raw else default
+
+
+def _hash_one_shot_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _classify_one_shot_outcome(provider_state: str) -> tuple[str, str | None]:
+    """Map a post-sync provider state to a one-shot (state, error_code) pair.
+
+    A genuine provider failure or blocking state must not be reported as a
+    successful checkpoint. A successful request that simply returned no eligible
+    market rows (state IDLE/CONNECTED/NO_CURRENT_EVENTS) maps to SUCCESS with a
+    None error code.
+    """
+    if provider_state == "AUTH_ERROR":
+        return "FAILED", "AUTH_ERROR"
+    if provider_state == "RATE_LIMITED":
+        return "FAILED", "RATE_LIMITED"
+    if provider_state == "DEGRADED":
+        return "FAILED", "PROVIDER_ERROR"
+    if provider_state == "QUOTA_EXHAUSTED":
+        return "BLOCKED", "QUOTA_EXHAUSTED"
+    if provider_state == "QUOTA_GUARD":
+        return "BLOCKED", "QUOTA_GUARD"
+    if provider_state == "NOT_CONFIGURED":
+        return "BLOCKED", "PROVIDER_NOT_CONFIGURED"
+    return "SUCCESS", None
+
+
 @dataclass(frozen=True)
 class DashboardConfig:
     repo_root: Path
@@ -104,6 +138,7 @@ class DashboardConfig:
     enable_scheduler: bool = True
     current_odds_connected: bool = False
     enable_odds_sync: bool = False
+    odds_sync_once_token: str = ""
     current_xg_connected: bool = False
 
     @classmethod
@@ -127,6 +162,7 @@ class DashboardConfig:
             enable_scheduler=_env_bool(DEFAULT_ENABLE_AUTOMATED_SYNC_ENV_VAR, True),
             current_odds_connected=_env_bool(DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR, False),
             enable_odds_sync=_env_bool(DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR, False),
+            odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
         )
 
@@ -201,6 +237,18 @@ class DashboardServices:
             "decision_count": 0,
             "evaluations": {},
         }
+        self._one_shot_sync_state: dict[str, Any] = {
+            "configured": False,
+            "token_id": None,
+            "state": "NOT_CONFIGURED",
+            "claimed_at": None,
+            "completed_at": None,
+            "provider_requests": 0,
+            "snapshots": 0,
+            "decisions": 0,
+            "paper_entries": 0,
+            "error": None,
+        }
         self._storage_runtime_state: dict[str, Any] = {}
 
     async def initialize(self) -> None:
@@ -240,6 +288,7 @@ class DashboardServices:
         prediction_state = storage.get_runtime_state(conn, "prediction_state")
         market_runtime_state = storage.get_runtime_state(conn, "market_runtime_state")
         storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state")
+        one_shot_sync_state = storage.get_runtime_state(conn, "one_shot_sync_state")
         if isinstance(provider_state, dict):
             merged_provider_state = dict(self._provider_state)
             merged_provider_state.update(provider_state)
@@ -262,6 +311,8 @@ class DashboardServices:
             self._market_runtime_state.update(market_runtime_state)
         if isinstance(storage_runtime_state, dict):
             self._storage_runtime_state.update(storage_runtime_state)
+        if isinstance(one_shot_sync_state, dict):
+            self._one_shot_sync_state.update(one_shot_sync_state)
 
     def _record_storage_runtime_state(self, *, initialized_at: str) -> None:
         existing = dict(self._storage_runtime_state)
@@ -677,7 +728,7 @@ class DashboardServices:
                     }
                 )
                 self._update_prediction_state(rows_with_predictions)
-                self._sync_current_market_state(rows_with_predictions)
+                self._run_market_sync(rows_with_predictions, conn)
                 storage.put_runtime_state(
                     conn,
                     state_key="provider_state",
@@ -694,6 +745,12 @@ class DashboardServices:
                     conn,
                     state_key="market_runtime_state",
                     state_value=self._market_runtime_state,
+                    updated_at=attempted_at,
+                )
+                storage.put_runtime_state(
+                    conn,
+                    state_key="one_shot_sync_state",
+                    state_value=self._one_shot_sync_state,
                     updated_at=attempted_at,
                 )
             logger.info(
@@ -915,7 +972,174 @@ class DashboardServices:
 
         return build
 
-    def _sync_current_market_state(self, rows_with_predictions: list[dict[str, Any]]) -> None:
+    def _run_market_sync(self, rows_with_predictions: list[dict[str, Any]], conn: Any) -> None:
+        """Run the current-market sync, honoring the one-shot checkpoint token.
+
+        When no one-shot token is configured the normal automatic-sync gate
+        applies unchanged. When a token is configured it is claimed persistently
+        (atomic) before any provider request; the same token can therefore only
+        ever execute one provider checkpoint, even across scheduler cycles,
+        process restarts, or redeploys.
+        """
+        token = self.config.odds_sync_once_token.strip()
+        if not token:
+            self._one_shot_sync_state = {
+                "configured": False,
+                "token_id": None,
+                "state": "NOT_CONFIGURED",
+                "claimed_at": None,
+                "completed_at": None,
+                "provider_requests": 0,
+                "snapshots": 0,
+                "decisions": 0,
+                "paper_entries": 0,
+                "error": None,
+            }
+            self._sync_current_market_state(rows_with_predictions)
+            return
+
+        token_id: str | None = None
+        try:
+            if len(token) > 256:
+                self._one_shot_sync_state = {
+                    "configured": True,
+                    "token_id": None,
+                    "state": "BLOCKED",
+                    "claimed_at": None,
+                    "completed_at": None,
+                    "provider_requests": 0,
+                    "snapshots": 0,
+                    "decisions": 0,
+                    "paper_entries": 0,
+                    "error": "TOKEN_TOO_LONG",
+                }
+                return
+
+            token_hash = _hash_one_shot_token(token)
+            token_id = token_hash[:12]
+
+            if self.config.enable_odds_sync:
+                # Automatic mode owns provider synchronization; never double-fire.
+                self._one_shot_sync_state = {
+                    "configured": True,
+                    "token_id": token_id,
+                    "state": "BLOCKED",
+                    "claimed_at": None,
+                    "completed_at": None,
+                    "provider_requests": 0,
+                    "snapshots": 0,
+                    "decisions": 0,
+                    "paper_entries": 0,
+                    "error": "AUTOMATIC_SYNC_ENABLED",
+                }
+                self._sync_current_market_state(rows_with_predictions)
+                return
+
+            claimed_at = utc_now_iso()
+            claimed = storage.claim_one_shot_market_sync_token(
+                conn,
+                token_hash=token_hash,
+                token_id=token_id,
+                claimed_at=claimed_at,
+            )
+            if not claimed:
+                existing = storage.get_one_shot_market_sync_claim(conn, token_hash)
+                self._one_shot_sync_state = {
+                    "configured": True,
+                    "token_id": token_id,
+                    "state": "ALREADY_CONSUMED",
+                    "claimed_at": existing["claimed_at"] if existing else None,
+                    "completed_at": existing["completed_at"] if existing else None,
+                    "provider_requests": int(existing["provider_requests"]) if existing else 0,
+                    "snapshots": int(existing["snapshots"]) if existing else 0,
+                    "decisions": int(existing["decisions"]) if existing else 0,
+                    "paper_entries": int(existing["paper_entries"]) if existing else 0,
+                    "error": existing["error"] if existing else None,
+                }
+                return
+
+            try:
+                self._sync_current_market_state(rows_with_predictions, force_once=True)
+            except Exception:
+                completed_at = utc_now_iso()
+                error_code = "INTERNAL_ERROR"
+                storage.update_one_shot_market_sync_claim(
+                    conn,
+                    token_hash=token_hash,
+                    state="FAILED",
+                    completed_at=completed_at,
+                    provider_requests=0,
+                    snapshots=0,
+                    decisions=0,
+                    paper_entries=0,
+                    error=error_code,
+                )
+                self._one_shot_sync_state = {
+                    "configured": True,
+                    "token_id": token_id,
+                    "state": "FAILED",
+                    "claimed_at": claimed_at,
+                    "completed_at": completed_at,
+                    "provider_requests": 0,
+                    "snapshots": 0,
+                    "decisions": 0,
+                    "paper_entries": 0,
+                    "error": error_code,
+                }
+                return
+
+            completed_at = utc_now_iso()
+            diagnostics = self.market_provider.diagnostics()
+            provider_requests = int(diagnostics.get("request_count") or 0)
+            snapshots = int(self._market_runtime_state.get("market_snapshots") or 0)
+            decisions = int(self._market_runtime_state.get("decision_count") or 0)
+            paper_entries = int(self._market_runtime_state.get("paper_entry_count") or 0)
+            outcome_state, error_code = _classify_one_shot_outcome(str(diagnostics.get("state") or ""))
+
+            storage.update_one_shot_market_sync_claim(
+                conn,
+                token_hash=token_hash,
+                state=outcome_state,
+                completed_at=completed_at,
+                provider_requests=provider_requests,
+                snapshots=snapshots,
+                decisions=decisions,
+                paper_entries=paper_entries,
+                error=error_code,
+            )
+            self._one_shot_sync_state = {
+                "configured": True,
+                "token_id": token_id,
+                "state": outcome_state,
+                "claimed_at": claimed_at,
+                "completed_at": completed_at,
+                "provider_requests": provider_requests,
+                "snapshots": snapshots,
+                "decisions": decisions,
+                "paper_entries": paper_entries,
+                "error": error_code,
+            }
+        except Exception:
+            # Defensive: one-shot bookkeeping must never break the normal sync path.
+            self._one_shot_sync_state = {
+                "configured": True,
+                "token_id": token_id,
+                "state": "FAILED",
+                "claimed_at": None,
+                "completed_at": utc_now_iso(),
+                "provider_requests": 0,
+                "snapshots": 0,
+                "decisions": 0,
+                "paper_entries": 0,
+                "error": "INTERNAL_ERROR",
+            }
+
+    def _sync_current_market_state(
+        self,
+        rows_with_predictions: list[dict[str, Any]],
+        *,
+        force_once: bool = False,
+    ) -> None:
         market_state = self._market_provider_state()
         now_utc = datetime.now(timezone.utc)
         evaluations: dict[str, Any] = {}
@@ -942,7 +1166,7 @@ class DashboardServices:
             )
             return
 
-        if not self.config.enable_odds_sync:
+        if not self.config.enable_odds_sync and not force_once:
             self._market_runtime_state.update(
                 {
                     "state": market_state["state"],
@@ -1109,7 +1333,7 @@ class DashboardServices:
         self._market_runtime_state.update(
             {
                 "state": market_state["state"],
-                "automatic_odds_sync": "ENABLED",
+                "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
                 "last_sync_at": utc_now_iso(),
                 "last_successful_snapshot_at": last_successful_snapshot_at,
                 "last_error": market_state.get("last_error") or market_state.get("reason"),
@@ -1927,6 +2151,7 @@ class DashboardServices:
             },
             "storage": storage_state,
             "market_sync": dict(self._market_runtime_state),
+            "one_shot_sync": dict(self._one_shot_sync_state),
             "xg": {
                 "state": "AVAILABLE" if self.config.current_xg_connected else "MISSING",
             },
