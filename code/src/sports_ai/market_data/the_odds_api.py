@@ -38,13 +38,17 @@ THE_ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 
 THE_ODDS_MARKET_H2H = "h2h"
 THE_ODDS_MARKET_TOTALS = "totals"
+THE_ODDS_MARKET_BTTS = "btts"
 THE_ODDS_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_H2H},{THE_ODDS_MARKET_TOTALS}"
 _SUPPORTED_MARKET_KEYS = frozenset({THE_ODDS_MARKET_H2H, THE_ODDS_MARKET_TOTALS})
 
 MARKET_1X2 = "1x2"
 MARKET_GOALS_TOTAL = "goals_total"
+MARKET_BTTS = "btts"
 TOTALS_SELECTION_OVER = "OVER"
 TOTALS_SELECTION_UNDER = "UNDER"
+BTTS_SELECTION_YES = "YES"
+BTTS_SELECTION_NO = "NO"
 
 STATE_NOT_CONFIGURED = "NOT_CONFIGURED"
 STATE_IDLE = "IDLE"
@@ -55,6 +59,19 @@ STATE_RATE_LIMITED = "RATE_LIMITED"
 STATE_QUOTA_GUARD = "QUOTA_GUARD"
 STATE_QUOTA_EXHAUSTED = "QUOTA_EXHAUSTED"
 STATE_NO_CURRENT_EVENTS = "NO_CURRENT_EVENTS"
+
+# Provider states that stop further BTTS event fan-out for a sync. BTTS event
+# requests are additive to the league-wide h2h,totals request, so once a global
+# failure/guard condition is observed the fan-out must halt to protect quota.
+_BTTS_BLOCKING_STATES = frozenset(
+    {
+        STATE_AUTH_ERROR,
+        STATE_RATE_LIMITED,
+        STATE_DEGRADED,
+        STATE_QUOTA_GUARD,
+        STATE_QUOTA_EXHAUSTED,
+    }
+)
 
 FRESHNESS_STATE_FRESH = "FRESH"
 FRESHNESS_STATE_STALE = "STALE"
@@ -183,6 +200,7 @@ class TheOddsApiProviderConfig:
     min_quota_reserve: int = 10
     max_retries: int = 2
     retry_backoff_seconds: float = 1.0
+    max_btts_event_requests: int = 10
 
 
 class TheOddsApiProvider:
@@ -214,6 +232,8 @@ class TheOddsApiProvider:
             "unmatched": 0,
             "ambiguous": 0,
             "bookmakers": {},
+            "btts_event_requests": 0,
+            "btts_truncated": 0,
         }
         self._stats_lock = Lock()
         self._state = STATE_NOT_CONFIGURED
@@ -221,6 +241,7 @@ class TheOddsApiProvider:
         self._last_attempt_at: str | None = None
         self._last_success_at: str | None = None
         self._request_count = 0
+        self._btts_event_requests_this_window = 0
 
     def provider_name(self) -> str:
         return THE_ODDS_API_PROVIDER
@@ -360,6 +381,10 @@ class TheOddsApiProvider:
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
                 return cached[1]
 
+        # A fresh league-wide fetch starts a new sync window; reset the BTTS
+        # event-request budget so the fan-out cap is per-window, not cumulative.
+        self._btts_event_requests_this_window = 0
+
         payload = self._request_json(
             endpoint=f"sports/{sport_key}/odds",
             params={
@@ -420,6 +445,15 @@ class TheOddsApiProvider:
             return TOTALS_SELECTION_OVER
         if normalized == "under":
             return TOTALS_SELECTION_UNDER
+        return None
+
+    @staticmethod
+    def _classify_btts_selection(outcome_name: str) -> str | None:
+        normalized = normalize_text_key(outcome_name)
+        if normalized == "yes":
+            return BTTS_SELECTION_YES
+        if normalized == "no":
+            return BTTS_SELECTION_NO
         return None
 
     @staticmethod
@@ -554,6 +588,149 @@ class TheOddsApiProvider:
                     )
         return snapshots
 
+    def _event_odds_payload(self, sport_key: str, event_id: str) -> dict[str, Any] | None:
+        """Fetch a single event's additional-market odds (e.g. btts).
+
+        Returns the event payload on success, or None when the fan-out cap has
+        been reached (fail closed without a request). Raises MarketProviderError
+        on transport/provider failures, which the caller isolates so the
+        league-wide h2h/totals data is preserved.
+        """
+        cache_key = f"btts:{sport_key}:{self._region()}:{event_id}"
+        now = monotonic()
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+            if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
+                return cached[1]
+
+        if self._btts_event_requests_this_window >= self._config.max_btts_event_requests:
+            with self._stats_lock:
+                self._stats["btts_truncated"] = int(self._stats["btts_truncated"]) + 1
+            return None
+
+        payload = self._request_json(
+            endpoint=f"sports/{sport_key}/events/{event_id}/odds",
+            params={
+                "regions": self._region(),
+                "markets": THE_ODDS_MARKET_BTTS,
+                "oddsFormat": "decimal",
+            },
+        )
+        self._btts_event_requests_this_window += 1
+        with self._stats_lock:
+            self._stats["btts_event_requests"] = int(self._stats["btts_event_requests"]) + 1
+        if not isinstance(payload, dict):
+            payload = {}
+        with self._cache_lock:
+            self._cache[cache_key] = (now, payload)
+        return payload
+
+    def _btts_snapshots_from_event(
+        self,
+        *,
+        fixture_id: str,
+        fixture_context: dict[str, Any],
+        event: dict[str, Any],
+    ) -> list[NormalizedMarketSnapshot]:
+        captured_at = _utc_now()
+        event_id = str(event.get("id") or "")
+        commence_time = str(event.get("commence_time") or "") or None
+        reference_bookmakers = self._reference_bookmakers()
+        ref_priority = {name: index for index, name in enumerate(reference_bookmakers)}
+        snapshots: list[NormalizedMarketSnapshot] = []
+
+        for bookmaker in event.get("bookmakers") or []:
+            bookmaker_key = str(bookmaker.get("key") or "").strip()
+            if not bookmaker_key:
+                continue
+            key_lower = bookmaker_key.lower()
+            reference_rank = ref_priority.get(key_lower)
+            reference_designation = "reference" if reference_rank is not None else "available"
+            for market in bookmaker.get("markets") or []:
+                market_key = str(market.get("key") or "").strip()
+                if market_key != THE_ODDS_MARKET_BTTS:
+                    continue
+                source_timestamp = (
+                    str(market.get("last_update") or "").strip()
+                    or str(bookmaker.get("last_update") or "").strip()
+                    or None
+                )
+                for outcome in market.get("outcomes") or []:
+                    outcome_name = str(outcome.get("name") or "")
+                    price_raw = outcome.get("price")
+                    if price_raw is None:
+                        continue
+                    try:
+                        price = float(price_raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if price <= 1.0:
+                        continue
+                    selection = self._classify_btts_selection(outcome_name)
+                    if selection is None:
+                        continue
+                    snapshots.append(
+                        NormalizedMarketSnapshot(
+                            provider=self.provider_name(),
+                            fixture_id=fixture_id,
+                            provider_fixture_id=event_id,
+                            captured_at=captured_at,
+                            source_timestamp=source_timestamp,
+                            market=MARKET_BTTS,
+                            selection=selection,
+                            line=None,
+                            decimal_odds=price,
+                            bookmaker=key_lower,
+                            ingestion_version=THE_ODDS_API_INGESTION_VERSION,
+                            provider_market_id=f"{event_id}:{key_lower}:{market_key}:{selection}",
+                            is_pre_match=True,
+                            home_team_name=str(fixture_context.get("home_team_name") or ""),
+                            away_team_name=str(fixture_context.get("away_team_name") or ""),
+                            competition_id=str(fixture_context.get("competition_id") or ""),
+                            competition_name=str(fixture_context.get("competition_name") or ""),
+                            kickoff_utc=commence_time,
+                            freshness_state=self._freshness_state(
+                                source_timestamp=source_timestamp,
+                                captured_at=captured_at,
+                                kickoff_utc=commence_time,
+                            ),
+                            reference_designation=reference_designation,
+                            reference_rank=reference_rank,
+                        )
+                    )
+        return snapshots
+
+    def _fetch_btts_snapshots(
+        self,
+        *,
+        fixture_id: str,
+        fixture_context: dict[str, Any],
+        sport_key: str,
+        event: dict[str, Any],
+    ) -> list[NormalizedMarketSnapshot]:
+        """Fetch and normalize BTTS snapshots for one matched fixture event.
+
+        Fails closed: returns [] on a missing event id, a global blocking
+        provider state, a fan-out cap hit, or a request error, so the existing
+        h2h/totals snapshots are always preserved.
+        """
+        event_id = str(event.get("id") or "")
+        if not event_id:
+            return []
+        if self._state in _BTTS_BLOCKING_STATES:
+            return []
+        try:
+            btts_event = self._event_odds_payload(sport_key, event_id)
+        except MarketProviderError:
+            return []
+        if not btts_event:
+            return []
+        return self._btts_snapshots_from_event(
+            fixture_id=fixture_id,
+            fixture_context=fixture_context,
+            event=btts_event,
+        )
+
     def get_fixture_markets(
         self,
         fixture_id: str,
@@ -582,11 +759,20 @@ class TheOddsApiProvider:
         event = matches[0]
         with self._stats_lock:
             self._stats["matched"] = int(self._stats["matched"]) + 1
-        return self._snapshots_from_event(
+        snapshots = self._snapshots_from_event(
             fixture_id=fixture_id,
             fixture_context=fixture_context,
             event=event,
         )
+        snapshots.extend(
+            self._fetch_btts_snapshots(
+                fixture_id=fixture_id,
+                fixture_context=fixture_context,
+                sport_key=sport_key,
+                event=event,
+            )
+        )
+        return snapshots
 
     def get_best_prices(
         self,
@@ -638,6 +824,8 @@ class TheOddsApiProvider:
             "fixtures_matched": stats["matched"],
             "fixtures_unmatched": stats["unmatched"],
             "fixtures_ambiguous": stats["ambiguous"],
+            "btts_event_requests": int(stats.get("btts_event_requests", 0)),
+            "btts_truncated": int(stats.get("btts_truncated", 0)),
             "bookmakers": dict(stats["bookmakers"]),
             "competition_mappings": {
                 key: {
