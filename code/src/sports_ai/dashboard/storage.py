@@ -71,6 +71,20 @@ SCHEMA_STATEMENTS = (
         updated_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS one_shot_market_sync_claims (
+        token_hash TEXT PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        claimed_at TEXT NOT NULL,
+        completed_at TEXT,
+        provider_requests INTEGER NOT NULL DEFAULT 0,
+        snapshots INTEGER NOT NULL DEFAULT 0,
+        decisions INTEGER NOT NULL DEFAULT 0,
+        paper_entries INTEGER NOT NULL DEFAULT 0,
+        error TEXT
+    )
+    """,
 )
 
 
@@ -355,3 +369,82 @@ def get_runtime_state(conn: sqlite3.Connection, state_key: str) -> dict[str, Any
     if row is None:
         return None
     return json.loads(str(row["state_value_json"]))
+
+
+def claim_one_shot_market_sync_token(
+    conn: sqlite3.Connection,
+    *,
+    token_hash: str,
+    token_id: str,
+    claimed_at: str,
+) -> bool:
+    """Atomically claim a one-shot market-sync token.
+
+    Returns True when this process is the winner (a token never seen before) and
+    False when the token has already been claimed/consumed. The claim is
+    committed before any provider request, so a crash between claim and execution
+    cannot cause the same token to run more than once.
+    """
+    ensure_schema(conn)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO one_shot_market_sync_claims (
+                    token_hash, token_id, state, claimed_at, completed_at,
+                    provider_requests, snapshots, decisions, paper_entries, error
+                ) VALUES (?, ?, 'CLAIMED', ?, NULL, 0, 0, 0, 0, NULL)
+                """,
+                (token_hash, token_id, claimed_at),
+            )
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def get_one_shot_market_sync_claim(conn: sqlite3.Connection, token_hash: str) -> dict[str, Any] | None:
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT token_hash, token_id, state, claimed_at, completed_at,
+               provider_requests, snapshots, decisions, paper_entries, error
+        FROM one_shot_market_sync_claims
+        WHERE token_hash = ?
+        """,
+        (token_hash,),
+    ).fetchone()
+    return None if row is None else dict(row)
+
+
+def update_one_shot_market_sync_claim(
+    conn: sqlite3.Connection,
+    *,
+    token_hash: str,
+    state: str,
+    completed_at: str,
+    provider_requests: int,
+    snapshots: int,
+    decisions: int,
+    paper_entries: int,
+    error: str | None,
+) -> None:
+    ensure_schema(conn)
+    with conn:
+        conn.execute(
+            """
+            UPDATE one_shot_market_sync_claims
+            SET state = ?, completed_at = ?, provider_requests = ?, snapshots = ?,
+                decisions = ?, paper_entries = ?, error = ?
+            WHERE token_hash = ?
+            """,
+            (
+                state,
+                completed_at,
+                provider_requests,
+                snapshots,
+                decisions,
+                paper_entries,
+                error,
+                token_hash,
+            ),
+        )
