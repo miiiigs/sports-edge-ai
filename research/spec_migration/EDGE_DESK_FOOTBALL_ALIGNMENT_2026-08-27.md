@@ -114,8 +114,11 @@ The new Edge Desk ledger records parallel truth in shadow mode:
 - Edge Desk shadow records blocked states as durable data
 - Edge Desk shadow records consensus truthfully as insufficient when quorum is not available
 - Edge Desk shadow initialization is fail-open relative to the legacy dashboard path
+- runtime Edge Desk shadow-write failures are also fail-open relative to the legacy dashboard path
 
 If Edge Desk initialization fails, the current Football dashboard still starts, predictions still load, and legacy behavior continues while Edge Desk shadow persistence is marked degraded through logging and runtime diagnostics.
+
+If a runtime Edge Desk shadow write fails after startup, the current Football prediction still saves and returns normally, Edge Desk is marked `DEGRADED`, and later shadow writes are skipped for the lifetime of that service instance.
 
 With only Route B available, Edge Desk consensus cannot pass the multi-agent requirement.
 

@@ -272,7 +272,9 @@ class DashboardServices:
                 self._edge_desk_last_error = None
             except Exception as exc:
                 self._edge_desk_available = False
-                self._edge_desk_last_error = str(exc)
+                self._edge_desk_last_error = (
+                    f"initialization failure: {self._sanitize_edge_desk_error(exc)}"
+                )
                 logger.exception("edge desk shadow initialization failed; continuing in fail-open mode")
             self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
@@ -324,11 +326,31 @@ class DashboardServices:
         if isinstance(one_shot_sync_state, dict):
             self._one_shot_sync_state.update(one_shot_sync_state)
 
-    def _record_storage_runtime_state(self, *, initialized_at: str) -> None:
+    def _edge_desk_shadow_state(self) -> dict[str, Any]:
+        return {
+            "available": self._edge_desk_available,
+            "state": "READY" if self._edge_desk_available else "DEGRADED",
+            "last_error": self._edge_desk_last_error,
+        }
+
+    @staticmethod
+    def _sanitize_edge_desk_error(exc: Exception) -> str:
+        message = " ".join(str(exc).split()).strip()
+        if not message:
+            return type(exc).__name__
+        return f"{type(exc).__name__}: {message[:200]}"
+
+    def _persist_storage_runtime_state(
+        self,
+        conn: Any,
+        *,
+        updated_at: str,
+        initialized_at: str | None = None,
+    ) -> None:
         existing = dict(self._storage_runtime_state)
         payload = {
-            "first_initialized_at": existing.get("first_initialized_at") or initialized_at,
-            "last_db_initialization_at": initialized_at,
+            "first_initialized_at": existing.get("first_initialized_at") or initialized_at or updated_at,
+            "last_db_initialization_at": existing.get("last_db_initialization_at") or initialized_at or updated_at,
             "dashboard_db_path": str(self.config.dashboard_db_path),
             "paper_trading_db_path": str(self.config.paper_trading_db_path),
             "research_db_path": str(self.config.research_db_path),
@@ -336,20 +358,31 @@ class DashboardServices:
                 {"role": "dashboard", "path": str(self.config.dashboard_db_path)},
                 {"role": "paper_trading", "path": str(self.config.paper_trading_db_path)},
             ],
-            "edge_desk_shadow": {
-                "available": self._edge_desk_available,
-                "state": "READY" if self._edge_desk_available else "DEGRADED",
-                "last_error": self._edge_desk_last_error,
-            },
+            "edge_desk_shadow": self._edge_desk_shadow_state(),
         }
-        with storage.connect(self.config.dashboard_db_path) as conn:
-            storage.put_runtime_state(
-                conn,
-                state_key="storage_runtime_state",
-                state_value=payload,
-                updated_at=initialized_at,
-            )
+        storage.put_runtime_state(
+            conn,
+            state_key="storage_runtime_state",
+            state_value=payload,
+            updated_at=updated_at,
+        )
         self._storage_runtime_state = payload
+
+    def _record_storage_runtime_state(self, *, initialized_at: str) -> None:
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            self._persist_storage_runtime_state(conn, updated_at=initialized_at, initialized_at=initialized_at)
+
+    def _mark_edge_desk_degraded(
+        self,
+        conn: Any,
+        *,
+        reason: str,
+        exc: Exception,
+        updated_at: str,
+    ) -> None:
+        self._edge_desk_available = False
+        self._edge_desk_last_error = f"{reason}: {self._sanitize_edge_desk_error(exc)}"
+        self._persist_storage_runtime_state(conn, updated_at=updated_at)
 
     def _build_snapshot(self) -> None:
         try:
@@ -1461,7 +1494,13 @@ class DashboardServices:
                 fixture=fixture.to_dict(timezone_name="UTC"),
                 prediction=prediction,
             )
-        except Exception:
+        except Exception as exc:
+            self._mark_edge_desk_degraded(
+                conn,
+                reason="runtime shadow-write failure",
+                exc=exc,
+                updated_at=utc_now_iso(),
+            )
             logger.exception("edge desk shadow persistence failed for fixture_id=%s", fixture.fixture_id)
 
     @staticmethod

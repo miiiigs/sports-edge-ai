@@ -405,6 +405,10 @@ def test_dashboard_services_shadow_edge_desk_records_route_b_without_changing_cu
     assert all(row["status"] == "INSUFFICIENT_AGENTS" for row in edge_consensus)
     assert edge_decisions
     assert all(row["decision_status"] == "NO_BET" for row in edge_decisions)
+    status = services.get_system_status()
+    assert status["storage"]["edge_desk_shadow"]["available"] is True
+    assert status["storage"]["edge_desk_shadow"]["state"] == "READY"
+    assert status["storage"]["edge_desk_shadow"]["last_error"] is None
     asyncio.run(services.shutdown())
 
 
@@ -442,8 +446,101 @@ def test_dashboard_services_fail_open_when_edge_desk_init_fails(monkeypatch, tmp
     status = services.get_system_status()
     assert status["storage"]["edge_desk_shadow"]["available"] is False
     assert status["storage"]["edge_desk_shadow"]["state"] == "DEGRADED"
+    assert "initialization failure" in (status["storage"]["edge_desk_shadow"]["last_error"] or "")
     assert "edge desk init failed" in (status["storage"]["edge_desk_shadow"]["last_error"] or "")
     assert shadow_calls["count"] == 0
+
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_runtime_edge_desk_failure_degrades_status_and_skips_future_writes(
+    monkeypatch,
+    tmp_path: Path,
+):
+    fixture = _fixture()
+    second_fixture = _fixture(
+        fixture_id="fake:liverpool_everton",
+        home_team_name="Liverpool",
+        away_team_name="Everton",
+    )
+    config = _dashboard_config(tmp_path)
+    shadow_calls = {"count": 0}
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture, second_fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+
+    healthy_status = services.get_system_status()
+    assert healthy_status["storage"]["edge_desk_shadow"]["available"] is True
+    assert healthy_status["storage"]["edge_desk_shadow"]["state"] == "READY"
+    assert healthy_status["storage"]["edge_desk_shadow"]["last_error"] is None
+
+    def broken_edge_desk_write(*args, **kwargs):
+        shadow_calls["count"] += 1
+        raise RuntimeError("edge desk runtime write failed")
+
+    monkeypatch.setattr(football_edge_desk, "record_shadow_prediction_bundle", broken_edge_desk_write)
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        edge_prediction_count_before = len(football_edge_desk.fetch_agent_predictions(conn, fixture_id=fixture.fixture_id))
+        second_edge_prediction_count_before = len(
+            football_edge_desk.fetch_agent_predictions(conn, fixture_id=second_fixture.fixture_id)
+        )
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        first_payload = services.ensure_prediction(conn, fixture)
+    assert first_payload["prediction_status"] == "READY"
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        first_prediction = dashboard_storage.fetch_latest_prediction_for_fixture(conn, fixture.fixture_id)
+        persisted_runtime_state = dashboard_storage.get_runtime_state(conn, "storage_runtime_state")
+        edge_predictions = football_edge_desk.fetch_agent_predictions(conn, fixture_id=fixture.fixture_id)
+
+    assert first_prediction is not None
+    assert first_prediction["prediction_status"] == "READY"
+    assert len(edge_predictions) == edge_prediction_count_before
+    assert persisted_runtime_state is not None
+    assert persisted_runtime_state["edge_desk_shadow"]["available"] is False
+    assert persisted_runtime_state["edge_desk_shadow"]["state"] == "DEGRADED"
+    assert "runtime shadow-write failure" in (persisted_runtime_state["edge_desk_shadow"]["last_error"] or "")
+    assert "edge desk runtime write failed" in (persisted_runtime_state["edge_desk_shadow"]["last_error"] or "")
+
+    degraded_status = services.get_system_status()
+    assert degraded_status["storage"]["edge_desk_shadow"]["available"] is False
+    assert degraded_status["storage"]["edge_desk_shadow"]["state"] == "DEGRADED"
+    assert "runtime shadow-write failure" in (degraded_status["storage"]["edge_desk_shadow"]["last_error"] or "")
+    assert "edge desk runtime write failed" in (degraded_status["storage"]["edge_desk_shadow"]["last_error"] or "")
+
+    reload_payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert reload_payload is not None
+    assert reload_payload["prediction"]["prediction_status"] == "READY"
+    assert reload_payload["prediction"]["fixture_id"] == fixture.fixture_id
+    assert "consensus_rows" not in reload_payload["prediction"]
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        second_payload = services.ensure_prediction(conn, second_fixture)
+    assert second_payload["prediction_status"] == "READY"
+
+    second_detail_payload = services.get_fixture_detail_payload(second_fixture.fixture_id)
+    assert second_detail_payload is not None
+    assert second_detail_payload["prediction"]["prediction_status"] == "READY"
+    assert second_detail_payload["prediction"]["fixture_id"] == second_fixture.fixture_id
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        second_prediction = dashboard_storage.fetch_latest_prediction_for_fixture(conn, second_fixture.fixture_id)
+        second_runtime_state = dashboard_storage.get_runtime_state(conn, "storage_runtime_state")
+        second_edge_predictions = football_edge_desk.fetch_agent_predictions(conn, fixture_id=second_fixture.fixture_id)
+
+    assert second_prediction is not None
+    assert second_prediction["prediction_status"] == "READY"
+    assert second_runtime_state is not None
+    assert second_runtime_state["edge_desk_shadow"]["available"] is False
+    assert second_runtime_state["edge_desk_shadow"]["state"] == "DEGRADED"
+    assert len(second_edge_predictions) == second_edge_prediction_count_before
+    assert shadow_calls["count"] == 1
 
     asyncio.run(services.shutdown())
 
