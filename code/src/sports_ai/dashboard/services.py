@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
 from ..market_data.the_odds_api import TheOddsApiProvider
-from ..storage import football_paper_trading
+from ..storage import football_edge_desk, football_paper_trading
 from . import storage
 from .current_market import build_fixture_market_evaluation
 from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
@@ -264,6 +264,7 @@ class DashboardServices:
         )
         with storage.connect(self.config.dashboard_db_path) as conn:
             storage.ensure_schema(conn)
+            football_edge_desk.ensure_schema(conn)
             self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             football_paper_trading.ensure_schema(conn)
@@ -1379,17 +1380,20 @@ class DashboardServices:
                 "safeguard_reason": "POINT-IN-TIME XG NOT AVAILABLE",
             }
             storage.save_prediction(conn, payload, updated_at=utc_now_iso())
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
         version_key = self._prediction_version_key(fixture, self.snapshot)
         existing = storage.fetch_prediction_by_version_key(conn, version_key)
         if existing is not None:
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=existing)
             return existing
 
         kickoff_utc = parse_iso_datetime(fixture.kickoff_utc)
         current_time_utc = datetime.now(timezone.utc)
         latest = storage.fetch_latest_prediction_for_fixture(conn, fixture.fixture_id)
         if latest is not None and kickoff_utc <= current_time_utc:
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=latest)
             return latest
         if kickoff_utc <= current_time_utc:
             payload = {
@@ -1414,6 +1418,7 @@ class DashboardServices:
                 "away_team_name": fixture.away_team_name,
             }
             storage.save_prediction(conn, payload, updated_at=utc_now_iso())
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
         context = PredictionContext(fixture=fixture, snapshot=self.snapshot)
@@ -1424,7 +1429,24 @@ class DashboardServices:
             if isinstance(resolution, dict):
                 storage.record_team_resolution(conn, resolution, updated_at=utc_now_iso())
         storage.save_prediction(conn, prediction, updated_at=utc_now_iso())
+        self._record_edge_desk_shadow(conn, fixture=fixture, prediction=prediction)
         return prediction
+
+    def _record_edge_desk_shadow(
+        self,
+        conn: Any,
+        *,
+        fixture: NormalizedFixture,
+        prediction: dict[str, Any],
+    ) -> None:
+        try:
+            football_edge_desk.record_shadow_prediction_bundle(
+                conn,
+                fixture=fixture.to_dict(timezone_name="UTC"),
+                prediction=prediction,
+            )
+        except Exception:
+            logger.exception("edge desk shadow persistence failed for fixture_id=%s", fixture.fixture_id)
 
     @staticmethod
     def _prediction_version_key(

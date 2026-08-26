@@ -15,7 +15,7 @@ from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, Fix
 from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture, normalize_text_key
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
-from sports_ai.storage import football_paper_trading
+from sports_ai.storage import football_edge_desk, football_paper_trading
 
 
 class FakeFixtureProvider:
@@ -374,6 +374,37 @@ def test_dashboard_services_generate_prediction_and_ignore_live_score(tmp_path: 
     assert updated_prediction["expected_home_goals"] == initial_prediction["expected_home_goals"]
     assert updated_prediction["expected_away_goals"] == initial_prediction["expected_away_goals"]
     assert updated_prediction["top_scorelines"] == initial_prediction["top_scorelines"]
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_shadow_edge_desk_records_route_b_without_changing_current_prediction(tmp_path: Path):
+    fixture = _fixture()
+    config = _dashboard_config(tmp_path)
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["prediction"]["prediction_status"] == "READY"
+    assert payload["prediction"]["fixture_id"] == fixture.fixture_id
+    assert payload["prediction"]["competition_id"] == "ENG1"
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        edge_predictions = football_edge_desk.fetch_agent_predictions(conn, fixture_id=fixture.fixture_id)
+        edge_consensus = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture.fixture_id)
+        edge_decisions = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture.fixture_id)
+
+    assert edge_predictions
+    assert all(row["agent_id"] == football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID for row in edge_predictions)
+    assert all(row["prediction_status"] == "PREDICTED" for row in edge_predictions)
+    assert edge_consensus
+    assert all(row["status"] == "INSUFFICIENT_AGENTS" for row in edge_consensus)
+    assert edge_decisions
+    assert all(row["decision_status"] == "NO_BET" for row in edge_decisions)
     asyncio.run(services.shutdown())
 
 
@@ -912,5 +943,14 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
         paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
         assert len(paper_rows) == 1
         assert str(paper_rows[0]["paper_trade_id"]) == first_trade_id
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        edge_decisions = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture.fixture_id)
+        edge_consensus = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture.fixture_id)
+
+    assert edge_consensus
+    assert all(row["status"] == "INSUFFICIENT_AGENTS" for row in edge_consensus)
+    assert edge_decisions
+    assert all(row["decision_status"] == "NO_BET" for row in edge_decisions)
 
     asyncio.run(services.shutdown())
