@@ -250,6 +250,8 @@ class DashboardServices:
             "error": None,
         }
         self._storage_runtime_state: dict[str, Any] = {}
+        self._edge_desk_available = True
+        self._edge_desk_last_error: str | None = None
 
     async def initialize(self) -> None:
         ensure_operational_data_dir(self.config.operational_data_dir)
@@ -264,7 +266,14 @@ class DashboardServices:
         )
         with storage.connect(self.config.dashboard_db_path) as conn:
             storage.ensure_schema(conn)
-            football_edge_desk.ensure_schema(conn)
+            try:
+                football_edge_desk.ensure_schema(conn)
+                self._edge_desk_available = True
+                self._edge_desk_last_error = None
+            except Exception as exc:
+                self._edge_desk_available = False
+                self._edge_desk_last_error = str(exc)
+                logger.exception("edge desk shadow initialization failed; continuing in fail-open mode")
             self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             football_paper_trading.ensure_schema(conn)
@@ -327,6 +336,11 @@ class DashboardServices:
                 {"role": "dashboard", "path": str(self.config.dashboard_db_path)},
                 {"role": "paper_trading", "path": str(self.config.paper_trading_db_path)},
             ],
+            "edge_desk_shadow": {
+                "available": self._edge_desk_available,
+                "state": "READY" if self._edge_desk_available else "DEGRADED",
+                "last_error": self._edge_desk_last_error,
+            },
         }
         with storage.connect(self.config.dashboard_db_path) as conn:
             storage.put_runtime_state(
@@ -1439,6 +1453,8 @@ class DashboardServices:
         fixture: NormalizedFixture,
         prediction: dict[str, Any],
     ) -> None:
+        if not self._edge_desk_available:
+            return
         try:
             football_edge_desk.record_shadow_prediction_bundle(
                 conn,
@@ -1797,6 +1813,7 @@ class DashboardServices:
             "last_db_initialization_at": self._storage_runtime_state.get("last_db_initialization_at"),
             "first_initialized_at": self._storage_runtime_state.get("first_initialized_at"),
             "operational_db_paths": operational_paths,
+            "edge_desk_shadow": dict(self._storage_runtime_state.get("edge_desk_shadow") or {}),
             "mutable_storage_class": "OPERATIONAL_RUNTIME",
             "immutable_storage_class": "RESEARCH_REFERENCE",
         }

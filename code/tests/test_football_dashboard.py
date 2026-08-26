@@ -408,6 +408,46 @@ def test_dashboard_services_shadow_edge_desk_records_route_b_without_changing_cu
     asyncio.run(services.shutdown())
 
 
+def test_dashboard_services_fail_open_when_edge_desk_init_fails(monkeypatch, tmp_path: Path):
+    fixture = _fixture()
+    config = _dashboard_config(tmp_path)
+    shadow_calls = {"count": 0}
+
+    def broken_edge_desk_schema(conn):
+        raise RuntimeError("edge desk init failed")
+
+    def record_shadow_call(*args, **kwargs):
+        shadow_calls["count"] += 1
+
+    monkeypatch.setattr(football_edge_desk, "ensure_schema", broken_edge_desk_schema)
+    monkeypatch.setattr(football_edge_desk, "record_shadow_prediction_bundle", record_shadow_call)
+
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    asyncio.run(services.initialize())
+
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["prediction"]["prediction_status"] == "READY"
+
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        prediction = dashboard_storage.fetch_latest_prediction_for_fixture(conn, fixture.fixture_id)
+    assert prediction is not None
+    assert prediction["prediction_status"] == "READY"
+
+    status = services.get_system_status()
+    assert status["storage"]["edge_desk_shadow"]["available"] is False
+    assert status["storage"]["edge_desk_shadow"]["state"] == "DEGRADED"
+    assert "edge desk init failed" in (status["storage"]["edge_desk_shadow"]["last_error"] or "")
+    assert shadow_calls["count"] == 0
+
+    asyncio.run(services.shutdown())
+
+
 def test_dashboard_config_default_uses_configured_data_dir(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SPORTS_AI_DATA_DIR", str(tmp_path))
     config = DashboardConfig.default()

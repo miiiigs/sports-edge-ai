@@ -14,15 +14,17 @@ ACTIVE_AGENT_STATUS = "ACTIVE"
 CAPABILITY_SUPPORTED = "SUPPORTED"
 CAPABILITY_NOT_SUPPORTED = "NOT_SUPPORTED"
 CAPABILITY_INACTIVE = "INACTIVE"
+GLOBAL_CONFIG_SCOPE_KEY = "__ALL__"
 PREDICTION_STATUSES = {"PREDICTED", "ABSTAINED", "BLOCKED", "NOT_APPLICABLE"}
 CONSENSUS_STATUSES = {"PASSED", "FAILED", "INSUFFICIENT_AGENTS", "NOT_EVALUABLE"}
-DECISION_STATUSES = {"QUALIFIED", "NO_BET"}
+DECISION_STATUSES = {"QUALIFIED", "CONSENSUS_PASSED", "NO_BET"}
 DECISION_REASON_CODES = {
     "CONSENSUS_INSUFFICIENT_AGENTS",
     "CONSENSUS_DIRECTIONAL_DISAGREEMENT",
     "CONSENSUS_PROBABILITY_SPREAD",
     "AGENT_BLOCKED",
     "AGENT_ABSTAINED",
+    "VALUE_RISK_PENDING",
     "VALUE_FAILED",
     "RISK_FAILED",
     "MARKET_STALE",
@@ -49,7 +51,7 @@ SCHEMA_STATEMENTS = (
         version_tag TEXT NOT NULL,
         name TEXT NOT NULL,
         method_family TEXT NOT NULL,
-        status TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('ACTIVE')),
         created_at TEXT NOT NULL,
         metadata_json TEXT NOT NULL,
         UNIQUE(agent_id, version_tag)
@@ -59,12 +61,14 @@ SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS edge_desk_agent_market_capabilities (
         capability_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
         agent_id TEXT NOT NULL,
+        agent_version_tag TEXT NOT NULL,
         market_family TEXT NOT NULL,
         version_tag TEXT NOT NULL,
-        capability_status TEXT NOT NULL,
+        capability_status TEXT NOT NULL CHECK(capability_status IN ('SUPPORTED', 'NOT_SUPPORTED', 'INACTIVE')),
         valid_from TEXT NOT NULL,
         created_at TEXT NOT NULL,
         metadata_json TEXT NOT NULL,
+        FOREIGN KEY(agent_id, agent_version_tag) REFERENCES edge_desk_agent_registry(agent_id, version_tag),
         UNIQUE(agent_id, market_family, version_tag)
     )
     """,
@@ -73,15 +77,27 @@ SCHEMA_STATEMENTS = (
         config_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
         config_id TEXT NOT NULL,
         market_family TEXT,
+        config_scope_key TEXT NOT NULL,
         version_tag TEXT NOT NULL,
         required_agents_json TEXT NOT NULL,
-        minimum_quorum INTEGER NOT NULL,
-        same_direction_required INTEGER NOT NULL,
-        max_probability_spread REAL,
+        minimum_quorum INTEGER NOT NULL CHECK(minimum_quorum >= 1),
+        same_direction_required INTEGER NOT NULL CHECK(same_direction_required IN (0, 1)),
+        max_probability_spread REAL CHECK(
+            max_probability_spread IS NULL
+            OR (
+                max_probability_spread = max_probability_spread
+                AND max_probability_spread >= 0.0
+                AND max_probability_spread <= 1.0
+            )
+        ),
         valid_from TEXT NOT NULL,
         created_at TEXT NOT NULL,
         metadata_json TEXT NOT NULL,
-        UNIQUE(config_id, market_family, version_tag)
+        CHECK(
+            (market_family IS NULL AND config_scope_key = '__ALL__')
+            OR (market_family IS NOT NULL AND config_scope_key = market_family)
+        ),
+        UNIQUE(config_id, config_scope_key, version_tag)
     )
     """,
     """
@@ -92,12 +108,13 @@ SCHEMA_STATEMENTS = (
         fixture_id TEXT NOT NULL,
         kickoff_utc TEXT,
         agent_id TEXT NOT NULL,
+        agent_version_tag TEXT NOT NULL,
         market_family TEXT NOT NULL,
         line REAL,
         selection TEXT,
-        probability REAL,
-        fair_price REAL,
-        prediction_status TEXT NOT NULL,
+        probability REAL CHECK(probability IS NULL OR (probability = probability AND probability >= 0.0 AND probability <= 1.0)),
+        fair_price REAL CHECK(fair_price IS NULL OR (fair_price = fair_price AND fair_price > 1.0)),
+        prediction_status TEXT NOT NULL CHECK(prediction_status IN ('PREDICTED', 'ABSTAINED', 'BLOCKED', 'NOT_APPLICABLE')),
         as_of TEXT,
         generated_at TEXT NOT NULL,
         model_version TEXT,
@@ -108,7 +125,8 @@ SCHEMA_STATEMENTS = (
         source_references_json TEXT NOT NULL,
         metadata_json TEXT NOT NULL,
         payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(agent_id, agent_version_tag) REFERENCES edge_desk_agent_registry(agent_id, version_tag)
     )
     """,
     """
@@ -121,17 +139,34 @@ SCHEMA_STATEMENTS = (
         market_family TEXT NOT NULL,
         line REAL,
         config_id TEXT NOT NULL,
+        config_scope_key TEXT NOT NULL,
         config_version_tag TEXT NOT NULL,
         participating_agents_json TEXT NOT NULL,
         prediction_ids_json TEXT NOT NULL,
         agreed_selection TEXT,
-        consensus_probability REAL,
-        probability_spread REAL,
-        status TEXT NOT NULL,
+        consensus_probability REAL CHECK(
+            consensus_probability IS NULL
+            OR (
+                consensus_probability = consensus_probability
+                AND consensus_probability >= 0.0
+                AND consensus_probability <= 1.0
+            )
+        ),
+        probability_spread REAL CHECK(
+            probability_spread IS NULL
+            OR (
+                probability_spread = probability_spread
+                AND probability_spread >= 0.0
+                AND probability_spread <= 1.0
+            )
+        ),
+        status TEXT NOT NULL CHECK(status IN ('PASSED', 'FAILED', 'INSUFFICIENT_AGENTS', 'NOT_EVALUABLE')),
         reason TEXT NOT NULL,
         evaluated_at TEXT NOT NULL,
         payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(config_id, config_scope_key, config_version_tag)
+            REFERENCES edge_desk_consensus_configs(config_id, config_scope_key, version_tag)
     )
     """,
     """
@@ -146,12 +181,26 @@ SCHEMA_STATEMENTS = (
         selection TEXT,
         consensus_id TEXT,
         agent_prediction_ids_json TEXT NOT NULL,
-        decision_status TEXT NOT NULL,
-        reason_code TEXT NOT NULL,
+        decision_status TEXT NOT NULL CHECK(decision_status IN ('QUALIFIED', 'CONSENSUS_PASSED', 'NO_BET')),
+        reason_code TEXT NOT NULL CHECK(
+            reason_code IN (
+                'CONSENSUS_INSUFFICIENT_AGENTS',
+                'CONSENSUS_DIRECTIONAL_DISAGREEMENT',
+                'CONSENSUS_PROBABILITY_SPREAD',
+                'AGENT_BLOCKED',
+                'AGENT_ABSTAINED',
+                'VALUE_RISK_PENDING',
+                'VALUE_FAILED',
+                'RISK_FAILED',
+                'MARKET_STALE',
+                'OTHER'
+            )
+        ),
         reason_detail TEXT,
         decided_at TEXT NOT NULL,
         payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(consensus_id) REFERENCES edge_desk_consensus_evaluations(consensus_id)
     )
     """,
 )
@@ -170,38 +219,22 @@ def _json_dumps(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
+def _configure_connection(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA recursive_triggers = ON")
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    _configure_connection(conn)
     return conn
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    with conn:
-        for statement in SCHEMA_STATEMENTS:
-            conn.execute(statement)
-        for table_name in IMMUTABLE_TABLES:
-            conn.execute(
-                f"""
-                CREATE TRIGGER IF NOT EXISTS {table_name}_prevent_update
-                BEFORE UPDATE ON {table_name}
-                BEGIN
-                    SELECT RAISE(ABORT, '{table_name} is immutable');
-                END
-                """
-            )
-            conn.execute(
-                f"""
-                CREATE TRIGGER IF NOT EXISTS {table_name}_prevent_delete
-                BEFORE DELETE ON {table_name}
-                BEGIN
-                    SELECT RAISE(ABORT, '{table_name} is immutable');
-                END
-                """
-            )
+    ensure_schema_only(conn)
     seed_foundation(conn)
 
 
@@ -231,31 +264,33 @@ def seed_foundation(conn: sqlite3.Connection) -> None:
         )
         for market_family in SUPPORTED_ROUTE_B_MARKET_FAMILIES:
             conn.execute(
-                """
-                INSERT OR IGNORE INTO edge_desk_agent_market_capabilities (
-                    agent_id, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    ROUTE_B_COMPOSITE_AGENT_ID,
-                    market_family,
-                    FOUNDATION_VERSION,
-                    CAPABILITY_SUPPORTED,
-                    FOUNDATION_CREATED_AT,
-                    FOUNDATION_CREATED_AT,
+            """
+            INSERT OR IGNORE INTO edge_desk_agent_market_capabilities (
+                agent_id, agent_version_tag, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ROUTE_B_COMPOSITE_AGENT_ID,
+                FOUNDATION_VERSION,
+                market_family,
+                FOUNDATION_VERSION,
+                CAPABILITY_SUPPORTED,
+                FOUNDATION_CREATED_AT,
+                FOUNDATION_CREATED_AT,
                     _json_dumps({"shadow_mode": True}),
                 ),
             )
         conn.execute(
             """
             INSERT OR IGNORE INTO edge_desk_consensus_configs (
-                config_id, market_family, version_tag, required_agents_json, minimum_quorum,
+                config_id, market_family, config_scope_key, version_tag, required_agents_json, minimum_quorum,
                 same_direction_required, max_probability_spread, valid_from, created_at, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 DEFAULT_CONSENSUS_CONFIG_ID,
                 None,
+                GLOBAL_CONFIG_SCOPE_KEY,
                 DEFAULT_CONSENSUS_VERSION,
                 _json_dumps([]),
                 2,
@@ -275,28 +310,333 @@ def seed_foundation(conn: sqlite3.Connection) -> None:
 
 
 def ensure_schema_only(conn: sqlite3.Connection) -> None:
+    _configure_connection(conn)
+    if _needs_phase1a_schema_rebuild(conn):
+        _migrate_phase1a_schema(conn)
     with conn:
         for statement in SCHEMA_STATEMENTS:
             conn.execute(statement)
-        for table_name in IMMUTABLE_TABLES:
-            conn.execute(
-                f"""
-                CREATE TRIGGER IF NOT EXISTS {table_name}_prevent_update
-                BEFORE UPDATE ON {table_name}
-                BEGIN
-                    SELECT RAISE(ABORT, '{table_name} is immutable');
-                END
-                """
-            )
-            conn.execute(
-                f"""
-                CREATE TRIGGER IF NOT EXISTS {table_name}_prevent_delete
-                BEFORE DELETE ON {table_name}
-                BEGIN
-                    SELECT RAISE(ABORT, '{table_name} is immutable');
-                END
-                """
-            )
+        _ensure_immutability_triggers(conn)
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    if not _table_exists(conn, table_name):
+        return set()
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _needs_phase1a_schema_rebuild(conn: sqlite3.Connection) -> bool:
+    required_columns = {
+        "edge_desk_agent_market_capabilities": {"agent_version_tag"},
+        "edge_desk_consensus_configs": {"config_scope_key"},
+        "edge_desk_agent_predictions": {"agent_version_tag"},
+        "edge_desk_consensus_evaluations": {"config_scope_key"},
+    }
+    return any(
+        _table_exists(conn, table_name) and not columns.issubset(_table_columns(conn, table_name))
+        for table_name, columns in required_columns.items()
+    )
+
+
+def _migrate_phase1a_schema(conn: sqlite3.Connection) -> None:
+    legacy_tables = [table_name for table_name in IMMUTABLE_TABLES if _table_exists(conn, table_name)]
+    if not legacy_tables:
+        return
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        with conn:
+            for table_name in legacy_tables:
+                conn.execute(f"ALTER TABLE {table_name} RENAME TO {table_name}__phase1a_legacy")
+            for statement in SCHEMA_STATEMENTS:
+                conn.execute(statement)
+            _copy_legacy_agent_registry(conn)
+            _copy_legacy_agent_market_capabilities(conn)
+            _copy_legacy_consensus_configs(conn)
+            _copy_legacy_agent_predictions(conn)
+            _copy_legacy_consensus_evaluations(conn)
+            _copy_legacy_decision_history(conn)
+            for table_name in legacy_tables:
+                conn.execute(f"DROP TABLE {table_name}__phase1a_legacy")
+        conn.execute("PRAGMA foreign_keys = ON")
+    except Exception:
+        conn.execute("PRAGMA foreign_keys = ON")
+        raise
+    _configure_connection(conn)
+
+
+def _copy_legacy_agent_registry(conn: sqlite3.Connection) -> None:
+    legacy_rows = conn.execute(
+        """
+        SELECT registry_row_id, agent_id, version_tag, name, method_family, status, created_at, metadata_json
+        FROM edge_desk_agent_registry__phase1a_legacy
+        ORDER BY registry_row_id
+        """
+    ).fetchall()
+    for row in legacy_rows:
+        conn.execute(
+            """
+            INSERT INTO edge_desk_agent_registry (
+                registry_row_id, agent_id, version_tag, name, method_family, status, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            tuple(row),
+        )
+
+
+def _resolve_agent_version_tag(conn: sqlite3.Connection, agent_id: str) -> str:
+    row = conn.execute(
+        """
+        SELECT version_tag
+        FROM edge_desk_agent_registry
+        WHERE agent_id = ?
+        ORDER BY created_at DESC, registry_row_id DESC
+        LIMIT 1
+        """,
+        (agent_id,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"cannot migrate edge desk rows without registered agent {agent_id!r}")
+    return str(row["version_tag"])
+
+
+def _copy_legacy_agent_market_capabilities(conn: sqlite3.Connection) -> None:
+    legacy_rows = conn.execute(
+        """
+        SELECT capability_row_id, agent_id, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
+        FROM edge_desk_agent_market_capabilities__phase1a_legacy
+        ORDER BY capability_row_id
+        """
+    ).fetchall()
+    for row in legacy_rows:
+        agent_id = str(row["agent_id"])
+        conn.execute(
+            """
+            INSERT INTO edge_desk_agent_market_capabilities (
+                capability_row_id, agent_id, agent_version_tag, market_family, version_tag,
+                capability_status, valid_from, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["capability_row_id"],
+                agent_id,
+                _resolve_agent_version_tag(conn, agent_id),
+                row["market_family"],
+                row["version_tag"],
+                row["capability_status"],
+                row["valid_from"],
+                row["created_at"],
+                row["metadata_json"],
+            ),
+        )
+
+
+def _config_scope_key(market_family: str | None) -> str:
+    return GLOBAL_CONFIG_SCOPE_KEY if market_family is None else str(market_family)
+
+
+def _copy_legacy_consensus_configs(conn: sqlite3.Connection) -> None:
+    legacy_rows = conn.execute(
+        """
+        SELECT config_row_id, config_id, market_family, version_tag, required_agents_json, minimum_quorum,
+               same_direction_required, max_probability_spread, valid_from, created_at, metadata_json
+        FROM edge_desk_consensus_configs__phase1a_legacy
+        ORDER BY config_row_id
+        """
+    ).fetchall()
+    for row in legacy_rows:
+        conn.execute(
+            """
+            INSERT INTO edge_desk_consensus_configs (
+                config_row_id, config_id, market_family, config_scope_key, version_tag, required_agents_json,
+                minimum_quorum, same_direction_required, max_probability_spread, valid_from, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["config_row_id"],
+                row["config_id"],
+                row["market_family"],
+                _config_scope_key(None if row["market_family"] is None else str(row["market_family"])),
+                row["version_tag"],
+                row["required_agents_json"],
+                row["minimum_quorum"],
+                row["same_direction_required"],
+                row["max_probability_spread"],
+                row["valid_from"],
+                row["created_at"],
+                row["metadata_json"],
+            ),
+        )
+
+
+def _copy_legacy_agent_predictions(conn: sqlite3.Connection) -> None:
+    legacy_rows = conn.execute(
+        """
+        SELECT prediction_row_id, prediction_id, prediction_key, fixture_id, kickoff_utc, agent_id, market_family, line,
+               selection, probability, fair_price, prediction_status, as_of, generated_at, model_version,
+               model_snapshot_id, source_prediction_version, source_payload_hash, block_reason,
+               source_references_json, metadata_json, payload_json, created_at
+        FROM edge_desk_agent_predictions__phase1a_legacy
+        ORDER BY prediction_row_id
+        """
+    ).fetchall()
+    for row in legacy_rows:
+        agent_id = str(row["agent_id"])
+        conn.execute(
+            """
+            INSERT INTO edge_desk_agent_predictions (
+                prediction_row_id, prediction_id, prediction_key, fixture_id, kickoff_utc, agent_id, agent_version_tag,
+                market_family, line, selection, probability, fair_price, prediction_status, as_of, generated_at,
+                model_version, model_snapshot_id, source_prediction_version, source_payload_hash, block_reason,
+                source_references_json, metadata_json, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["prediction_row_id"],
+                row["prediction_id"],
+                row["prediction_key"],
+                row["fixture_id"],
+                row["kickoff_utc"],
+                agent_id,
+                _resolve_agent_version_tag(conn, agent_id),
+                row["market_family"],
+                row["line"],
+                row["selection"],
+                row["probability"],
+                row["fair_price"],
+                row["prediction_status"],
+                row["as_of"],
+                row["generated_at"],
+                row["model_version"],
+                row["model_snapshot_id"],
+                row["source_prediction_version"],
+                row["source_payload_hash"],
+                row["block_reason"],
+                row["source_references_json"],
+                row["metadata_json"],
+                row["payload_json"],
+                row["created_at"],
+            ),
+        )
+
+
+def _resolve_config_scope_key(conn: sqlite3.Connection, config_id: str, config_version_tag: str, market_family: str) -> str:
+    row = conn.execute(
+        """
+        SELECT config_scope_key
+        FROM edge_desk_consensus_configs
+        WHERE config_id = ?
+          AND version_tag = ?
+          AND (market_family = ? OR market_family IS NULL)
+        ORDER BY CASE WHEN market_family = ? THEN 0 ELSE 1 END, valid_from DESC, config_row_id DESC
+        LIMIT 1
+        """,
+        (config_id, config_version_tag, market_family, market_family),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(
+            f"cannot migrate edge desk consensus without config {config_id!r} version {config_version_tag!r}"
+        )
+    return str(row["config_scope_key"])
+
+
+def _copy_legacy_consensus_evaluations(conn: sqlite3.Connection) -> None:
+    legacy_rows = conn.execute(
+        """
+        SELECT consensus_row_id, consensus_id, consensus_key, fixture_id, kickoff_utc, market_family, line, config_id,
+               config_version_tag, participating_agents_json, prediction_ids_json, agreed_selection,
+               consensus_probability, probability_spread, status, reason, evaluated_at, payload_json, created_at
+        FROM edge_desk_consensus_evaluations__phase1a_legacy
+        ORDER BY consensus_row_id
+        """
+    ).fetchall()
+    for row in legacy_rows:
+        market_family = str(row["market_family"])
+        conn.execute(
+            """
+            INSERT INTO edge_desk_consensus_evaluations (
+                consensus_row_id, consensus_id, consensus_key, fixture_id, kickoff_utc, market_family, line, config_id,
+                config_scope_key, config_version_tag, participating_agents_json, prediction_ids_json, agreed_selection,
+                consensus_probability, probability_spread, status, reason, evaluated_at, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["consensus_row_id"],
+                row["consensus_id"],
+                row["consensus_key"],
+                row["fixture_id"],
+                row["kickoff_utc"],
+                market_family,
+                row["line"],
+                row["config_id"],
+                _resolve_config_scope_key(conn, str(row["config_id"]), str(row["config_version_tag"]), market_family),
+                row["config_version_tag"],
+                row["participating_agents_json"],
+                row["prediction_ids_json"],
+                row["agreed_selection"],
+                row["consensus_probability"],
+                row["probability_spread"],
+                row["status"],
+                row["reason"],
+                row["evaluated_at"],
+                row["payload_json"],
+                row["created_at"],
+            ),
+        )
+
+
+def _copy_legacy_decision_history(conn: sqlite3.Connection) -> None:
+    legacy_rows = conn.execute(
+        """
+        SELECT decision_row_id, decision_event_id, decision_key, fixture_id, kickoff_utc, market_family, line,
+               selection, consensus_id, agent_prediction_ids_json, decision_status, reason_code, reason_detail,
+               decided_at, payload_json, created_at
+        FROM edge_desk_decision_history__phase1a_legacy
+        ORDER BY decision_row_id
+        """
+    ).fetchall()
+    for row in legacy_rows:
+        conn.execute(
+            """
+            INSERT INTO edge_desk_decision_history (
+                decision_row_id, decision_event_id, decision_key, fixture_id, kickoff_utc, market_family, line,
+                selection, consensus_id, agent_prediction_ids_json, decision_status, reason_code, reason_detail,
+                decided_at, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            tuple(row),
+        )
+
+
+def _ensure_immutability_triggers(conn: sqlite3.Connection) -> None:
+    for table_name in IMMUTABLE_TABLES:
+        conn.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS {table_name}_prevent_update
+            BEFORE UPDATE ON {table_name}
+            BEGIN
+                SELECT RAISE(ABORT, '{table_name} is immutable');
+            END
+            """
+        )
+        conn.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS {table_name}_prevent_delete
+            BEFORE DELETE ON {table_name}
+            BEGIN
+                SELECT RAISE(ABORT, '{table_name} is immutable');
+            END
+            """
+        )
 
 
 def list_active_agents(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -450,6 +790,7 @@ def _build_agent_prediction_rows(
                 "fixture_id": str(fixture["fixture_id"]),
                 "kickoff_utc": kickoff_utc,
                 "agent_id": ROUTE_B_COMPOSITE_AGENT_ID,
+                "agent_version_tag": FOUNDATION_VERSION,
                 "market_family": str(market_row["market_family"]),
                 "line": None if market_row.get("line") is None else float(market_row["line"]),
                 "selection": str(market_row["selection"]),
@@ -497,6 +838,7 @@ def _build_agent_prediction_rows(
             "fixture_id": str(fixture["fixture_id"]),
             "kickoff_utc": kickoff_utc,
             "agent_id": ROUTE_B_COMPOSITE_AGENT_ID,
+            "agent_version_tag": FOUNDATION_VERSION,
             "market_family": market_family,
             "line": None,
             "selection": None,
@@ -625,6 +967,7 @@ def _build_consensus_row(conn: sqlite3.Connection, grouped_rows: list[dict[str, 
         "market_family": str(exemplar["market_family"]),
         "line": exemplar.get("line"),
         "config_id": str(config["config_id"]),
+        "config_scope_key": str(config["config_scope_key"]),
         "config_version_tag": str(config["version_tag"]),
         "participating_agents": participating_agents,
         "prediction_ids": prediction_ids,
@@ -656,8 +999,8 @@ def _build_decision_row(grouped_rows: list[dict[str, Any]], consensus_row: dict[
     if len(selections) == 1:
         context_selection = next(iter(selections))
     if consensus_row["status"] == "PASSED":
-        decision_status = "QUALIFIED"
-        reason_code = "OTHER"
+        decision_status = "CONSENSUS_PASSED"
+        reason_code = "VALUE_RISK_PENDING"
     elif consensus_row["status"] == "INSUFFICIENT_AGENTS":
         decision_status = "NO_BET"
         reason_code = "CONSENSUS_INSUFFICIENT_AGENTS"
@@ -707,11 +1050,11 @@ def _insert_prediction_row(conn: sqlite3.Connection, payload: dict[str, Any]) ->
         conn.execute(
             """
             INSERT OR IGNORE INTO edge_desk_agent_predictions (
-                prediction_id, prediction_key, fixture_id, kickoff_utc, agent_id, market_family, line, selection,
-                probability, fair_price, prediction_status, as_of, generated_at, model_version, model_snapshot_id,
-                source_prediction_version, source_payload_hash, block_reason, source_references_json, metadata_json,
-                payload_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                prediction_id, prediction_key, fixture_id, kickoff_utc, agent_id, agent_version_tag, market_family,
+                line, selection, probability, fair_price, prediction_status, as_of, generated_at, model_version,
+                model_snapshot_id, source_prediction_version, source_payload_hash, block_reason, source_references_json,
+                metadata_json, payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload["prediction_id"],
@@ -719,6 +1062,7 @@ def _insert_prediction_row(conn: sqlite3.Connection, payload: dict[str, Any]) ->
                 payload["fixture_id"],
                 payload.get("kickoff_utc"),
                 payload["agent_id"],
+                payload["agent_version_tag"],
                 payload["market_family"],
                 payload.get("line"),
                 payload.get("selection"),
@@ -755,9 +1099,10 @@ def _insert_consensus_row(conn: sqlite3.Connection, payload: dict[str, Any]) -> 
             """
             INSERT OR IGNORE INTO edge_desk_consensus_evaluations (
                 consensus_id, consensus_key, fixture_id, kickoff_utc, market_family, line, config_id,
-                config_version_tag, participating_agents_json, prediction_ids_json, agreed_selection,
-                consensus_probability, probability_spread, status, reason, evaluated_at, payload_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                config_scope_key, config_version_tag, participating_agents_json, prediction_ids_json,
+                agreed_selection, consensus_probability, probability_spread, status, reason, evaluated_at,
+                payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload["consensus_id"],
@@ -767,6 +1112,7 @@ def _insert_consensus_row(conn: sqlite3.Connection, payload: dict[str, Any]) -> 
                 payload["market_family"],
                 payload.get("line"),
                 payload["config_id"],
+                payload["config_scope_key"],
                 payload["config_version_tag"],
                 _json_dumps(payload["participating_agents"]),
                 _json_dumps(payload["prediction_ids"]),

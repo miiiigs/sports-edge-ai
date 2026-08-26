@@ -79,11 +79,29 @@ The ledger persists:
 - consensus evaluations
 - decision history
 
-The shadow ledger uses SQLite-compatible append-only tables with database triggers that reject `UPDATE` and `DELETE` against immutable records.
+The shadow ledger now hardens immutability at the SQLite boundary for practical mutation paths used in this repository:
+
+- `UPDATE` is rejected
+- `DELETE` is rejected
+- `INSERT OR REPLACE` / `REPLACE INTO` cannot rewrite prior rows
+- `ON CONFLICT DO UPDATE` cannot rewrite prior rows
+
+This is enforced through immutable-table triggers together with connection-level SQLite settings required for `REPLACE` semantics to route through the immutable delete guard.
 
 Retries of the same logical observation are idempotent through stable logical keys and insert-ignore semantics.
 
 Changed model version, changed `as_of`, changed market line, changed selection context, or changed payload truth produce new immutable rows instead of mutation.
+
+The ledger also now enforces minimal database-domain and referential integrity for the current phase:
+
+- probability must stay within `0.0` to `1.0` when present
+- fair decimal price must stay above `1.0` when present
+- status fields use closed DB-level domains
+- agent capability and prediction rows must reference a registered agent version
+- consensus evaluations must reference a real consensus config version
+- decision history must reference a real consensus evaluation
+
+Existing Phase 1A databases are rebuilt in place into the hardened schema during initialization so those protections also apply to databases created before this remediation.
 
 ## Shadow-Mode Status
 
@@ -95,10 +113,17 @@ The new Edge Desk ledger records parallel truth in shadow mode:
 - Edge Desk shadow records Route B agent output per market
 - Edge Desk shadow records blocked states as durable data
 - Edge Desk shadow records consensus truthfully as insufficient when quorum is not available
+- Edge Desk shadow initialization is fail-open relative to the legacy dashboard path
+
+If Edge Desk initialization fails, the current Football dashboard still starts, predictions still load, and legacy behavior continues while Edge Desk shadow persistence is marked degraded through logging and runtime diagnostics.
 
 With only Route B available, Edge Desk consensus cannot pass the multi-agent requirement.
 
 That temporary split is intentional.
+
+If consensus ever passes before downstream value and risk stages exist, the decision history now records `CONSENSUS_PASSED` rather than claiming `QUALIFIED`.
+
+`QUALIFIED` remains reserved for a future phase where consensus, value, and risk have each been explicitly evaluated and passed.
 
 ## No Historical Fabrication
 
@@ -137,3 +162,14 @@ If that file is not present in this repository, it remains an external reference
 Phase 1A creates truth before presentation.
 
 The repository keeps the current Football application behavior intact while adding the permanent historical foundation needed for future Route A work, Agent 3 design, multi-agent consensus, and later Edge Desk dashboard implementation.
+
+Known remaining gaps after this remediation:
+
+- Route A is still not implemented
+- Agent 3 is still unresolved
+- true 3-agent consensus is still unavailable
+- value integration is still pending
+- risk integration is still pending
+- Edge Desk dashboard presentation is still pending
+- historical backfill was not performed
+- full-slate fixture-level blocked representation remains partial in this phase
