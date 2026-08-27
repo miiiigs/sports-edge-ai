@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
 from ..market_data.the_odds_api import TheOddsApiProvider
-from ..storage import football_paper_trading
+from ..storage import football_edge_desk, football_paper_trading
 from . import storage
 from .current_market import build_fixture_market_evaluation
 from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
@@ -250,6 +250,8 @@ class DashboardServices:
             "error": None,
         }
         self._storage_runtime_state: dict[str, Any] = {}
+        self._edge_desk_available = True
+        self._edge_desk_last_error: str | None = None
 
     async def initialize(self) -> None:
         ensure_operational_data_dir(self.config.operational_data_dir)
@@ -264,6 +266,16 @@ class DashboardServices:
         )
         with storage.connect(self.config.dashboard_db_path) as conn:
             storage.ensure_schema(conn)
+            try:
+                football_edge_desk.ensure_schema(conn)
+                self._edge_desk_available = True
+                self._edge_desk_last_error = None
+            except Exception as exc:
+                self._edge_desk_available = False
+                self._edge_desk_last_error = (
+                    f"initialization failure: {self._sanitize_edge_desk_error(exc)}"
+                )
+                logger.exception("edge desk shadow initialization failed; continuing in fail-open mode")
             self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             football_paper_trading.ensure_schema(conn)
@@ -314,11 +326,31 @@ class DashboardServices:
         if isinstance(one_shot_sync_state, dict):
             self._one_shot_sync_state.update(one_shot_sync_state)
 
-    def _record_storage_runtime_state(self, *, initialized_at: str) -> None:
+    def _edge_desk_shadow_state(self) -> dict[str, Any]:
+        return {
+            "available": self._edge_desk_available,
+            "state": "READY" if self._edge_desk_available else "DEGRADED",
+            "last_error": self._edge_desk_last_error,
+        }
+
+    @staticmethod
+    def _sanitize_edge_desk_error(exc: Exception) -> str:
+        message = " ".join(str(exc).split()).strip()
+        if not message:
+            return type(exc).__name__
+        return f"{type(exc).__name__}: {message[:200]}"
+
+    def _persist_storage_runtime_state(
+        self,
+        conn: Any,
+        *,
+        updated_at: str,
+        initialized_at: str | None = None,
+    ) -> None:
         existing = dict(self._storage_runtime_state)
         payload = {
-            "first_initialized_at": existing.get("first_initialized_at") or initialized_at,
-            "last_db_initialization_at": initialized_at,
+            "first_initialized_at": existing.get("first_initialized_at") or initialized_at or updated_at,
+            "last_db_initialization_at": existing.get("last_db_initialization_at") or initialized_at or updated_at,
             "dashboard_db_path": str(self.config.dashboard_db_path),
             "paper_trading_db_path": str(self.config.paper_trading_db_path),
             "research_db_path": str(self.config.research_db_path),
@@ -326,15 +358,31 @@ class DashboardServices:
                 {"role": "dashboard", "path": str(self.config.dashboard_db_path)},
                 {"role": "paper_trading", "path": str(self.config.paper_trading_db_path)},
             ],
+            "edge_desk_shadow": self._edge_desk_shadow_state(),
         }
-        with storage.connect(self.config.dashboard_db_path) as conn:
-            storage.put_runtime_state(
-                conn,
-                state_key="storage_runtime_state",
-                state_value=payload,
-                updated_at=initialized_at,
-            )
+        storage.put_runtime_state(
+            conn,
+            state_key="storage_runtime_state",
+            state_value=payload,
+            updated_at=updated_at,
+        )
         self._storage_runtime_state = payload
+
+    def _record_storage_runtime_state(self, *, initialized_at: str) -> None:
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            self._persist_storage_runtime_state(conn, updated_at=initialized_at, initialized_at=initialized_at)
+
+    def _mark_edge_desk_degraded(
+        self,
+        conn: Any,
+        *,
+        reason: str,
+        exc: Exception,
+        updated_at: str,
+    ) -> None:
+        self._edge_desk_available = False
+        self._edge_desk_last_error = f"{reason}: {self._sanitize_edge_desk_error(exc)}"
+        self._persist_storage_runtime_state(conn, updated_at=updated_at)
 
     def _build_snapshot(self) -> None:
         try:
@@ -1379,17 +1427,20 @@ class DashboardServices:
                 "safeguard_reason": "POINT-IN-TIME XG NOT AVAILABLE",
             }
             storage.save_prediction(conn, payload, updated_at=utc_now_iso())
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
         version_key = self._prediction_version_key(fixture, self.snapshot)
         existing = storage.fetch_prediction_by_version_key(conn, version_key)
         if existing is not None:
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=existing)
             return existing
 
         kickoff_utc = parse_iso_datetime(fixture.kickoff_utc)
         current_time_utc = datetime.now(timezone.utc)
         latest = storage.fetch_latest_prediction_for_fixture(conn, fixture.fixture_id)
         if latest is not None and kickoff_utc <= current_time_utc:
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=latest)
             return latest
         if kickoff_utc <= current_time_utc:
             payload = {
@@ -1414,6 +1465,7 @@ class DashboardServices:
                 "away_team_name": fixture.away_team_name,
             }
             storage.save_prediction(conn, payload, updated_at=utc_now_iso())
+            self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
         context = PredictionContext(fixture=fixture, snapshot=self.snapshot)
@@ -1424,7 +1476,32 @@ class DashboardServices:
             if isinstance(resolution, dict):
                 storage.record_team_resolution(conn, resolution, updated_at=utc_now_iso())
         storage.save_prediction(conn, prediction, updated_at=utc_now_iso())
+        self._record_edge_desk_shadow(conn, fixture=fixture, prediction=prediction)
         return prediction
+
+    def _record_edge_desk_shadow(
+        self,
+        conn: Any,
+        *,
+        fixture: NormalizedFixture,
+        prediction: dict[str, Any],
+    ) -> None:
+        if not self._edge_desk_available:
+            return
+        try:
+            football_edge_desk.record_shadow_prediction_bundle(
+                conn,
+                fixture=fixture.to_dict(timezone_name="UTC"),
+                prediction=prediction,
+            )
+        except Exception as exc:
+            self._mark_edge_desk_degraded(
+                conn,
+                reason="runtime shadow-write failure",
+                exc=exc,
+                updated_at=utc_now_iso(),
+            )
+            logger.exception("edge desk shadow persistence failed for fixture_id=%s", fixture.fixture_id)
 
     @staticmethod
     def _prediction_version_key(
@@ -1775,6 +1852,7 @@ class DashboardServices:
             "last_db_initialization_at": self._storage_runtime_state.get("last_db_initialization_at"),
             "first_initialized_at": self._storage_runtime_state.get("first_initialized_at"),
             "operational_db_paths": operational_paths,
+            "edge_desk_shadow": dict(self._storage_runtime_state.get("edge_desk_shadow") or {}),
             "mutable_storage_class": "OPERATIONAL_RUNTIME",
             "immutable_storage_class": "RESEARCH_REFERENCE",
         }

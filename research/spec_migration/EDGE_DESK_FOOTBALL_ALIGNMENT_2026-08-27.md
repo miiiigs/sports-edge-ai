@@ -1,0 +1,178 @@
+# Football Edge Desk Alignment
+
+Date: `2026-08-26`
+
+## Purpose
+
+This document records the alignment between the original Football implementation in this repository and the newer Football Edge Desk architecture direction.
+
+It preserves the requirement history rather than rewriting older material.
+
+## Original Football Architecture
+
+The original Football production path in this repository currently operates around one primary live predictor:
+
+- Route B composite
+- GAP baseline state
+- Day 8 expected-goals conversion
+- Day 9 Dixon-Coles scoreline distribution
+- Day 10 fair-price derivation
+
+The current application then layers current-market evaluation, manager logic, safeguards, candidate handling, paper-trading, and dashboard presentation on top of that single prediction payload.
+
+Manager logic is not an agent.
+
+Day 12 safeguards are not agents.
+
+xG conversion is not an independent agent.
+
+Legacy Poisson remains historical and research-oriented work. It is not silently promoted to a new live Football agent.
+
+## Newer Edge Desk Architecture
+
+The newer Football Edge Desk direction expands the architecture toward:
+
+- full slate processing
+- permanent individual agent outputs
+- configurable consensus
+- later value and risk evaluation
+- durable qualified-pick and no-bet history
+- eventual settlement and review by market context
+
+This is an architecture expansion, not a retroactive claim that three Football agents always existed in production.
+
+## Owner Clarification
+
+The current repository has one legitimate implemented predictive Football agent today:
+
+- `ROUTE_B_COMPOSITE`
+
+Route A remains part of the intended Football direction but is not yet implemented as a live predictor.
+
+Agent 3 remains unresolved and requires a genuinely new model design.
+
+Because only Route B is implemented, the Edge Desk shadow layer must not pretend three-agent consensus already exists.
+
+## Current Route B Status
+
+Route B remains the authoritative current Football prediction path for the application.
+
+Phase 1A does not:
+
+- rewrite Route B
+- change Route B probabilities
+- change Route B fair prices
+- change current qualification behavior
+- change current paper-entry eligibility
+- redesign the dashboard
+
+## Immutable Ledger Architecture
+
+Phase 1A introduces an immutable Edge Desk shadow ledger beside the existing mutable dashboard prediction store.
+
+The ledger persists:
+
+- agent registry
+- agent market capability
+- agent predictions
+- consensus configurations
+- consensus evaluations
+- decision history
+
+The shadow ledger now hardens immutability at the SQLite boundary for practical mutation paths used in this repository:
+
+- `UPDATE` is rejected
+- `DELETE` is rejected
+- `INSERT OR REPLACE` / `REPLACE INTO` cannot rewrite prior rows
+- `ON CONFLICT DO UPDATE` cannot rewrite prior rows
+
+This is enforced through immutable-table triggers together with connection-level SQLite settings required for `REPLACE` semantics to route through the immutable delete guard.
+
+Retries of the same logical observation are idempotent through stable logical keys and insert-ignore semantics.
+
+Changed model version, changed `as_of`, changed market line, changed selection context, or changed payload truth produce new immutable rows instead of mutation.
+
+The ledger also now enforces minimal database-domain and referential integrity for the current phase:
+
+- probability must stay within `0.0` to `1.0` when present
+- fair decimal price must stay above `1.0` when present
+- status fields use closed DB-level domains
+- agent capability and prediction rows must reference a registered agent version
+- consensus evaluations must reference a real consensus config version
+- decision history must reference a real consensus evaluation
+
+Existing Phase 1A databases are rebuilt in place into the hardened schema during initialization so those protections also apply to databases created before this remediation.
+
+## Shadow-Mode Status
+
+The current application remains authoritative.
+
+The new Edge Desk ledger records parallel truth in shadow mode:
+
+- current Football application behavior continues unchanged
+- Edge Desk shadow records Route B agent output per market
+- Edge Desk shadow records blocked states as durable data
+- Edge Desk shadow records consensus truthfully as insufficient when quorum is not available
+- Edge Desk shadow initialization is fail-open relative to the legacy dashboard path
+- runtime Edge Desk shadow-write failures are also fail-open relative to the legacy dashboard path
+
+If Edge Desk initialization fails, the current Football dashboard still starts, predictions still load, and legacy behavior continues while Edge Desk shadow persistence is marked degraded through logging and runtime diagnostics.
+
+If a runtime Edge Desk shadow write fails after startup, the current Football prediction still saves and returns normally, Edge Desk is marked `DEGRADED`, and later shadow writes are skipped for the lifetime of that service instance.
+
+With only Route B available, Edge Desk consensus cannot pass the multi-agent requirement.
+
+That temporary split is intentional.
+
+If consensus ever passes before downstream value and risk stages exist, the decision history now records `CONSENSUS_PASSED` rather than claiming `QUALIFIED`.
+
+`QUALIFIED` remains reserved for a future phase where consensus, value, and risk have each been explicitly evaluated and passed.
+
+## No Historical Fabrication
+
+Phase 1A does not fabricate historical Route A rows, Agent 3 rows, or synthetic multi-agent consensus history.
+
+It also does not rewrite existing stored Football prediction history into fake multi-agent past truth.
+
+Only clear Route B shadow recording is introduced for the new architecture foundation.
+
+## Market Participation Truth
+
+The Edge Desk design must remain market-aware.
+
+Agents do not automatically support every market family.
+
+Phase 1A records Route B as supporting the currently implemented market families used by the repository:
+
+- `1x2`
+- `btts`
+- `goals_total`
+- `asian_handicap`
+- `corner_total`
+
+Unsupported capability must not be treated as a positive vote.
+
+## Dashboard Note
+
+The main Edge Desk presentation layer is not implemented in Phase 1A.
+
+The eventual presentation reference is `Edge-Desk-Design-Pack.html`.
+
+If that file is not present in this repository, it remains an external reference by name only.
+
+## Summary
+
+Phase 1A creates truth before presentation.
+
+The repository keeps the current Football application behavior intact while adding the permanent historical foundation needed for future Route A work, Agent 3 design, multi-agent consensus, and later Edge Desk dashboard implementation.
+
+Known remaining gaps after this remediation:
+
+- Route A is still not implemented
+- Agent 3 is still unresolved
+- true 3-agent consensus is still unavailable
+- value integration is still pending
+- risk integration is still pending
+- Edge Desk dashboard presentation is still pending
+- historical backfill was not performed
+- full-slate fixture-level blocked representation remains partial in this phase
