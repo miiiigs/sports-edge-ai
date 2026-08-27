@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ..agents.football.route_a_classifier import (
+    ROUTE_A_AGENT_ID,
+    ROUTE_A_AGENT_VERSION_TAG,
+    build_route_a_market_rows,
+)
 from ..experiments.football_day10_market_pricing import (
     DAY10_INPUT_CONTRACT_VERSION,
     DAY7_BASELINE_EXPERIMENT_VERSION,
@@ -135,6 +140,135 @@ def _blocked_prediction(
     }
 
 
+def _route_b_shadow_agent(prediction: dict[str, Any]) -> dict[str, Any]:
+    prediction_status = str(prediction.get("prediction_status") or PREDICTION_STATUS_BLOCKED)
+    statuses = {
+        PREDICTION_STATUS_READY: "PREDICTED",
+        PREDICTION_STATUS_BLOCKED: "BLOCKED",
+        PREDICTION_STATUS_FAILED: "BLOCKED",
+    }
+    if statuses.get(prediction_status, "NOT_APPLICABLE") == "PREDICTED":
+        return {
+            "agent_id": "ROUTE_B_COMPOSITE",
+            "agent_version_tag": "football_edge_desk_foundation_v1",
+            "prediction_status": "PREDICTED",
+            "generated_at": prediction.get("generated_at"),
+            "model_snapshot_id": prediction.get("model_snapshot_id"),
+            "source_prediction_version": prediction.get("version_key") or prediction.get("prediction_id"),
+            "market_rows": list(prediction.get("market_rows") or []),
+            "metadata": {},
+        }
+    return {
+        "agent_id": "ROUTE_B_COMPOSITE",
+        "agent_version_tag": "football_edge_desk_foundation_v1",
+        "prediction_status": statuses.get(prediction_status, "NOT_APPLICABLE"),
+        "generated_at": prediction.get("generated_at"),
+        "model_snapshot_id": prediction.get("model_snapshot_id"),
+        "source_prediction_version": prediction.get("version_key") or prediction.get("prediction_id"),
+        "model_version": (prediction.get("model_versions") or {}).get("current_snapshot_model_version"),
+        "model_as_of": prediction.get("model_as_of"),
+        "blockers": list(prediction.get("blockers") or []),
+        "warnings": list(prediction.get("warnings") or []),
+        "market_contexts": [
+            {"market_family": "1x2", "line": None},
+            {"market_family": "asian_handicap", "line": None},
+            {"market_family": "btts", "line": None},
+            {"market_family": "corner_total", "line": None},
+            {"market_family": "goals_total", "line": None},
+        ],
+        "metadata": {},
+    }
+
+
+def _route_a_shadow_agent(
+    *,
+    fixture: NormalizedFixture,
+    prediction: dict[str, Any],
+    snapshot: CurrentFootballModelSnapshot | None,
+) -> dict[str, Any]:
+    if snapshot is None:
+        return {
+            "agent_id": ROUTE_A_AGENT_ID,
+            "agent_version_tag": ROUTE_A_AGENT_VERSION_TAG,
+            "prediction_status": "BLOCKED",
+            "generated_at": prediction.get("generated_at"),
+            "source_prediction_version": prediction.get("version_key") or prediction.get("prediction_id"),
+            "blockers": ["MODEL_SNAPSHOT_UNAVAILABLE"],
+            "market_contexts": [
+                {"market_family": "btts", "line": None},
+                {"market_family": "goals_total", "line": 2.5},
+            ],
+            "metadata": {},
+        }
+
+    if str(prediction.get("prediction_status")) != PREDICTION_STATUS_READY:
+        return {
+            "agent_id": ROUTE_A_AGENT_ID,
+            "agent_version_tag": ROUTE_A_AGENT_VERSION_TAG,
+            "prediction_status": "BLOCKED",
+            "generated_at": prediction.get("generated_at"),
+            "model_snapshot_id": prediction.get("model_snapshot_id"),
+            "source_prediction_version": prediction.get("version_key") or prediction.get("prediction_id"),
+            "model_version": None if snapshot.route_a_artifact is None else snapshot.route_a_artifact.get("agent_version_tag"),
+            "model_as_of": prediction.get("model_as_of") or snapshot.model_as_of,
+            "blockers": list(prediction.get("blockers") or ["ROUTE_A_UPSTREAM_BLOCKED"]),
+            "warnings": list(prediction.get("warnings") or []),
+            "market_contexts": [
+                {"market_family": "btts", "line": None},
+                {"market_family": "goals_total", "line": 2.5},
+            ],
+            "metadata": {
+                "artifact_id": None if snapshot.route_a_artifact is None else snapshot.route_a_artifact.get("artifact_id"),
+            },
+        }
+
+    route_a_prediction = build_route_a_market_rows(
+        snapshot.route_a_artifact,
+        competition_id=fixture.competition_id,
+        predicted_home_shots=prediction.get("expected_home_shots"),
+        predicted_away_shots=prediction.get("expected_away_shots"),
+        predicted_home_corners=prediction.get("expected_home_corners"),
+        predicted_away_corners=prediction.get("expected_away_corners"),
+        as_of=str(prediction.get("model_as_of") or snapshot.model_as_of),
+    )
+    return {
+        "agent_id": ROUTE_A_AGENT_ID,
+        "agent_version_tag": ROUTE_A_AGENT_VERSION_TAG,
+        "prediction_status": str(route_a_prediction.get("prediction_status") or "BLOCKED"),
+        "generated_at": prediction.get("generated_at"),
+        "model_snapshot_id": prediction.get("model_snapshot_id"),
+        "source_prediction_version": prediction.get("version_key") or prediction.get("prediction_id"),
+        "model_version": None if snapshot.route_a_artifact is None else snapshot.route_a_artifact.get("agent_version_tag"),
+        "model_as_of": prediction.get("model_as_of") or snapshot.model_as_of,
+        "blockers": list(route_a_prediction.get("blockers") or []),
+        "warnings": [],
+        "market_contexts": list(route_a_prediction.get("market_contexts") or []),
+        "market_rows": list(route_a_prediction.get("market_rows") or []),
+        "metadata": {
+            "artifact_id": None if snapshot.route_a_artifact is None else snapshot.route_a_artifact.get("artifact_id"),
+            "overall_route_a_status": None
+            if snapshot.route_a_artifact is None
+            else snapshot.route_a_artifact.get("overall_route_a_status"),
+        },
+    }
+
+
+def attach_edge_desk_shadow_bundle(
+    prediction: dict[str, Any],
+    *,
+    fixture: NormalizedFixture,
+    snapshot: CurrentFootballModelSnapshot | None,
+) -> dict[str, Any]:
+    payload = dict(prediction)
+    payload["edge_desk_shadow_bundle"] = {
+        "agents": [
+            _route_b_shadow_agent(payload),
+            _route_a_shadow_agent(fixture=fixture, prediction=payload, snapshot=snapshot),
+        ]
+    }
+    return payload
+
+
 def _season_code_from_fixture(fixture: NormalizedFixture) -> str:
     season_text = str(fixture.season or "").strip()
     if season_text.isdigit() and len(season_text) == 4:
@@ -148,10 +282,14 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
     generated_at = utc_now_iso()
 
     if fixture.competition_id not in snapshot.supported_competitions:
-        return _blocked_prediction(
+        return attach_edge_desk_shadow_bundle(
+            _blocked_prediction(
+                fixture=fixture,
+                generated_at=generated_at,
+                blocker_reason="COMPETITION_UNSUPPORTED",
+            ),
             fixture=fixture,
-            generated_at=generated_at,
-            blocker_reason="COMPETITION_UNSUPPORTED",
+            snapshot=snapshot,
         )
 
     home_resolution = snapshot.resolve_team(
@@ -172,17 +310,21 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
             reasons.append("HOME_TEAM_IDENTITY_UNRESOLVED")
         if not away_resolution.is_resolved:
             reasons.append("AWAY_TEAM_IDENTITY_UNRESOLVED")
-        return {
-            **_blocked_prediction(
-                fixture=fixture,
-                generated_at=generated_at,
-                blockers=reasons,
-            ),
-            "team_resolution": {
-                "home": home_resolution.to_dict(),
-                "away": away_resolution.to_dict(),
+        return attach_edge_desk_shadow_bundle(
+            {
+                **_blocked_prediction(
+                    fixture=fixture,
+                    generated_at=generated_at,
+                    blockers=reasons,
+                ),
+                "team_resolution": {
+                    "home": home_resolution.to_dict(),
+                    "away": away_resolution.to_dict(),
+                },
             },
-        }
+            fixture=fixture,
+            snapshot=snapshot,
+        )
 
     home_history = snapshot.team_model_history_status(
         competition_id=fixture.competition_id,
@@ -200,21 +342,25 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
             blockers.append("HOME_MODEL_HISTORY_MISSING")
         if not away_history["available"]:
             blockers.append("AWAY_MODEL_HISTORY_MISSING")
-        return {
-            **_blocked_prediction(
-                fixture=fixture,
-                generated_at=generated_at,
-                blockers=blockers,
-            ),
-            "team_resolution": {
-                "home": home_resolution.to_dict(),
-                "away": away_resolution.to_dict(),
+        return attach_edge_desk_shadow_bundle(
+            {
+                **_blocked_prediction(
+                    fixture=fixture,
+                    generated_at=generated_at,
+                    blockers=blockers,
+                ),
+                "team_resolution": {
+                    "home": home_resolution.to_dict(),
+                    "away": away_resolution.to_dict(),
+                },
+                "model_history": {
+                    "home": home_history,
+                    "away": away_history,
+                },
             },
-            "model_history": {
-                "home": home_history,
-                "away": away_history,
-            },
-        }
+            fixture=fixture,
+            snapshot=snapshot,
+        )
 
     try:
         shots_state = context.snapshot.gap_engine.state_record(
@@ -274,15 +420,19 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
             max_goals=MAX_GOALS,
         )
     except Exception as exc:
-        return {
-            **_blocked_prediction(
-                fixture=fixture,
-                generated_at=generated_at,
-                blocker_reason="MODEL_STATE_UNAVAILABLE",
-                warnings=[f"{type(exc).__name__}: {exc}"],
-            ),
-            "prediction_status": PREDICTION_STATUS_FAILED,
-        }
+        return attach_edge_desk_shadow_bundle(
+            {
+                **_blocked_prediction(
+                    fixture=fixture,
+                    generated_at=generated_at,
+                    blocker_reason="MODEL_STATE_UNAVAILABLE",
+                    warnings=[f"{type(exc).__name__}: {exc}"],
+                ),
+                "prediction_status": PREDICTION_STATUS_FAILED,
+            },
+            fixture=fixture,
+            snapshot=snapshot,
+        )
 
     scoreline_object_content = {
         "event_id": fixture.fixture_id,
@@ -383,7 +533,8 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
     kickoff_utc = datetime.fromisoformat(fixture.kickoff_utc)
     lock_state = "LOCKED_PRE_MATCH_PREDICTION" if current_time_utc >= kickoff_utc else "PRE_MATCH_OPEN"
 
-    return {
+    return attach_edge_desk_shadow_bundle(
+        {
         "prediction_id": prediction_id,
         "fixture_id": fixture.fixture_id,
         "generated_at": generated_at,
@@ -432,4 +583,7 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
         "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
         "safeguard_status": "BLOCKED",
         "safeguard_reason": "POINT-IN-TIME XG NOT AVAILABLE",
-    }
+        },
+        fixture=fixture,
+        snapshot=snapshot,
+    )

@@ -40,7 +40,7 @@ from .models import (
     parse_iso_datetime,
     utc_now_iso,
 )
-from .prediction_service import PredictionContext, build_prediction_for_fixture
+from .prediction_service import PredictionContext, attach_edge_desk_shadow_bundle, build_prediction_for_fixture
 from .runtime_paths import ensure_operational_data_dir, resolve_dashboard_operational_paths
 from .snapshot_service import CurrentFootballModelSnapshot, CurrentSnapshotError, build_current_football_model_snapshot
 
@@ -281,6 +281,18 @@ class DashboardServices:
             football_paper_trading.ensure_schema(conn)
         self._record_storage_runtime_state(initialized_at=initialized_at)
         self._build_snapshot()
+        if self.snapshot is not None and self._edge_desk_available:
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                try:
+                    football_edge_desk.ensure_route_a_foundation(conn, artifact=self.snapshot.route_a_artifact)
+                except Exception as exc:
+                    self._mark_edge_desk_degraded(
+                        conn,
+                        reason="route a foundation registration failure",
+                        exc=exc,
+                        updated_at=utc_now_iso(),
+                    )
+                    logger.exception("edge desk route a registration failed during startup")
         await self.sync_once(sync_kind="startup", include_schedule=True)
         if self.config.enable_scheduler and self._background_task is None:
             self._background_task = asyncio.create_task(self._run_scheduler())
@@ -390,9 +402,10 @@ class DashboardServices:
             self.snapshot_error = None
             self._prediction_state["state"] = "READY"
             logger.info(
-                "current model snapshot ready: snapshot_id=%s model_as_of=%s",
+                "current model snapshot ready: snapshot_id=%s model_as_of=%s route_a_status=%s",
                 self.snapshot.snapshot_id,
                 self.snapshot.model_as_of,
+                self.snapshot.diagnostics.get("route_a", {}).get("overall_status"),
             )
         except CurrentSnapshotError as exc:
             self.snapshot = None
@@ -1410,22 +1423,26 @@ class DashboardServices:
 
     def ensure_prediction(self, conn: Any, fixture: NormalizedFixture) -> dict[str, Any]:
         if self.snapshot is None:
-            payload = {
-                "prediction_id": f"prediction_blocked_{fixture.fixture_id}",
-                "fixture_id": fixture.fixture_id,
-                "generated_at": utc_now_iso(),
-                "model_as_of": None,
-                "model_snapshot_id": None,
-                "prediction_version": f"blocked|{fixture.fixture_id}",
-                "prediction_locked_at": fixture.kickoff_utc,
-                "version_key": f"blocked|{fixture.fixture_id}",
-                "prediction_status": PREDICTION_STATUS_BLOCKED,
-                "blockers": ["MODEL_SNAPSHOT_UNAVAILABLE"],
-                "warnings": [self.snapshot_error] if self.snapshot_error else [],
-                "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
-                "safeguard_status": "BLOCKED",
-                "safeguard_reason": "POINT-IN-TIME XG NOT AVAILABLE",
-            }
+            payload = attach_edge_desk_shadow_bundle(
+                {
+                    "prediction_id": f"prediction_blocked_{fixture.fixture_id}",
+                    "fixture_id": fixture.fixture_id,
+                    "generated_at": utc_now_iso(),
+                    "model_as_of": None,
+                    "model_snapshot_id": None,
+                    "prediction_version": f"blocked|{fixture.fixture_id}",
+                    "prediction_locked_at": fixture.kickoff_utc,
+                    "version_key": f"blocked|{fixture.fixture_id}",
+                    "prediction_status": PREDICTION_STATUS_BLOCKED,
+                    "blockers": ["MODEL_SNAPSHOT_UNAVAILABLE"],
+                    "warnings": [self.snapshot_error] if self.snapshot_error else [],
+                    "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
+                    "safeguard_status": "BLOCKED",
+                    "safeguard_reason": "POINT-IN-TIME XG NOT AVAILABLE",
+                },
+                fixture=fixture,
+                snapshot=None,
+            )
             storage.save_prediction(conn, payload, updated_at=utc_now_iso())
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
@@ -1443,27 +1460,31 @@ class DashboardServices:
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=latest)
             return latest
         if kickoff_utc <= current_time_utc:
-            payload = {
-                "prediction_id": f"prediction_locked_{fixture.fixture_id}",
-                "fixture_id": fixture.fixture_id,
-                "generated_at": utc_now_iso(),
-                "model_as_of": self.snapshot.model_as_of,
-                "model_snapshot_id": self.snapshot.snapshot_id,
-                "prediction_version": f"missed_lock|{fixture.fixture_id}",
-                "prediction_locked_at": fixture.kickoff_utc,
-                "version_key": f"missed_lock|{fixture.fixture_id}",
-                "prediction_status": PREDICTION_STATUS_BLOCKED,
-                "blockers": ["PREDICTION_AFTER_KICKOFF_BLOCKED"],
-                "warnings": ["fixture passed kickoff before a pre-match prediction version was persisted"],
-                "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
-                "safeguard_status": "BLOCKED",
-                "safeguard_reason": "POINT-IN-TIME XG NOT AVAILABLE",
-                "kickoff_utc": fixture.kickoff_utc,
-                "competition_id": fixture.competition_id,
-                "competition_name": fixture.competition_name,
-                "home_team_name": fixture.home_team_name,
-                "away_team_name": fixture.away_team_name,
-            }
+            payload = attach_edge_desk_shadow_bundle(
+                {
+                    "prediction_id": f"prediction_locked_{fixture.fixture_id}",
+                    "fixture_id": fixture.fixture_id,
+                    "generated_at": utc_now_iso(),
+                    "model_as_of": self.snapshot.model_as_of,
+                    "model_snapshot_id": self.snapshot.snapshot_id,
+                    "prediction_version": f"missed_lock|{fixture.fixture_id}",
+                    "prediction_locked_at": fixture.kickoff_utc,
+                    "version_key": f"missed_lock|{fixture.fixture_id}",
+                    "prediction_status": PREDICTION_STATUS_BLOCKED,
+                    "blockers": ["PREDICTION_AFTER_KICKOFF_BLOCKED"],
+                    "warnings": ["fixture passed kickoff before a pre-match prediction version was persisted"],
+                    "manager_decision_status": "MARKET_DATA_NOT_CONNECTED",
+                    "safeguard_status": "BLOCKED",
+                    "safeguard_reason": "POINT-IN-TIME XG NOT AVAILABLE",
+                    "kickoff_utc": fixture.kickoff_utc,
+                    "competition_id": fixture.competition_id,
+                    "competition_name": fixture.competition_name,
+                    "home_team_name": fixture.home_team_name,
+                    "away_team_name": fixture.away_team_name,
+                },
+                fixture=fixture,
+                snapshot=self.snapshot,
+            )
             storage.save_prediction(conn, payload, updated_at=utc_now_iso())
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload

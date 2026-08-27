@@ -1,6 +1,59 @@
 # Experiment Log
 
-Last updated: Thursday, August 20, 2026
+Last updated: Thursday, August 27, 2026
+
+## EXP-030 - Football Route A Direct Classification
+
+- `date`: 2026-08-27
+- `scope`: reconstruct the original Football Route A direct-classification lane from repository evidence, validate it chronologically against naive league baselines, activate it only if both intended markets clear the evidence gate, and wire it into the Edge Desk immutable shadow ledger as the second real predictive agent
+- `implementation`:
+  - `code/src/sports_ai/agents/football/route_a_classifier.py`
+  - `code/src/sports_ai/experiments/football_route_a_direct_classifier.py`
+  - `code/src/sports_ai/dashboard/prediction_service.py`
+  - `code/src/sports_ai/dashboard/snapshot_service.py`
+  - `code/src/sports_ai/dashboard/services.py`
+  - `code/src/sports_ai/storage/football_edge_desk.py`
+  - `code/tests/test_football_route_a_classifier.py`
+  - `code/tests/test_football_edge_desk.py`
+  - `code/tests/test_football_dashboard.py`
+  - `research/football_research/football_route_a_direct_classifier_2026-08-27_artifact.json`
+  - `research/football_research/football_route_a_direct_classifier_2026-08-27_manifest.json`
+  - `research/product_outputs/football/route_a/ROUTE_A_VALIDATION.md`
+  - `research/spec_migration/ROUTE_A_IMPLEMENTATION_CONTRACT_2026-08-27.md`
+  - `research/spec_migration/EDGE_DESK_FOOTBALL_ALIGNMENT_2026-08-27.md`
+- `validated contract`:
+  - Route A remains direct classification, not a new modelling concept
+  - baseline features stay on GAP-predicted shots and corners plus sums, differences, and competition identity
+  - `shots_on_target` was not silently added to the Route A baseline
+  - supported markets remain `BTTS` and `goals_total 2.5` only
+  - consensus with Route B is market-scoped, same-direction, and `<= 0.06` spread
+- `walk-forward result`:
+  - dataset rows: `12080`
+  - seasons: `2122`, `2223`, `2324`, `2425`, `2526`
+  - validation sample: `9664`
+  - selected calibration for both accepted markets: `none`
+  - `BTTS`
+    - naive log loss: `0.692930`
+    - Route A log loss: `0.691299`
+    - naive Brier: `0.249892`
+    - Route A Brier: `0.249067`
+  - `Over 2.5`
+    - naive log loss: `0.692669`
+    - Route A log loss: `0.687043`
+    - naive Brier: `0.249756`
+    - Route A Brier: `0.246980`
+- `activation decision`:
+  - `BTTS`: accepted
+  - `Over 2.5`: accepted
+  - overall Route A state: `ACTIVE`
+- `runtime integration`:
+  - the dashboard’s saved prediction payload now carries a frozen shadow bundle for both agents
+  - Route A runtime rows persist directly into `edge_desk_agent_predictions`
+  - overlapping Route A plus Route B markets evaluate one vote per agent rather than falsely passing both binary sides
+  - non-overlapping Route B-only markets remain `INSUFFICIENT_AGENTS`
+- `verified post-implementation baseline`:
+  - focused Route A plus Edge Desk plus dashboard slice: `46 passed in 103.89s`
+- `conclusion`: Route A earned activation as the second real Edge Desk predictive agent without changing Route B math, picks, or dashboard-facing prediction behavior
 
 ## EXP-029 - Current Fixture And Model Coverage Audit
 

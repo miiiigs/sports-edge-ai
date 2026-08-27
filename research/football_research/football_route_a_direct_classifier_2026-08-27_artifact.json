@@ -1,0 +1,1530 @@
+{
+  "agent_id": "ROUTE_A_DIRECT_CLASSIFIER",
+  "agent_name": "Route A Direct Classifier",
+  "agent_version_tag": "ROUTE_A_LOGISTIC_V1",
+  "artifact_id": "route_a_artifact_6ab67ff66bd3629c85bfc6d529023dfbfd2a1065f3fef33fae68c12d2391c85e",
+  "artifact_version": "football_route_a_direct_classifier_bundle_v1",
+  "configuration_count": 6,
+  "dataset_summary": {
+    "competition_ids": [
+      "ENG1",
+      "ENG2",
+      "ENG3",
+      "ENG4",
+      "ESP1"
+    ],
+    "end_match_date": "2026-05-24",
+    "leakage_controls": [
+      "features originate from chronological Day 7 GAP predictions only",
+      "targets are derived from realized match goals after feature generation",
+      "walk-forward folds are season-ordered and calibration uses only prior seasons",
+      "no closing prices, final scores, future fixtures, or future ratings enter the feature set"
+    ],
+    "point_in_time_contract": "Day 7 GAP pre-match predictions joined to realized targets only after as_of <= kickoff validation.",
+    "row_count": 12080,
+    "season_codes": [
+      "2122",
+      "2223",
+      "2324",
+      "2425",
+      "2526"
+    ],
+    "start_match_date": "2021-08-06"
+  },
+  "feature_version": "route_a_gap_shots_corners_v1",
+  "generated_at": "2026-08-27T12:52:56+00:00",
+  "markets": {
+    "btts": {
+      "agent_version_tag": "ROUTE_A_LOGISTIC_V1",
+      "calibration": {
+        "method": "none"
+      },
+      "calibration_window": null,
+      "coefficients": [
+        0.08692897681769932,
+        0.04387314976806187,
+        0.05279961841379574,
+        0.003622120001100003,
+        0.007719595131560281,
+        0.09370401104733737,
+        -0.0011252143256175007,
+        0.011167153648936992,
+        -0.0019502221306719658,
+        -0.009162076643346362,
+        -0.02871199432035909,
+        0.007454565316516384,
+        0.015270262779025124
+      ],
+      "feature_version": "route_a_gap_shots_corners_v1",
+      "line": null,
+      "market_family": "btts",
+      "market_key": "btts",
+      "model_family": "LOGISTIC_REGRESSION",
+      "model_version": "ROUTE_A_LOGISTIC_V1_BTTS",
+      "negative_selection": "NO",
+      "positive_selection": "YES",
+      "preprocessing": {
+        "competition_categories": [
+          "ENG1",
+          "ENG2",
+          "ENG3",
+          "ENG4",
+          "ESP1"
+        ],
+        "mean_by_feature": [
+          13.087047699920305,
+          11.123656495111168,
+          5.342033925793578,
+          4.640395217772774,
+          24.210704195031546,
+          1.9633912048091207,
+          9.982429143566346,
+          0.701638708020822
+        ],
+        "numeric_feature_order": [
+          "predicted_home_shots",
+          "predicted_away_shots",
+          "predicted_home_corners",
+          "predicted_away_corners",
+          "predicted_total_shots",
+          "predicted_shot_difference",
+          "predicted_total_corners",
+          "predicted_corner_difference"
+        ],
+        "scale_by_feature": [
+          2.0743419684619826,
+          1.7947042080938036,
+          0.6879549947313176,
+          0.6076486903251153,
+          1.9824937174939765,
+          3.334281669781598,
+          0.643195002370939,
+          1.127536340959457
+        ]
+      },
+      "selected_calibration_method": "none",
+      "training_window": {
+        "end_season": "2526",
+        "sample_count": 12080,
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425",
+          "2526"
+        ],
+        "start_season": "2122"
+      },
+      "validation_summary": {
+        "accepted": true,
+        "calibrated_candidates": {
+          "isotonic": {
+            "brier": 0.24985972360181075,
+            "calibration_slope": -0.2705765625214388,
+            "expected_calibration_error": 0.02803313333740675,
+            "log_loss": 0.7107811729091419,
+            "sample_count": 7248
+          },
+          "platt": {
+            "brier": 0.24931544446260928,
+            "calibration_slope": -0.31546076647119115,
+            "expected_calibration_error": 0.02761324018337069,
+            "log_loss": 0.6918246692260815,
+            "sample_count": 7248
+          }
+        },
+        "folds": [
+          {
+            "calibration_seasons": [],
+            "isotonic": null,
+            "naive": {
+              "brier": 0.25042803569895083,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.009933774834432044,
+              "log_loss": 0.6940043738388075,
+              "sample_count": 2416
+            },
+            "platt": null,
+            "sample_count": 2416,
+            "test_season": "2223",
+            "train_seasons": [
+              "2122"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2511491760300121,
+              "calibration_slope": -0.05755690756717801,
+              "expected_calibration_error": 0.020970594355239118,
+              "log_loss": 0.6954744689878545,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2223"
+            ],
+            "isotonic": {
+              "brier": 0.2501292582113235,
+              "calibration_slope": 0.9307101575827857,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.3991386989092488,
+                  0.4366516694021037,
+                  0.4405104888590745,
+                  0.4969455803561626,
+                  0.4970027136194507,
+                  0.5642131431329586,
+                  0.5788822825729361,
+                  0.6252352146988306,
+                  0.6334399667924642
+                ],
+                "values": [
+                  0.4,
+                  0.4274193548387097,
+                  0.42857142857142855,
+                  0.48412698412698413,
+                  0.5,
+                  0.50199203187251,
+                  0.5217391304347826,
+                  0.5344827586206896,
+                  0.6666666666666666
+                ]
+              },
+              "expected_calibration_error": 0.04992362037395986,
+              "log_loss": 0.6934056810707392,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.25041035939528494,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.05132450331125745,
+              "log_loss": 0.6939681646276734,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.25077266691530653,
+              "calibration_slope": NaN,
+              "calibrator": {
+                "intercept": -0.03974292886877884,
+                "method": "platt",
+                "slope": 0.07943348952258257
+              },
+              "expected_calibration_error": 0.05496325794159307,
+              "log_loss": 0.6946926955642047,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2324",
+            "train_seasons": [
+              "2122",
+              "2223"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2478967749050594,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.045742185653486894,
+              "log_loss": 0.688932100016466,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2324"
+            ],
+            "isotonic": {
+              "brier": 0.25137974050235085,
+              "calibration_slope": -0.25732535485123587,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.41608702014248433,
+                  0.4474095583595845,
+                  0.47237038741590387,
+                  0.48129020941912654,
+                  0.484124024736339,
+                  0.4966360968200657,
+                  0.5029101802592835,
+                  0.5222689786999805,
+                  0.5403445597882306,
+                  0.5521463835930143,
+                  0.5970750205117323,
+                  0.6060606272546393
+                ],
+                "values": [
+                  0.25,
+                  0.39759036144578314,
+                  0.44272445820433437,
+                  0.5158371040723982,
+                  0.5333333333333333,
+                  0.5506172839506173,
+                  0.555045871559633,
+                  0.5755258126195029,
+                  0.5921450151057401,
+                  0.6166666666666667,
+                  0.6574074074074074,
+                  1.0
+                ]
+              },
+              "expected_calibration_error": 0.030758205749359356,
+              "log_loss": 0.7343200058291531,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.24957021995494064,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.008692052980132611,
+              "log_loss": 0.6922851398668002,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.24973674001526128,
+              "calibration_slope": -0.2388046563924196,
+              "calibrator": {
+                "intercept": 0.184815069267429,
+                "method": "platt",
+                "slope": 1.6770852600121886
+              },
+              "expected_calibration_error": 0.011824846373118213,
+              "log_loss": 0.6927738814060381,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2425",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2493690335014705,
+              "calibration_slope": 0.48418973280234723,
+              "expected_calibration_error": 0.015197359376369514,
+              "log_loss": 0.691951538072358,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2425"
+            ],
+            "isotonic": {
+              "brier": 0.24807017209175788,
+              "calibration_slope": 0.17728302114844538,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.34775057399418396,
+                  0.45105866276383005,
+                  0.4518679907394957,
+                  0.48180410043210764,
+                  0.4940467757494228,
+                  0.4964944512876551,
+                  0.518696337562222,
+                  0.569502643965962,
+                  0.6024093385859349,
+                  0.6083675558941525,
+                  0.6218013753254847,
+                  0.7235871757990452
+                ],
+                "values": [
+                  0.0,
+                  0.4307228915662651,
+                  0.4444444444444444,
+                  0.5011820330969267,
+                  0.5023041474654378,
+                  0.5106382978723404,
+                  0.5423728813559322,
+                  0.5454545454545454,
+                  0.5643564356435643,
+                  0.5882352941176471,
+                  0.5945945945945946,
+                  0.6122448979591837
+                ]
+              },
+              "expected_calibration_error": 0.02611066614803981,
+              "log_loss": 0.7046178318275258,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.24915899973274405,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.033423013245019215,
+              "log_loss": 0.6914625915954441,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.24743692645726,
+              "calibration_slope": NaN,
+              "calibrator": {
+                "intercept": 0.061432927612640374,
+                "method": "platt",
+                "slope": 0.5588723769484057
+              },
+              "expected_calibration_error": 0.0254445528438649,
+              "log_loss": 0.6880074307080021,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2526",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324",
+              "2425"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.24785496013320707,
+              "calibration_slope": -0.3523298473630863,
+              "expected_calibration_error": 0.03143796682905145,
+              "log_loss": 0.688838282376063,
+              "sample_count": 2416
+            }
+          }
+        ],
+        "market_definition": {
+          "line": null,
+          "market_family": "btts",
+          "model_version": "ROUTE_A_LOGISTIC_V1_BTTS",
+          "negative_selection": "NO",
+          "positive_selection": "YES",
+          "target_field": "btts_target"
+        },
+        "naive_baseline": {
+          "brier": 0.24989190369548012,
+          "calibration_slope": NaN,
+          "expected_calibration_error": 0.0207384795805731,
+          "log_loss": 0.6929300674822036,
+          "name": "LEAGUE_BASE_RATE",
+          "sample_count": 9664
+        },
+        "selected_calibration_method": "none",
+        "selected_metrics": {
+          "brier": 0.24906748614243723,
+          "calibration_slope": 0.34669939791392634,
+          "expected_calibration_error": 0.022217017706050883,
+          "log_loss": 0.6912990973631887,
+          "sample_count": 9664
+        },
+        "uncalibrated_logistic": {
+          "brier": 0.24906748614243723,
+          "calibration_slope": 0.34669939791392634,
+          "expected_calibration_error": 0.022217017706050883,
+          "log_loss": 0.6912990973631887,
+          "sample_count": 9664
+        }
+      }
+    },
+    "goals_total_2.5": {
+      "agent_version_tag": "ROUTE_A_LOGISTIC_V1",
+      "calibration": {
+        "method": "none"
+      },
+      "calibration_window": null,
+      "coefficients": [
+        0.09122910517588523,
+        0.08311843228080783,
+        0.04890417496684625,
+        0.007638884026583182,
+        0.004677786508881573,
+        0.13124106207433436,
+        0.025387034512949325,
+        0.012589742202927526,
+        0.0021398490557031267,
+        -0.15521733098679114,
+        -0.08846125633537441,
+        -0.1531819949501064,
+        -0.17443629291406237
+      ],
+      "feature_version": "route_a_gap_shots_corners_v1",
+      "line": 2.5,
+      "market_family": "goals_total",
+      "market_key": "goals_total_2.5",
+      "model_family": "LOGISTIC_REGRESSION",
+      "model_version": "ROUTE_A_LOGISTIC_V1_OU25",
+      "negative_selection": "UNDER",
+      "positive_selection": "OVER",
+      "preprocessing": {
+        "competition_categories": [
+          "ENG1",
+          "ENG2",
+          "ENG3",
+          "ENG4",
+          "ESP1"
+        ],
+        "mean_by_feature": [
+          13.087047699920305,
+          11.123656495111168,
+          5.342033925793578,
+          4.640395217772774,
+          24.210704195031546,
+          1.9633912048091207,
+          9.982429143566346,
+          0.701638708020822
+        ],
+        "numeric_feature_order": [
+          "predicted_home_shots",
+          "predicted_away_shots",
+          "predicted_home_corners",
+          "predicted_away_corners",
+          "predicted_total_shots",
+          "predicted_shot_difference",
+          "predicted_total_corners",
+          "predicted_corner_difference"
+        ],
+        "scale_by_feature": [
+          2.0743419684619826,
+          1.7947042080938036,
+          0.6879549947313176,
+          0.6076486903251153,
+          1.9824937174939765,
+          3.334281669781598,
+          0.643195002370939,
+          1.127536340959457
+        ]
+      },
+      "selected_calibration_method": "none",
+      "training_window": {
+        "end_season": "2526",
+        "sample_count": 12080,
+        "season_codes": [
+          "2122",
+          "2223",
+          "2324",
+          "2425",
+          "2526"
+        ],
+        "start_season": "2122"
+      },
+      "validation_summary": {
+        "accepted": true,
+        "calibrated_candidates": {
+          "isotonic": {
+            "brier": 0.24958543541725886,
+            "calibration_slope": 0.28633700915995064,
+            "expected_calibration_error": 0.026557039702018812,
+            "log_loss": 0.7599366611464947,
+            "sample_count": 7248
+          },
+          "platt": {
+            "brier": 0.24776981393450168,
+            "calibration_slope": 0.7895182459635687,
+            "expected_calibration_error": 0.02120322466556376,
+            "log_loss": 0.6886654057450293,
+            "sample_count": 7248
+          }
+        },
+        "folds": [
+          {
+            "calibration_seasons": [],
+            "isotonic": null,
+            "naive": {
+              "brier": 0.2478656544092018,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.01738410596026495,
+              "log_loss": 0.6888730739806922,
+              "sample_count": 2416
+            },
+            "platt": null,
+            "sample_count": 2416,
+            "test_season": "2223",
+            "train_seasons": [
+              "2122"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.24709969761494602,
+              "calibration_slope": 0.7340179969200215,
+              "expected_calibration_error": 0.021225221434386477,
+              "log_loss": 0.6872987926291442,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2223"
+            ],
+            "isotonic": {
+              "brier": 0.25062903958890315,
+              "calibration_slope": 0.40859167953957637,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.32869581124997543,
+                  0.33033128454605165,
+                  0.3585533275558043,
+                  0.3811044438546978,
+                  0.3818620380455812,
+                  0.4097442097457345,
+                  0.42180908307513404,
+                  0.4224065751512858,
+                  0.43064350777686217,
+                  0.4444613615599887,
+                  0.4822431423094971,
+                  0.5302503728716957,
+                  0.5395257982793735,
+                  0.5704060414231452,
+                  0.645865953433061,
+                  0.653843693662697,
+                  0.6615140733506405,
+                  0.6657097079174602,
+                  0.6932981656706532
+                ],
+                "values": [
+                  0.0,
+                  0.0,
+                  0.2727272727272727,
+                  0.30612244897959184,
+                  0.3333333333333333,
+                  0.36597938144329895,
+                  0.39090909090909093,
+                  0.4,
+                  0.45,
+                  0.45698924731182794,
+                  0.4578313253012048,
+                  0.45984251968503936,
+                  0.47126436781609193,
+                  0.5410628019323671,
+                  0.5747126436781609,
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              "expected_calibration_error": 0.056819989616088355,
+              "log_loss": 0.8591792665521368,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.2523340002102687,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.06705298013244618,
+              "log_loss": 0.6978594575152589,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.2475865424377148,
+              "calibration_slope": 1.3285908954964865,
+              "calibrator": {
+                "intercept": -0.10311046660466006,
+                "method": "platt",
+                "slope": 0.771228902996333
+              },
+              "expected_calibration_error": 0.05122812297742039,
+              "log_loss": 0.6882807425795162,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2324",
+            "train_seasons": [
+              "2122",
+              "2223"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2465119292892593,
+              "calibration_slope": 1.1592091707944838,
+              "expected_calibration_error": 0.047201532429032904,
+              "log_loss": 0.6861029243359072,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2324"
+            ],
+            "isotonic": {
+              "brier": 0.24904533701574103,
+              "calibration_slope": 0.35933859331939233,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.33310306216365276,
+                  0.3331241417892065,
+                  0.40525497909645974,
+                  0.41360830460741765,
+                  0.4454574821496652,
+                  0.47683049186333687,
+                  0.5005730779041608,
+                  0.5122694172813542,
+                  0.5209837154259336,
+                  0.534110976285556,
+                  0.5881140974494901,
+                  0.6427363857283009,
+                  0.671036480813593,
+                  0.684670686375805,
+                  0.7332835018783349
+                ],
+                "values": [
+                  0.0,
+                  0.0,
+                  0.4016393442622951,
+                  0.4166666666666667,
+                  0.43820224719101125,
+                  0.5043936731107206,
+                  0.5530864197530864,
+                  0.5608465608465608,
+                  0.576,
+                  0.5985401459854015,
+                  0.6180758017492711,
+                  0.6896551724137931,
+                  0.7368421052631579,
+                  0.8333333333333334,
+                  0.875
+                ]
+              },
+              "expected_calibration_error": 0.03218678723703389,
+              "log_loss": 0.7140186302737722,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.2486366194323349,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.004966887417222485,
+              "log_loss": 0.6904164767221997,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.24784517157165697,
+              "calibration_slope": 0.7586484562957145,
+              "calibrator": {
+                "intercept": 0.20274209677609473,
+                "method": "platt",
+                "slope": 1.213954430424592
+              },
+              "expected_calibration_error": 0.033796108094709634,
+              "log_loss": 0.6888680311692348,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2425",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2467352113835062,
+              "calibration_slope": 0.9044887502201365,
+              "expected_calibration_error": 0.027601222806702495,
+              "log_loss": 0.6865452203027532,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2425"
+            ],
+            "isotonic": {
+              "brier": 0.2490819296471324,
+              "calibration_slope": 0.8867719806506196,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.2893188400457414,
+                  0.2993222216073703,
+                  0.3150388821669736,
+                  0.31691937009446486,
+                  0.3660635012782227,
+                  0.3925192174497907,
+                  0.39445778483130356,
+                  0.4270740629118125,
+                  0.4306414483034911,
+                  0.45205376507097395,
+                  0.45349396699973105,
+                  0.46020415378170315,
+                  0.5128910296789544,
+                  0.6173046295190618,
+                  0.6594583949458361,
+                  0.6957227253046232,
+                  0.7320819535294981,
+                  0.7580208693354835,
+                  0.7641132668519212,
+                  0.7667916489123735,
+                  0.7678812236116941,
+                  0.8016912181550336
+                ],
+                "values": [
+                  0.0,
+                  0.0,
+                  0.3333333333333333,
+                  0.3333333333333333,
+                  0.36363636363636365,
+                  0.3706896551724138,
+                  0.38461538461538464,
+                  0.3879598662207358,
+                  0.4186046511627907,
+                  0.4419475655430712,
+                  0.4444444444444444,
+                  0.5,
+                  0.5122699386503068,
+                  0.525,
+                  0.6144578313253012,
+                  0.6341463414634146,
+                  0.7058823529411765,
+                  0.8,
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              "expected_calibration_error": 0.018812136183439725,
+              "log_loss": 0.7066120866136021,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.2501887958676204,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.024006622516562624,
+              "log_loss": 0.6935275291405045,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.2478777277941333,
+              "calibration_slope": 1.2520506787287167,
+              "calibrator": {
+                "intercept": -0.02731551203607648,
+                "method": "platt",
+                "slope": 0.7499592131165098
+              },
+              "expected_calibration_error": 0.024229590951954174,
+              "log_loss": 0.6888474434863302,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2526",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324",
+              "2425"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.24757303628928407,
+              "calibration_slope": 1.19056522525651,
+              "expected_calibration_error": 0.034408843030825816,
+              "log_loss": 0.6882238500165454,
+              "sample_count": 2416
+            }
+          }
+        ],
+        "market_definition": {
+          "line": 2.5,
+          "market_family": "goals_total",
+          "model_version": "ROUTE_A_LOGISTIC_V1_OU25",
+          "negative_selection": "UNDER",
+          "positive_selection": "OVER",
+          "target_field": "over_2_5_target"
+        },
+        "naive_baseline": {
+          "brier": 0.24975626747985646,
+          "calibration_slope": NaN,
+          "expected_calibration_error": 0.015624999999986264,
+          "log_loss": 0.6926691343396382,
+          "name": "LEAGUE_BASE_RATE",
+          "sample_count": 9664
+        },
+        "selected_calibration_method": "none",
+        "selected_metrics": {
+          "brier": 0.24697996864424887,
+          "calibration_slope": 1.069191943543998,
+          "expected_calibration_error": 0.016743173339402756,
+          "log_loss": 0.6870426968210888,
+          "sample_count": 9664
+        },
+        "uncalibrated_logistic": {
+          "brier": 0.24697996864424887,
+          "calibration_slope": 1.069191943543998,
+          "expected_calibration_error": 0.016743173339402756,
+          "log_loss": 0.6870426968210888,
+          "sample_count": 9664
+        }
+      }
+    }
+  },
+  "method_family": "GAP_DIRECT_CLASSIFICATION",
+  "model_as_of": "2026-05-24T20:00:00",
+  "model_family": "LOGISTIC_REGRESSION",
+  "overall_route_a_status": "ACTIVE",
+  "supported_competitions": [
+    "ENG1",
+    "ENG2",
+    "ENG3",
+    "ENG4",
+    "ESP1"
+  ],
+  "validation": {
+    "accepted_markets": [
+      "btts",
+      "goals_total_2.5"
+    ],
+    "competition_categories": [
+      "ENG1",
+      "ENG2",
+      "ENG3",
+      "ENG4",
+      "ESP1"
+    ],
+    "dataset_rows": 12080,
+    "date_range": {
+      "end_match_date": "2026-05-24",
+      "start_match_date": "2021-08-06"
+    },
+    "market_results": {
+      "btts": {
+        "accepted": true,
+        "calibrated_candidates": {
+          "isotonic": {
+            "brier": 0.24985972360181075,
+            "calibration_slope": -0.2705765625214388,
+            "expected_calibration_error": 0.02803313333740675,
+            "log_loss": 0.7107811729091419,
+            "sample_count": 7248
+          },
+          "platt": {
+            "brier": 0.24931544446260928,
+            "calibration_slope": -0.31546076647119115,
+            "expected_calibration_error": 0.02761324018337069,
+            "log_loss": 0.6918246692260815,
+            "sample_count": 7248
+          }
+        },
+        "folds": [
+          {
+            "calibration_seasons": [],
+            "isotonic": null,
+            "naive": {
+              "brier": 0.25042803569895083,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.009933774834432044,
+              "log_loss": 0.6940043738388075,
+              "sample_count": 2416
+            },
+            "platt": null,
+            "sample_count": 2416,
+            "test_season": "2223",
+            "train_seasons": [
+              "2122"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2511491760300121,
+              "calibration_slope": -0.05755690756717801,
+              "expected_calibration_error": 0.020970594355239118,
+              "log_loss": 0.6954744689878545,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2223"
+            ],
+            "isotonic": {
+              "brier": 0.2501292582113235,
+              "calibration_slope": 0.9307101575827857,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.3991386989092488,
+                  0.4366516694021037,
+                  0.4405104888590745,
+                  0.4969455803561626,
+                  0.4970027136194507,
+                  0.5642131431329586,
+                  0.5788822825729361,
+                  0.6252352146988306,
+                  0.6334399667924642
+                ],
+                "values": [
+                  0.4,
+                  0.4274193548387097,
+                  0.42857142857142855,
+                  0.48412698412698413,
+                  0.5,
+                  0.50199203187251,
+                  0.5217391304347826,
+                  0.5344827586206896,
+                  0.6666666666666666
+                ]
+              },
+              "expected_calibration_error": 0.04992362037395986,
+              "log_loss": 0.6934056810707392,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.25041035939528494,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.05132450331125745,
+              "log_loss": 0.6939681646276734,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.25077266691530653,
+              "calibration_slope": NaN,
+              "calibrator": {
+                "intercept": -0.03974292886877884,
+                "method": "platt",
+                "slope": 0.07943348952258257
+              },
+              "expected_calibration_error": 0.05496325794159307,
+              "log_loss": 0.6946926955642047,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2324",
+            "train_seasons": [
+              "2122",
+              "2223"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2478967749050594,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.045742185653486894,
+              "log_loss": 0.688932100016466,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2324"
+            ],
+            "isotonic": {
+              "brier": 0.25137974050235085,
+              "calibration_slope": -0.25732535485123587,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.41608702014248433,
+                  0.4474095583595845,
+                  0.47237038741590387,
+                  0.48129020941912654,
+                  0.484124024736339,
+                  0.4966360968200657,
+                  0.5029101802592835,
+                  0.5222689786999805,
+                  0.5403445597882306,
+                  0.5521463835930143,
+                  0.5970750205117323,
+                  0.6060606272546393
+                ],
+                "values": [
+                  0.25,
+                  0.39759036144578314,
+                  0.44272445820433437,
+                  0.5158371040723982,
+                  0.5333333333333333,
+                  0.5506172839506173,
+                  0.555045871559633,
+                  0.5755258126195029,
+                  0.5921450151057401,
+                  0.6166666666666667,
+                  0.6574074074074074,
+                  1.0
+                ]
+              },
+              "expected_calibration_error": 0.030758205749359356,
+              "log_loss": 0.7343200058291531,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.24957021995494064,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.008692052980132611,
+              "log_loss": 0.6922851398668002,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.24973674001526128,
+              "calibration_slope": -0.2388046563924196,
+              "calibrator": {
+                "intercept": 0.184815069267429,
+                "method": "platt",
+                "slope": 1.6770852600121886
+              },
+              "expected_calibration_error": 0.011824846373118213,
+              "log_loss": 0.6927738814060381,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2425",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2493690335014705,
+              "calibration_slope": 0.48418973280234723,
+              "expected_calibration_error": 0.015197359376369514,
+              "log_loss": 0.691951538072358,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2425"
+            ],
+            "isotonic": {
+              "brier": 0.24807017209175788,
+              "calibration_slope": 0.17728302114844538,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.34775057399418396,
+                  0.45105866276383005,
+                  0.4518679907394957,
+                  0.48180410043210764,
+                  0.4940467757494228,
+                  0.4964944512876551,
+                  0.518696337562222,
+                  0.569502643965962,
+                  0.6024093385859349,
+                  0.6083675558941525,
+                  0.6218013753254847,
+                  0.7235871757990452
+                ],
+                "values": [
+                  0.0,
+                  0.4307228915662651,
+                  0.4444444444444444,
+                  0.5011820330969267,
+                  0.5023041474654378,
+                  0.5106382978723404,
+                  0.5423728813559322,
+                  0.5454545454545454,
+                  0.5643564356435643,
+                  0.5882352941176471,
+                  0.5945945945945946,
+                  0.6122448979591837
+                ]
+              },
+              "expected_calibration_error": 0.02611066614803981,
+              "log_loss": 0.7046178318275258,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.24915899973274405,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.033423013245019215,
+              "log_loss": 0.6914625915954441,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.24743692645726,
+              "calibration_slope": NaN,
+              "calibrator": {
+                "intercept": 0.061432927612640374,
+                "method": "platt",
+                "slope": 0.5588723769484057
+              },
+              "expected_calibration_error": 0.0254445528438649,
+              "log_loss": 0.6880074307080021,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2526",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324",
+              "2425"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.24785496013320707,
+              "calibration_slope": -0.3523298473630863,
+              "expected_calibration_error": 0.03143796682905145,
+              "log_loss": 0.688838282376063,
+              "sample_count": 2416
+            }
+          }
+        ],
+        "market_definition": {
+          "line": null,
+          "market_family": "btts",
+          "model_version": "ROUTE_A_LOGISTIC_V1_BTTS",
+          "negative_selection": "NO",
+          "positive_selection": "YES",
+          "target_field": "btts_target"
+        },
+        "naive_baseline": {
+          "brier": 0.24989190369548012,
+          "calibration_slope": NaN,
+          "expected_calibration_error": 0.0207384795805731,
+          "log_loss": 0.6929300674822036,
+          "name": "LEAGUE_BASE_RATE",
+          "sample_count": 9664
+        },
+        "selected_calibration_method": "none",
+        "selected_metrics": {
+          "brier": 0.24906748614243723,
+          "calibration_slope": 0.34669939791392634,
+          "expected_calibration_error": 0.022217017706050883,
+          "log_loss": 0.6912990973631887,
+          "sample_count": 9664
+        },
+        "uncalibrated_logistic": {
+          "brier": 0.24906748614243723,
+          "calibration_slope": 0.34669939791392634,
+          "expected_calibration_error": 0.022217017706050883,
+          "log_loss": 0.6912990973631887,
+          "sample_count": 9664
+        }
+      },
+      "goals_total_2.5": {
+        "accepted": true,
+        "calibrated_candidates": {
+          "isotonic": {
+            "brier": 0.24958543541725886,
+            "calibration_slope": 0.28633700915995064,
+            "expected_calibration_error": 0.026557039702018812,
+            "log_loss": 0.7599366611464947,
+            "sample_count": 7248
+          },
+          "platt": {
+            "brier": 0.24776981393450168,
+            "calibration_slope": 0.7895182459635687,
+            "expected_calibration_error": 0.02120322466556376,
+            "log_loss": 0.6886654057450293,
+            "sample_count": 7248
+          }
+        },
+        "folds": [
+          {
+            "calibration_seasons": [],
+            "isotonic": null,
+            "naive": {
+              "brier": 0.2478656544092018,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.01738410596026495,
+              "log_loss": 0.6888730739806922,
+              "sample_count": 2416
+            },
+            "platt": null,
+            "sample_count": 2416,
+            "test_season": "2223",
+            "train_seasons": [
+              "2122"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.24709969761494602,
+              "calibration_slope": 0.7340179969200215,
+              "expected_calibration_error": 0.021225221434386477,
+              "log_loss": 0.6872987926291442,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2223"
+            ],
+            "isotonic": {
+              "brier": 0.25062903958890315,
+              "calibration_slope": 0.40859167953957637,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.32869581124997543,
+                  0.33033128454605165,
+                  0.3585533275558043,
+                  0.3811044438546978,
+                  0.3818620380455812,
+                  0.4097442097457345,
+                  0.42180908307513404,
+                  0.4224065751512858,
+                  0.43064350777686217,
+                  0.4444613615599887,
+                  0.4822431423094971,
+                  0.5302503728716957,
+                  0.5395257982793735,
+                  0.5704060414231452,
+                  0.645865953433061,
+                  0.653843693662697,
+                  0.6615140733506405,
+                  0.6657097079174602,
+                  0.6932981656706532
+                ],
+                "values": [
+                  0.0,
+                  0.0,
+                  0.2727272727272727,
+                  0.30612244897959184,
+                  0.3333333333333333,
+                  0.36597938144329895,
+                  0.39090909090909093,
+                  0.4,
+                  0.45,
+                  0.45698924731182794,
+                  0.4578313253012048,
+                  0.45984251968503936,
+                  0.47126436781609193,
+                  0.5410628019323671,
+                  0.5747126436781609,
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              "expected_calibration_error": 0.056819989616088355,
+              "log_loss": 0.8591792665521368,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.2523340002102687,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.06705298013244618,
+              "log_loss": 0.6978594575152589,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.2475865424377148,
+              "calibration_slope": 1.3285908954964865,
+              "calibrator": {
+                "intercept": -0.10311046660466006,
+                "method": "platt",
+                "slope": 0.771228902996333
+              },
+              "expected_calibration_error": 0.05122812297742039,
+              "log_loss": 0.6882807425795162,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2324",
+            "train_seasons": [
+              "2122",
+              "2223"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2465119292892593,
+              "calibration_slope": 1.1592091707944838,
+              "expected_calibration_error": 0.047201532429032904,
+              "log_loss": 0.6861029243359072,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2324"
+            ],
+            "isotonic": {
+              "brier": 0.24904533701574103,
+              "calibration_slope": 0.35933859331939233,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.33310306216365276,
+                  0.3331241417892065,
+                  0.40525497909645974,
+                  0.41360830460741765,
+                  0.4454574821496652,
+                  0.47683049186333687,
+                  0.5005730779041608,
+                  0.5122694172813542,
+                  0.5209837154259336,
+                  0.534110976285556,
+                  0.5881140974494901,
+                  0.6427363857283009,
+                  0.671036480813593,
+                  0.684670686375805,
+                  0.7332835018783349
+                ],
+                "values": [
+                  0.0,
+                  0.0,
+                  0.4016393442622951,
+                  0.4166666666666667,
+                  0.43820224719101125,
+                  0.5043936731107206,
+                  0.5530864197530864,
+                  0.5608465608465608,
+                  0.576,
+                  0.5985401459854015,
+                  0.6180758017492711,
+                  0.6896551724137931,
+                  0.7368421052631579,
+                  0.8333333333333334,
+                  0.875
+                ]
+              },
+              "expected_calibration_error": 0.03218678723703389,
+              "log_loss": 0.7140186302737722,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.2486366194323349,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.004966887417222485,
+              "log_loss": 0.6904164767221997,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.24784517157165697,
+              "calibration_slope": 0.7586484562957145,
+              "calibrator": {
+                "intercept": 0.20274209677609473,
+                "method": "platt",
+                "slope": 1.213954430424592
+              },
+              "expected_calibration_error": 0.033796108094709634,
+              "log_loss": 0.6888680311692348,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2425",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.2467352113835062,
+              "calibration_slope": 0.9044887502201365,
+              "expected_calibration_error": 0.027601222806702495,
+              "log_loss": 0.6865452203027532,
+              "sample_count": 2416
+            }
+          },
+          {
+            "calibration_seasons": [
+              "2425"
+            ],
+            "isotonic": {
+              "brier": 0.2490819296471324,
+              "calibration_slope": 0.8867719806506196,
+              "calibrator": {
+                "method": "isotonic",
+                "upper_bounds": [
+                  0.2893188400457414,
+                  0.2993222216073703,
+                  0.3150388821669736,
+                  0.31691937009446486,
+                  0.3660635012782227,
+                  0.3925192174497907,
+                  0.39445778483130356,
+                  0.4270740629118125,
+                  0.4306414483034911,
+                  0.45205376507097395,
+                  0.45349396699973105,
+                  0.46020415378170315,
+                  0.5128910296789544,
+                  0.6173046295190618,
+                  0.6594583949458361,
+                  0.6957227253046232,
+                  0.7320819535294981,
+                  0.7580208693354835,
+                  0.7641132668519212,
+                  0.7667916489123735,
+                  0.7678812236116941,
+                  0.8016912181550336
+                ],
+                "values": [
+                  0.0,
+                  0.0,
+                  0.3333333333333333,
+                  0.3333333333333333,
+                  0.36363636363636365,
+                  0.3706896551724138,
+                  0.38461538461538464,
+                  0.3879598662207358,
+                  0.4186046511627907,
+                  0.4419475655430712,
+                  0.4444444444444444,
+                  0.5,
+                  0.5122699386503068,
+                  0.525,
+                  0.6144578313253012,
+                  0.6341463414634146,
+                  0.7058823529411765,
+                  0.8,
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ]
+              },
+              "expected_calibration_error": 0.018812136183439725,
+              "log_loss": 0.7066120866136021,
+              "sample_count": 2416
+            },
+            "naive": {
+              "brier": 0.2501887958676204,
+              "calibration_slope": NaN,
+              "expected_calibration_error": 0.024006622516562624,
+              "log_loss": 0.6935275291405045,
+              "sample_count": 2416
+            },
+            "platt": {
+              "brier": 0.2478777277941333,
+              "calibration_slope": 1.2520506787287167,
+              "calibrator": {
+                "intercept": -0.02731551203607648,
+                "method": "platt",
+                "slope": 0.7499592131165098
+              },
+              "expected_calibration_error": 0.024229590951954174,
+              "log_loss": 0.6888474434863302,
+              "sample_count": 2416
+            },
+            "sample_count": 2416,
+            "test_season": "2526",
+            "train_seasons": [
+              "2122",
+              "2223",
+              "2324",
+              "2425"
+            ],
+            "uncalibrated_logistic": {
+              "brier": 0.24757303628928407,
+              "calibration_slope": 1.19056522525651,
+              "expected_calibration_error": 0.034408843030825816,
+              "log_loss": 0.6882238500165454,
+              "sample_count": 2416
+            }
+          }
+        ],
+        "market_definition": {
+          "line": 2.5,
+          "market_family": "goals_total",
+          "model_version": "ROUTE_A_LOGISTIC_V1_OU25",
+          "negative_selection": "UNDER",
+          "positive_selection": "OVER",
+          "target_field": "over_2_5_target"
+        },
+        "naive_baseline": {
+          "brier": 0.24975626747985646,
+          "calibration_slope": NaN,
+          "expected_calibration_error": 0.015624999999986264,
+          "log_loss": 0.6926691343396382,
+          "name": "LEAGUE_BASE_RATE",
+          "sample_count": 9664
+        },
+        "selected_calibration_method": "none",
+        "selected_metrics": {
+          "brier": 0.24697996864424887,
+          "calibration_slope": 1.069191943543998,
+          "expected_calibration_error": 0.016743173339402756,
+          "log_loss": 0.6870426968210888,
+          "sample_count": 9664
+        },
+        "uncalibrated_logistic": {
+          "brier": 0.24697996864424887,
+          "calibration_slope": 1.069191943543998,
+          "expected_calibration_error": 0.016743173339402756,
+          "log_loss": 0.6870426968210888,
+          "sample_count": 9664
+        }
+      }
+    },
+    "minimum_history_requirements": {
+      "calibrated_logistic_prior_seasons": 2,
+      "minimum_isotonic_rows": 500,
+      "uncalibrated_logistic_prior_seasons": 1
+    },
+    "overall_route_a_status": "ACTIVE",
+    "seasons": [
+      "2122",
+      "2223",
+      "2324",
+      "2425",
+      "2526"
+    ]
+  }
+}

@@ -7,6 +7,15 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from ..agents.football.route_a_classifier import (
+    ROUTE_A_AGENT_ID,
+    ROUTE_A_AGENT_NAME,
+    ROUTE_A_AGENT_VERSION_TAG,
+    ROUTE_A_CONSENSUS_CONFIG_ID,
+    ROUTE_A_CONSENSUS_VALID_FROM,
+    ROUTE_A_CONSENSUS_VERSION,
+    ROUTE_A_METHOD_FAMILY,
+)
 from ..locking import canonical_hash
 
 ROUTE_B_COMPOSITE_AGENT_ID = "ROUTE_B_COMPOSITE"
@@ -36,6 +45,15 @@ SUPPORTED_ROUTE_B_MARKET_FAMILIES = (
     "btts",
     "corner_total",
     "goals_total",
+)
+ROUTE_A_SUPPORTED_MARKET_FAMILIES = (
+    "btts",
+    "goals_total",
+)
+ROUTE_A_UNSUPPORTED_MARKET_FAMILIES = (
+    "1x2",
+    "asian_handicap",
+    "corner_total",
 )
 FOUNDATION_VERSION = "football_edge_desk_foundation_v1"
 FOUNDATION_CREATED_AT = "2026-08-26T00:00:00+00:00"
@@ -307,6 +325,117 @@ def seed_foundation(conn: sqlite3.Connection) -> None:
                 ),
             ),
         )
+
+
+def ensure_route_a_foundation(
+    conn: sqlite3.Connection,
+    *,
+    artifact: dict[str, Any] | None,
+) -> None:
+    ensure_schema_only(conn)
+    if artifact is None or artifact.get("overall_route_a_status") != "ACTIVE":
+        return
+
+    created_at = str(artifact.get("generated_at") or ROUTE_A_CONSENSUS_VALID_FROM)
+    model_as_of = str(artifact.get("model_as_of") or created_at)
+    artifact_id = None if artifact.get("artifact_id") is None else str(artifact["artifact_id"])
+    validation = dict(artifact.get("validation") or {})
+
+    with conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO edge_desk_agent_registry (
+                agent_id, version_tag, name, method_family, status, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ROUTE_A_AGENT_ID,
+                ROUTE_A_AGENT_VERSION_TAG,
+                ROUTE_A_AGENT_NAME,
+                ROUTE_A_METHOD_FAMILY,
+                ACTIVE_AGENT_STATUS,
+                created_at,
+                _json_dumps(
+                    {
+                        "shadow_mode": True,
+                        "artifact_id": artifact_id,
+                        "artifact_version": artifact.get("artifact_version"),
+                        "model_as_of": model_as_of,
+                        "validation_status": validation.get("overall_route_a_status"),
+                    }
+                ),
+            ),
+        )
+
+        for market_family in ROUTE_A_SUPPORTED_MARKET_FAMILIES:
+            metadata = {"shadow_mode": True}
+            if market_family == "goals_total":
+                metadata["supported_lines"] = [2.5]
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO edge_desk_agent_market_capabilities (
+                    agent_id, agent_version_tag, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ROUTE_A_AGENT_ID,
+                    ROUTE_A_AGENT_VERSION_TAG,
+                    market_family,
+                    ROUTE_A_AGENT_VERSION_TAG,
+                    CAPABILITY_SUPPORTED,
+                    created_at,
+                    created_at,
+                    _json_dumps(metadata),
+                ),
+            )
+
+        for market_family in ROUTE_A_UNSUPPORTED_MARKET_FAMILIES:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO edge_desk_agent_market_capabilities (
+                    agent_id, agent_version_tag, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ROUTE_A_AGENT_ID,
+                    ROUTE_A_AGENT_VERSION_TAG,
+                    market_family,
+                    ROUTE_A_AGENT_VERSION_TAG,
+                    CAPABILITY_NOT_SUPPORTED,
+                    created_at,
+                    created_at,
+                    _json_dumps({"shadow_mode": True}),
+                ),
+            )
+
+        for market_family in ROUTE_A_SUPPORTED_MARKET_FAMILIES:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO edge_desk_consensus_configs (
+                    config_id, market_family, config_scope_key, version_tag, required_agents_json, minimum_quorum,
+                    same_direction_required, max_probability_spread, valid_from, created_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ROUTE_A_CONSENSUS_CONFIG_ID,
+                    market_family,
+                    market_family,
+                    ROUTE_A_CONSENSUS_VERSION,
+                    _json_dumps([ROUTE_A_AGENT_ID, ROUTE_B_COMPOSITE_AGENT_ID]),
+                    2,
+                    1,
+                    0.06,
+                    ROUTE_A_CONSENSUS_VALID_FROM,
+                    created_at,
+                    _json_dumps(
+                        {
+                            "shadow_mode": True,
+                            "phase": "2A",
+                            "supported_lines": [2.5] if market_family == "goals_total" else [],
+                        }
+                    ),
+                ),
+            )
 
 
 def ensure_schema_only(conn: sqlite3.Connection) -> None:
@@ -665,7 +794,7 @@ def list_market_capabilities(
 ) -> list[dict[str, Any]]:
     ensure_schema(conn)
     sql = """
-        SELECT agent_id, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
+        SELECT agent_id, agent_version_tag, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
         FROM edge_desk_agent_market_capabilities
     """
     params: list[Any] = []
@@ -765,6 +894,26 @@ def _build_agent_prediction_rows(
     fixture: dict[str, Any],
     prediction: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    shadow_bundle = dict(prediction.get("edge_desk_shadow_bundle") or {})
+    if shadow_bundle:
+        rows: list[dict[str, Any]] = []
+        for agent_payload in list(shadow_bundle.get("agents") or []):
+            rows.extend(
+                _build_shadow_agent_rows(
+                    fixture=fixture,
+                    prediction=prediction,
+                    agent_payload=dict(agent_payload),
+                )
+            )
+        return rows
+    return _build_route_b_prediction_rows(fixture=fixture, prediction=prediction)
+
+
+def _build_route_b_prediction_rows(
+    *,
+    fixture: dict[str, Any],
+    prediction: dict[str, Any],
+) -> list[dict[str, Any]]:
     generated_at = str(prediction.get("generated_at") or fixture.get("kickoff_utc") or FOUNDATION_CREATED_AT)
     kickoff_utc = None if fixture.get("kickoff_utc") is None else str(fixture["kickoff_utc"])
     source_prediction_version = str(prediction.get("version_key") or prediction.get("prediction_id") or "")
@@ -822,7 +971,11 @@ def _build_agent_prediction_rows(
             rows.append(payload)
         return rows
 
-    supported_families = [row["market_family"] for row in _latest_capability_rows_for_agent(ROUTE_B_COMPOSITE_AGENT_ID).values()]
+    supported_families = [
+        row["market_family"]
+        for row in _latest_capability_rows_for_agent(conn=None, agent_id=ROUTE_B_COMPOSITE_AGENT_ID).values()
+        if row["capability_status"] == CAPABILITY_SUPPORTED
+    ]
     blocked_rows = []
     blocker_text = ",".join(str(item) for item in list(prediction.get("blockers") or [])) or None
     for market_family in supported_families:
@@ -868,6 +1021,131 @@ def _build_agent_prediction_rows(
     return blocked_rows
 
 
+def _build_shadow_agent_rows(
+    *,
+    fixture: dict[str, Any],
+    prediction: dict[str, Any],
+    agent_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    generated_at = str(
+        agent_payload.get("generated_at")
+        or prediction.get("generated_at")
+        or fixture.get("kickoff_utc")
+        or FOUNDATION_CREATED_AT
+    )
+    kickoff_utc = None if fixture.get("kickoff_utc") is None else str(fixture["kickoff_utc"])
+    source_prediction_version = str(
+        agent_payload.get("source_prediction_version")
+        or prediction.get("version_key")
+        or prediction.get("prediction_id")
+        or ""
+    )
+    model_snapshot_id = None
+    if agent_payload.get("model_snapshot_id") is not None:
+        model_snapshot_id = str(agent_payload["model_snapshot_id"])
+    elif prediction.get("model_snapshot_id") is not None:
+        model_snapshot_id = str(prediction["model_snapshot_id"])
+
+    prediction_status = str(agent_payload.get("prediction_status") or "NOT_APPLICABLE")
+    agent_id = str(agent_payload["agent_id"])
+    agent_version_tag = str(agent_payload["agent_version_tag"])
+    base_metadata = {
+        "competition_id": prediction.get("competition_id") or fixture.get("competition_id"),
+        "competition_name": prediction.get("competition_name") or fixture.get("competition_name"),
+        "team_resolution": prediction.get("team_resolution"),
+        **dict(agent_payload.get("metadata") or {}),
+    }
+
+    if prediction_status == "PREDICTED":
+        rows: list[dict[str, Any]] = []
+        for market_row in list(agent_payload.get("market_rows") or []):
+            source_payload_hash = canonical_hash({"agent_id": agent_id, "market_row": market_row})
+            payload = {
+                "fixture_id": str(fixture["fixture_id"]),
+                "kickoff_utc": kickoff_utc,
+                "agent_id": agent_id,
+                "agent_version_tag": agent_version_tag,
+                "market_family": str(market_row["market_family"]),
+                "line": None if market_row.get("line") is None else float(market_row["line"]),
+                "selection": None if market_row.get("selection") is None else str(market_row["selection"]),
+                "probability": None
+                if market_row.get("effective_win_stake_probability") is None
+                else float(market_row["effective_win_stake_probability"]),
+                "fair_price": None if market_row.get("fair_decimal_price") is None else float(market_row["fair_decimal_price"]),
+                "prediction_status": "PREDICTED",
+                "as_of": str(market_row.get("as_of") or agent_payload.get("model_as_of") or prediction.get("model_as_of") or ""),
+                "generated_at": generated_at,
+                "model_version": str(
+                    market_row.get("model_version")
+                    or market_row.get("pricing_model_version")
+                    or agent_payload.get("model_version")
+                    or prediction.get("prediction_version")
+                    or ""
+                ),
+                "model_snapshot_id": model_snapshot_id,
+                "source_prediction_version": source_prediction_version,
+                "source_payload_hash": source_payload_hash,
+                "block_reason": None,
+                "source_references": {
+                    "source_scoreline_object_id": market_row.get("source_scoreline_object_id"),
+                    "source_corner_object_id": market_row.get("source_corner_object_id"),
+                },
+                "metadata": {
+                    **base_metadata,
+                    "market_settlement_probabilities": market_row.get("settlement_probabilities"),
+                    "component_lines": market_row.get("component_lines"),
+                },
+                "payload": market_row,
+            }
+            payload["prediction_key"] = _prediction_key(payload)
+            payload["prediction_id"] = f"edge_pred_{payload['prediction_key']}"
+            rows.append(payload)
+        return rows
+
+    blocker_text = ",".join(str(item) for item in list(agent_payload.get("blockers") or [])) or None
+    blocked_rows: list[dict[str, Any]] = []
+    for market_context in list(agent_payload.get("market_contexts") or []):
+        source_payload = {
+            "fixture_id": fixture["fixture_id"],
+            "agent_id": agent_id,
+            "market_family": market_context.get("market_family"),
+            "line": market_context.get("line"),
+            "prediction_status": prediction_status,
+            "blockers": list(agent_payload.get("blockers") or []),
+            "warnings": list(agent_payload.get("warnings") or []),
+            "prediction_version": source_prediction_version,
+        }
+        payload = {
+            "fixture_id": str(fixture["fixture_id"]),
+            "kickoff_utc": kickoff_utc,
+            "agent_id": agent_id,
+            "agent_version_tag": agent_version_tag,
+            "market_family": str(market_context["market_family"]),
+            "line": None if market_context.get("line") is None else float(market_context["line"]),
+            "selection": None,
+            "probability": None,
+            "fair_price": None,
+            "prediction_status": prediction_status,
+            "as_of": str(agent_payload.get("model_as_of") or prediction.get("model_as_of") or ""),
+            "generated_at": generated_at,
+            "model_version": str(agent_payload.get("model_version") or prediction.get("prediction_version") or ""),
+            "model_snapshot_id": model_snapshot_id,
+            "source_prediction_version": source_prediction_version,
+            "source_payload_hash": canonical_hash(source_payload),
+            "block_reason": blocker_text,
+            "source_references": {},
+            "metadata": {
+                **base_metadata,
+                "warnings": agent_payload.get("warnings"),
+            },
+            "payload": source_payload,
+        }
+        payload["prediction_key"] = _prediction_key(payload)
+        payload["prediction_id"] = f"edge_pred_{payload['prediction_key']}"
+        blocked_rows.append(payload)
+    return blocked_rows
+
+
 def _prediction_key(payload: dict[str, Any]) -> str:
     return canonical_hash(
         {
@@ -885,12 +1163,11 @@ def _prediction_key(payload: dict[str, Any]) -> str:
 
 
 def _group_predictions_by_market(prediction_rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    grouped: dict[tuple[str, float | None, str | None], list[dict[str, Any]]] = {}
+    grouped: dict[tuple[str, float | None], list[dict[str, Any]]] = {}
     for row in prediction_rows:
         key = (
             str(row["market_family"]),
             None if row.get("line") is None else float(row["line"]),
-            None if row.get("selection") is None else str(row["selection"]),
         )
         grouped.setdefault(key, []).append(row)
     return [grouped[key] for key in sorted(grouped)]
@@ -901,16 +1178,14 @@ def _build_consensus_row(conn: sqlite3.Connection, grouped_rows: list[dict[str, 
     config = _active_consensus_config(conn, market_family=str(exemplar["market_family"]))
     prediction_ids = [str(row["prediction_id"]) for row in grouped_rows]
     participating_agents = sorted({str(row["agent_id"]) for row in grouped_rows})
+    required_agents = set(str(agent_id) for agent_id in list(config.get("required_agents") or []))
     supported_agents = {
         agent_id
         for agent_id in participating_agents
         if _latest_capability_status(conn, agent_id=agent_id, market_family=str(exemplar["market_family"])) == CAPABILITY_SUPPORTED
     }
-    supported_predictions = [
-        row
-        for row in grouped_rows
-        if row["agent_id"] in supported_agents and row["prediction_status"] == "PREDICTED"
-    ]
+    eligible_agents = supported_agents & required_agents if required_agents else supported_agents
+    supported_predictions = _market_vote_rows(grouped_rows, agent_ids=eligible_agents)
     if grouped_rows and not supported_agents:
         status = "NOT_EVALUABLE"
         reason = "AGENT_CAPABILITY_NOT_SUPPORTED"
@@ -926,6 +1201,22 @@ def _build_consensus_row(conn: sqlite3.Connection, grouped_rows: list[dict[str, 
         else:
             reason = "NO_SUPPORTED_AGENT_PREDICTIONS"
         status = "NOT_EVALUABLE"
+        selection = None
+        consensus_probability = None
+        probability_spread = None
+    elif any(str(row["prediction_status"]) == "BLOCKED" for row in grouped_rows if row["agent_id"] in eligible_agents) and len(
+        supported_predictions
+    ) < int(config["minimum_quorum"]):
+        status = "NOT_EVALUABLE"
+        reason = "AGENT_BLOCKED"
+        selection = None
+        consensus_probability = None
+        probability_spread = None
+    elif any(str(row["prediction_status"]) == "ABSTAINED" for row in grouped_rows if row["agent_id"] in eligible_agents) and len(
+        supported_predictions
+    ) < int(config["minimum_quorum"]):
+        status = "NOT_EVALUABLE"
+        reason = "AGENT_ABSTAINED"
         selection = None
         consensus_probability = None
         probability_spread = None
@@ -991,6 +1282,32 @@ def _build_consensus_row(conn: sqlite3.Connection, grouped_rows: list[dict[str, 
     )
     consensus_payload["consensus_id"] = f"edge_consensus_{consensus_payload['consensus_key']}"
     return consensus_payload
+
+
+def _market_vote_rows(
+    grouped_rows: list[dict[str, Any]],
+    *,
+    agent_ids: set[str],
+) -> list[dict[str, Any]]:
+    votes: list[dict[str, Any]] = []
+    for agent_id in sorted(agent_ids):
+        predicted_rows = [
+            row
+            for row in grouped_rows
+            if row["agent_id"] == agent_id and row["prediction_status"] == "PREDICTED" and row.get("probability") is not None
+        ]
+        if not predicted_rows:
+            continue
+        votes.append(
+            max(
+                predicted_rows,
+                key=lambda row: (
+                    float(row["probability"]),
+                    "" if row.get("selection") is None else str(row["selection"]),
+                ),
+            )
+        )
+    return votes
 
 
 def _build_decision_row(grouped_rows: list[dict[str, Any]], consensus_row: dict[str, Any]) -> dict[str, Any]:
@@ -1182,12 +1499,11 @@ def _active_consensus_config(conn: sqlite3.Connection, *, market_family: str) ->
         """
         SELECT *
         FROM edge_desk_consensus_configs
-        WHERE config_id = ?
-          AND (market_family = ? OR market_family IS NULL)
+        WHERE market_family = ? OR market_family IS NULL
         ORDER BY CASE WHEN market_family = ? THEN 0 ELSE 1 END, valid_from DESC, config_row_id DESC
         LIMIT 1
         """,
-        (DEFAULT_CONSENSUS_CONFIG_ID, market_family, market_family),
+        (market_family, market_family),
     ).fetchone()
     if row is None:
         raise RuntimeError("edge desk consensus config missing")
@@ -1197,15 +1513,45 @@ def _active_consensus_config(conn: sqlite3.Connection, *, market_family: str) ->
     return payload
 
 
-def _latest_capability_rows_for_agent(agent_id: str) -> dict[str, dict[str, Any]]:
-    return {
-        market_family: {
-            "agent_id": agent_id,
-            "market_family": market_family,
-            "capability_status": CAPABILITY_SUPPORTED,
+def _latest_capability_rows_for_agent(
+    conn: sqlite3.Connection | None,
+    agent_id: str,
+) -> dict[str, dict[str, Any]]:
+    if conn is None:
+        market_families = SUPPORTED_ROUTE_B_MARKET_FAMILIES if agent_id == ROUTE_B_COMPOSITE_AGENT_ID else ()
+        return {
+            market_family: {
+                "agent_id": agent_id,
+                "market_family": market_family,
+                "capability_status": CAPABILITY_SUPPORTED,
+            }
+            for market_family in market_families
         }
-        for market_family in SUPPORTED_ROUTE_B_MARKET_FAMILIES
-    }
+    rows = conn.execute(
+        """
+        SELECT agent_id, agent_version_tag, market_family, version_tag, capability_status, valid_from, created_at, metadata_json
+        FROM edge_desk_agent_market_capabilities
+        WHERE agent_id = ?
+        ORDER BY valid_from DESC, capability_row_id DESC
+        """,
+        (agent_id,),
+    ).fetchall()
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        market_family = str(row["market_family"])
+        if market_family in latest:
+            continue
+        latest[market_family] = {
+            "agent_id": str(row["agent_id"]),
+            "agent_version_tag": str(row["agent_version_tag"]),
+            "market_family": market_family,
+            "version_tag": str(row["version_tag"]),
+            "capability_status": str(row["capability_status"]),
+            "valid_from": str(row["valid_from"]),
+            "created_at": str(row["created_at"]),
+            "metadata": json.loads(str(row["metadata_json"])),
+        }
+    return latest
 
 
 def _latest_capability_status(conn: sqlite3.Connection, *, agent_id: str, market_family: str) -> str:
