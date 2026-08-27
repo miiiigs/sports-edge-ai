@@ -1408,6 +1408,224 @@ tbody tr:hover {
   gap: 8px;
 }
 
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(35, 72, 95, 0.9);
+  background: rgba(16, 38, 58, 0.88);
+  color: #9bb3c6;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.best-picks-layout {
+  align-items: start;
+}
+
+.best-picks-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.featured-pick,
+.pick-card,
+.ops-callout {
+  border: 1px solid rgba(35, 72, 95, 0.95);
+  background: linear-gradient(180deg, rgba(11, 28, 44, 0.95), rgba(9, 22, 35, 0.95));
+}
+
+.featured-pick {
+  padding: 22px;
+  display: grid;
+  gap: 20px;
+}
+
+.featured-pick-top,
+.featured-pick-main,
+.featured-pick-footer,
+.featured-badges,
+.pick-card-top,
+.truth-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.featured-pick-top,
+.pick-card-top,
+.truth-row {
+  align-items: start;
+}
+
+.featured-pick-top h3,
+.pick-card h3 {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
+}
+
+.featured-subhead,
+.pick-card-top p,
+.truth-row small,
+.ops-callout p,
+.pick-card-status {
+  margin: 0;
+  color: #8398ab;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.featured-bet {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.featured-bet strong,
+.pick-label {
+  font-size: 24px;
+  line-height: 1.1;
+  font-family: var(--font-display);
+  letter-spacing: -0.04em;
+}
+
+.featured-bet small {
+  color: #88a1b7;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.featured-metrics,
+.pick-card-metrics,
+.truth-list {
+  display: grid;
+  gap: 12px;
+}
+
+.featured-metrics {
+  min-width: 360px;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+}
+
+.pick-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.pick-card {
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.pick-card-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.featured-metrics div,
+.pick-card-metrics div,
+.ops-callout {
+  padding: 14px 15px;
+  border-radius: 10px;
+}
+
+.featured-metrics div,
+.pick-card-metrics div {
+  border: 1px solid rgba(35, 72, 95, 0.72);
+  background: rgba(14, 32, 49, 0.9);
+}
+
+.featured-metrics span,
+.pick-card-metrics span,
+.ops-callout strong {
+  display: block;
+  color: #7f93a7;
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.featured-metrics strong,
+.pick-card-metrics b {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
+}
+
+.featured-pick-footer {
+  align-items: center;
+  color: #96acbe;
+  font-size: 11px;
+}
+
+.best-picks-empty {
+  padding: 22px;
+}
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(35, 72, 95, 0.95);
+  background: rgba(14, 32, 49, 0.92);
+  color: #b7c9d8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.state-badge-positive {
+  border-color: rgba(86, 227, 164, 0.45);
+  color: var(--green);
+}
+
+.state-badge-negative {
+  border-color: rgba(255, 123, 145, 0.45);
+  color: var(--red);
+}
+
+.truth-panel,
+.ops-callout {
+  display: grid;
+  gap: 16px;
+}
+
+.truth-row {
+  padding-top: 14px;
+  border-top: 1px solid rgba(26, 48, 67, 0.85);
+}
+
+.truth-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.truth-row strong,
+.ops-callout strong {
+  margin: 0;
+}
+
+.truth-note {
+  margin: 0;
+  color: #7d93a6;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.ops-callout p {
+  margin-top: 8px;
+}
+
 .page-footer {
   display: flex;
   justify-content: space-between;
@@ -1568,6 +1786,20 @@ tbody tr:hover {
   .right-rail {
     grid-template-columns: 1fr;
   }
+
+  .featured-pick-top,
+  .featured-pick-main,
+  .featured-pick-footer,
+  .pick-card-top,
+  .truth-row {
+    flex-direction: column;
+  }
+
+  .featured-metrics,
+  .pick-card-metrics {
+    min-width: 0;
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1617,5 +1849,15 @@ tbody tr:hover {
 
   .page-footer {
     flex-direction: column;
+  }
+
+  .featured-metrics,
+  .pick-card-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .featured-bet strong,
+  .pick-label {
+    font-size: 20px;
   }
 }

@@ -119,6 +119,99 @@ def _classify_one_shot_outcome(provider_state: str) -> tuple[str, str | None]:
     return "SUCCESS", None
 
 
+def _format_display_line(line: float | None) -> str | None:
+    if line is None:
+        return None
+    return f"{float(line):g}"
+
+
+def _format_signed_display_line(line: float | None) -> str | None:
+    if line is None:
+        return None
+    value = float(line)
+    return f"{value:+g}" if value > 0 else f"{value:g}"
+
+
+def _humanize_market_selection(
+    *,
+    market_family: str,
+    selection: str,
+    line: float | None,
+    home_team_name: str,
+    away_team_name: str,
+) -> dict[str, str | None]:
+    normalized_market = str(market_family)
+    normalized_selection = str(selection).upper()
+    line_text = _format_display_line(line)
+    if normalized_market == "1x2":
+        label = {
+            "HOME": f"{home_team_name} to Win",
+            "DRAW": "Match Draw",
+            "AWAY": f"{away_team_name} to Win",
+        }.get(normalized_selection, normalized_selection.title())
+        return {
+            "market_label": "Match Winner",
+            "selection_label": label,
+            "bet_label": label,
+        }
+    if normalized_market == "btts":
+        selection_label = "Yes" if normalized_selection == "YES" else "No" if normalized_selection == "NO" else normalized_selection.title()
+        return {
+            "market_label": "Both Teams to Score",
+            "selection_label": selection_label,
+            "bet_label": f"Both Teams to Score - {selection_label}",
+        }
+    if normalized_market == "goals_total":
+        selection_label = "Over" if normalized_selection == "OVER" else "Under" if normalized_selection == "UNDER" else normalized_selection.title()
+        goal_text = f"{line_text} Goals" if line_text is not None else "Goals"
+        return {
+            "market_label": "Goals Total",
+            "selection_label": selection_label,
+            "bet_label": f"{selection_label} {goal_text}",
+        }
+    if normalized_market == "corner_total":
+        selection_label = "Over" if normalized_selection == "OVER" else "Under" if normalized_selection == "UNDER" else normalized_selection.title()
+        corner_text = f"{line_text} Corners" if line_text is not None else "Corners"
+        return {
+            "market_label": "Corners Total",
+            "selection_label": selection_label,
+            "bet_label": f"{selection_label} {corner_text}",
+        }
+    if normalized_market == "asian_handicap":
+        team_label = home_team_name if normalized_selection == "HOME" else away_team_name if normalized_selection == "AWAY" else normalized_selection.title()
+        handicap_text = _format_signed_display_line(line)
+        return {
+            "market_label": "Asian Handicap",
+            "selection_label": team_label,
+            "bet_label": team_label if handicap_text is None else f"{team_label} {handicap_text}",
+        }
+    selection_label = normalized_selection.title()
+    bet_label = normalized_market.replace("_", " ").title()
+    if line_text is not None:
+        bet_label = f"{bet_label} {line_text}"
+    return {
+        "market_label": normalized_market.replace("_", " ").title(),
+        "selection_label": selection_label,
+        "bet_label": f"{bet_label} - {selection_label}",
+    }
+
+
+def _humanize_pick_status(row: dict[str, Any]) -> tuple[str, str]:
+    notes: list[str] = []
+    if row.get("paper_entry_eligible"):
+        notes.append("Paper eligible")
+    market_freshness = str(row.get("market_freshness") or "").strip()
+    if market_freshness:
+        notes.append(f"{market_freshness.replace('_', ' ').title()} market")
+    day12_state = str(row.get("day12_state") or "").strip()
+    if day12_state and day12_state != "NOT_APPLICABLE":
+        notes.append(f"Day 12 {day12_state.replace('_', ' ').title()}")
+    reason_codes = [str(code).replace("_", " ").title() for code in (row.get("reason_codes") or [])[:2]]
+    if not notes:
+        notes.extend(reason_codes)
+    return ("BET" if row.get("paper_entry_eligible") else "NO BET", " · ".join(note for note in notes if note))
+
+
 @dataclass(frozen=True)
 class DashboardConfig:
     repo_root: Path
@@ -1940,6 +2033,102 @@ class DashboardServices:
             },
         }
 
+    def _dashboard_agent_statuses(self) -> list[dict[str, str]]:
+        route_a_diagnostics = {} if self.snapshot is None else dict(self.snapshot.diagnostics.get("route_a") or {})
+        route_a_status = str(route_a_diagnostics.get("overall_status") or "UNAVAILABLE")
+        route_a_note = "Rejected clean validation artifact remains inactive."
+        if route_a_status == "PENDING_INDEPENDENT_REVIEW":
+            route_a_note = "Validated artifact is awaiting independent review before activation."
+        elif route_a_status == "SUPPORTED":
+            route_a_note = "Approved artifact is available for overlapping markets."
+        elif route_a_status == "UNAVAILABLE":
+            route_a_note = "No verified Route A runtime artifact is currently loaded."
+        return [
+            {
+                "agent_id": football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID,
+                "label": "Route B Composite",
+                "status": football_edge_desk.ACTIVE_AGENT_STATUS,
+                "note": "Only active Football predictive agent in runtime.",
+            },
+            {
+                "agent_id": "ROUTE_A_DIRECT_CLASSIFIER",
+                "label": "Route A Direct Classifier",
+                "status": route_a_status,
+                "note": route_a_note,
+            },
+            {
+                "agent_id": "AGENT_3",
+                "label": "Agent 3",
+                "status": "NOT IMPLEMENTED",
+                "note": "Not implemented yet.",
+            },
+        ]
+
+    def _build_best_pick_rows(self, fixture_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        fixture_map = {
+            str(row["fixture_id"]): self.serialize_fixture_row(row)
+            for row in fixture_rows
+        }
+        best_picks: list[dict[str, Any]] = []
+        for evaluation in self._market_evaluation_map().values():
+            for row in evaluation.get("decision_rows") or []:
+                if row.get("decision") != "PRELIMINARY_CANDIDATE":
+                    continue
+                if not row.get("paper_entry_eligible"):
+                    continue
+                fixture = fixture_map.get(str(row["fixture_id"]))
+                if fixture is None:
+                    continue
+                if str(fixture.get("status")) not in FIXTURE_PREMATCH_STATUSES:
+                    continue
+                labels = _humanize_market_selection(
+                    market_family=str(row["market_family"]),
+                    selection=str(row["selection"]),
+                    line=None if row.get("line") is None else float(row["line"]),
+                    home_team_name=str(fixture["home_team_name"]),
+                    away_team_name=str(fixture["away_team_name"]),
+                )
+                bet_state, risk_summary = _humanize_pick_status(row)
+                best_picks.append(
+                    {
+                        "fixture_id": str(row["fixture_id"]),
+                        "competition_id": str(row["competition_id"]),
+                        "competition_name": str(row["competition_name"]),
+                        "kickoff_utc": str(fixture["kickoff_utc"]),
+                        "kickoff_local": str(fixture["kickoff_local"]),
+                        "home_team_name": str(fixture["home_team_name"]),
+                        "away_team_name": str(fixture["away_team_name"]),
+                        "market_family": str(row["market_family"]),
+                        "market_label": labels["market_label"],
+                        "selection_label": labels["selection_label"],
+                        "bet_label": labels["bet_label"],
+                        "line": None if row.get("line") is None else float(row["line"]),
+                        "model_probability": float(row["model_probability"]),
+                        "fair_odds": float(row["model_fair_decimal_price"]),
+                        "market_odds": None if row.get("best_available_price") is None else float(row["best_available_price"]),
+                        "edge": None if row.get("settlement_aware_edge") is None else float(row["settlement_aware_edge"]),
+                        "bookmaker": None if row.get("best_available_bookmaker") is None else str(row["best_available_bookmaker"]),
+                        "bet_state": bet_state,
+                        "risk_status": "Qualified",
+                        "risk_summary": risk_summary,
+                        "market_freshness": None if row.get("market_freshness") is None else str(row["market_freshness"]),
+                        "paper_qualification_state": "QUALIFIED",
+                        "day12_state": str(row.get("day12_state") or "NOT_APPLICABLE"),
+                        "decision": str(row["decision"]),
+                        "reason_codes": list(row.get("reason_codes") or []),
+                    }
+                )
+        return sorted(
+            best_picks,
+            key=lambda row: (
+                -float(row.get("edge") or 0.0),
+                str(row["kickoff_utc"]),
+                str(row["fixture_id"]),
+                str(row["market_family"]),
+                str(row["bet_label"]),
+            ),
+        )
+
     def get_dashboard_payload(self) -> dict[str, Any]:
         fixture_rows = self._all_fixtures_with_predictions()
         live_rows = [self.serialize_fixture_row(row) for row in self._filter_fixture_rows(bucket="live", fixture_rows=fixture_rows)]
@@ -1958,12 +2147,20 @@ class DashboardServices:
             for row in next_rows
             if row.get("prediction") and row["prediction"].get("prediction_status") == PREDICTION_STATUS_READY
         ][:6]
+        best_picks = self._build_best_pick_rows(fixture_rows)
         return {
             "live": live_rows,
             "today": today_rows,
             "upcoming": upcoming_rows[:24],
             "next_matches": next_rows,
             "prediction_watchlist": prediction_watchlist,
+            "best_picks": best_picks,
+            "best_picks_summary": {
+                "count": len(best_picks),
+                "empty_message": "No qualified picks currently meet the model, value and risk requirements.",
+                "source": "Current qualified market-evaluation rows with existing value and safeguard truth.",
+            },
+            "agent_statuses": self._dashboard_agent_statuses(),
             "system_status": self.get_system_status(),
         }
 

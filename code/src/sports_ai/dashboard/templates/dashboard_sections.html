@@ -1,285 +1,235 @@
 {% set counts = payload.system_status.fixture_feed.counts %}
-{% set snapshot = payload.system_status.current_model_snapshot %}
-{% set nearest = payload.system_status.fixture_feed.nearest_supported_fixture %}
-{% set live_fixture = payload.live[0] if payload.live else none %}
-{% set next_fixture = payload.next_matches[0] if payload.next_matches else none %}
-{% set live_home_price = live_fixture.prediction.fair_prices['1x2'].HOME.fair_decimal_price if live_fixture and live_fixture.prediction and live_fixture.prediction.prediction_status == 'READY' else none %}
+{% set best_pick = payload.best_picks[0] if payload.best_picks else none %}
 
 <section class="page-heading">
   <div>
     <p class="eyebrow cyan-text">{{ payload.system_status.current_time_local }}</p>
-    <h1>Football command center.</h1>
-    <p class="subhead">Current fixtures, frozen model output, and honest operational state in one watchlist surface.</p>
+    <h1>Best Picks of the Day.</h1>
+    <p class="subhead">Qualified Football bets appear first, with probability, market price, fair price, edge, and honest bet status shown in plain language.</p>
   </div>
-  <button
-    class="refresh-button"
-    type="button"
-    data-manual-refresh="true"
-    data-refresh-endpoint="/api/fixtures/refresh"
-    data-cooldown-seconds="30"
-  >
-    Refresh data
-  </button>
+  <a class="refresh-button" href="/candidates">Open candidates view</a>
 </section>
 
 <section class="kpi-grid">
   <article class="kpi">
-    <span class="kpi-label">LIVE MATCHES</span>
-    <strong>{{ counts.live }}</strong>
-    <small>{{ payload.system_status.fixture_feed.provider }} feed window</small>
+    <span class="kpi-label">QUALIFIED PICKS</span>
+    <strong>{{ payload.best_picks_summary.count }}</strong>
+    <small>Existing model, value, and risk truth only</small>
   </article>
   <article class="kpi">
     <span class="kpi-label">TODAY'S BOARD</span>
     <strong>{{ counts.today }}</strong>
-    <small>{{ counts.predictions_ready }} prediction-ready rows</small>
+    <small>{{ counts.predictions_ready }} prediction-ready fixtures</small>
   </article>
   <article class="kpi">
-    <span class="kpi-label">UPCOMING</span>
-    <strong>{{ counts.upcoming }}</strong>
-    <small>{{ counts.supported }} supported fixtures in scope</small>
+    <span class="kpi-label">PAPER ENTRIES</span>
+    <strong>{{ payload.system_status.market_sync.paper_entry_count }}</strong>
+    <small>Qualified picks already persisted to paper tracking</small>
   </article>
   <article class="kpi kpi-muted">
-    <span class="kpi-label">PROVIDER STATE</span>
-    <strong>{{ payload.system_status.fixture_feed.state }}</strong>
-    <small>{{ payload.system_status.prediction_engine.state }} prediction engine</small>
+    <span class="kpi-label">MARKET SYNC</span>
+    <strong>{{ payload.system_status.market_sync.state }}</strong>
+    <small>{{ payload.system_status.odds_feed.state }} odds feed</small>
   </article>
 </section>
 
-<div class="section-row">
-  <div>
-    <p class="eyebrow cyan-text">Real-time feed</p>
-    <h2>Live now</h2>
-  </div>
-  <span class="live-badge">
-    <i class="status-dot {% if counts.live > 0 %}status-dot-live{% endif %}"></i>
-    {{ counts.live }} match{% if counts.live != 1 %}es{% endif %} in progress
-  </span>
-</div>
-
-{% if live_fixture %}
-  <section class="live-card">
-    <div class="live-card-top">
-      <div class="league-label">
-        <span class="league-icon">{{ live_fixture.competition_name[:2]|upper }}</span>
-        <span>
-          <b>{{ live_fixture.competition_name }}</b>
-          <small>{{ live_fixture.kickoff_local }} | {{ live_fixture.status }}</small>
-        </span>
-      </div>
-      <span class="live-clock">
-        <i class="status-dot status-dot-live"></i>
-        {{ live_fixture.status }}{% if live_fixture.elapsed_minute %} {{ live_fixture.elapsed_minute }}'{% endif %}
-      </span>
-    </div>
-
-    <div class="score-row">
-      <div class="team">
-        <span class="team-crest">{{ live_fixture.home_team_name[:1]|upper }}</span>
-        <strong>{{ live_fixture.home_team_name }}</strong>
-        <small>Home</small>
-      </div>
-      <div class="score">
-        <strong>{{ live_fixture.home_score if live_fixture.home_score is not none else 0 }} <span>-</span> {{ live_fixture.away_score if live_fixture.away_score is not none else 0 }}</strong>
-        <small>Pre-match prediction remains locked</small>
-      </div>
-      <div class="team team-away">
-        <span class="team-crest crest-blue">{{ live_fixture.away_team_name[:1]|upper }}</span>
-        <strong>{{ live_fixture.away_team_name }}</strong>
-        <small>Away</small>
-      </div>
-    </div>
-
-    <div class="live-insights">
-      <div>
-        <span>PREDICTION STATUS</span>
-        {% if live_fixture.prediction and live_fixture.prediction.prediction_status == 'READY' %}
-          <div class="probability">
-            <b>{{ "%.0f"|format((100 / live_home_price) if live_home_price else 0) }}%</b>
-            <div class="bar"><i style="width: {{ "%.0f"|format((100 / live_home_price) if live_home_price else 0) }}%"></i></div>
-            <b>{{ "%.0f"|format(100 - ((100 / live_home_price) if live_home_price else 0)) }}%</b>
-          </div>
-          <small>Model fair prices remain frozen from pre-match lock.</small>
-        {% else %}
-          <small>{{ live_fixture.prediction_eligibility_status }}</small>
-        {% endif %}
-      </div>
-
-      <div>
-        <span>MODEL SUMMARY</span>
-        {% if live_fixture.prediction and live_fixture.prediction.prediction_status == 'READY' %}
-          <div class="momentum">
-            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-          </div>
-          <small>
-            xG {{ "%.2f"|format(live_fixture.prediction.expected_home_goals) }} - {{ "%.2f"|format(live_fixture.prediction.expected_away_goals) }}
-            {% if live_fixture.prediction.top_scorelines %}
-              | top {{ live_fixture.prediction.top_scorelines[0].home_goals }}-{{ live_fixture.prediction.top_scorelines[0].away_goals }}
-            {% endif %}
-          </small>
-        {% else %}
-          <small>{{ live_fixture.prediction.blockers|join(', ') if live_fixture.prediction and live_fixture.prediction.blockers else 'Prediction pending.' }}</small>
-        {% endif %}
-      </div>
-
-      <a class="details-button" href="/matches/{{ live_fixture.fixture_id }}">
-        View match <span>-></span>
-      </a>
-    </div>
-  </section>
-{% else %}
-  <section class="live-card empty-state">
-    <strong>No live fixture is currently staged.</strong>
-    <p>
-      {% if payload.system_status.fixture_feed.live_status_note %}
-        {{ payload.system_status.fixture_feed.live_status_note }}
-      {% elif payload.system_status.fixture_feed.last_error %}
-        {{ payload.system_status.fixture_feed.last_error }}
-      {% else %}
-        The board is waiting for the next in-play match from the configured fixture provider.
-      {% endif %}
-    </p>
-  </section>
-{% endif %}
-
-<section class="workspace-grid">
-  <section class="watchlist-panel">
+<section class="workspace-grid best-picks-layout">
+  <section class="watchlist-panel best-picks-panel">
     <div class="panel-heading">
       <div>
-        <p class="eyebrow">Your slate</p>
-        <h2>Watchlist <span>{{ payload.next_matches|length }}</span></h2>
+        <p class="eyebrow">Main board</p>
+        <h2>Best Picks of the Day</h2>
       </div>
-      <a class="filter-button" href="/matches?status_bucket=next">Open full board</a>
+      <span class="pill">{{ payload.best_picks_summary.source }}</span>
     </div>
 
-    <div class="table-toolbar">
-      <div class="segmented">
-        <span class="segment-active">Next matches</span>
-        <span>Today</span>
-        <span>Upcoming</span>
-      </div>
-      <span class="search-box search-box-static">Frozen Sports Edge watchlist</span>
-    </div>
-
-    <div class="match-table">
-      <div class="table-head">
-        <span>MATCH</span>
-        <span>MODEL EDGE</span>
-        <span>PROBABILITY</span>
-        <span></span>
-      </div>
-      {% for fixture in payload.next_matches %}
-        <a class="match-row" href="/matches/{{ fixture.fixture_id }}">
-          <span class="match-info">
-            <span class="club-dot {% if fixture.competition_id == 'ESP1' %}purple{% elif fixture.status in ['LIVE', 'HALFTIME'] %}blue{% endif %}"></span>
-            <span>
-              <b>{{ fixture.home_team_name }} <small>vs</small> {{ fixture.away_team_name }}</b>
-              <em>{{ fixture.competition_name }} | {{ fixture.kickoff_local }}</em>
-            </span>
-          </span>
-          <span class="edge-cell">
-            <b>{{ fixture.market_signal.decision if fixture.market_signal else fixture.prediction_eligibility_status }}</b>
-            <small class="{% if fixture.market_signal and fixture.market_signal.decision == 'PRELIMINARY_CANDIDATE' %}positive{% else %}negative{% endif %}">
-              {% if fixture.market_signal %}
-                {{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}
-              {% else %}
-                {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
-              {% endif %}
-            </small>
-          </span>
-          <span class="prob-cell">
-            {% if fixture.market_signal and fixture.market_signal.edge is not none %}
-              {% set edge_percent = fixture.market_signal.edge * 100 %}
-              <b>{{ "{:+.1f}%".format(edge_percent) }}</b>
-              <span class="mini-bar"><i style="width: {{ "%.0f"|format([edge_percent * 2, 100]|min if edge_percent > 0 else 0) }}%"></i></span>
-            {% elif fixture.prediction and fixture.prediction.prediction_status == 'READY' %}
-              {% set home_price = fixture.prediction.fair_prices['1x2'].HOME.fair_decimal_price %}
-              <b>{{ "%.0f"|format((100 / home_price) if home_price else 0) }}%</b>
-              <span class="mini-bar"><i style="width: {{ "%.0f"|format((100 / home_price) if home_price else 0) }}%"></i></span>
-            {% else %}
-              <b>--</b>
-              <span class="mini-bar"><i style="width: 0%"></i></span>
-            {% endif %}
-          </span>
-          <span class="row-arrow">→</span>
-        </a>
-      {% else %}
-        <div class="match-row">
-          <span class="match-info">
-            <span class="club-dot"></span>
-            <span>
-              <b>No current next-match rows</b>
-              <em>{% if nearest %}Nearest supported fixture: {{ nearest.home_team_name }} vs {{ nearest.away_team_name }}{% else %}Waiting for fixture feed{% endif %}</em>
-            </span>
-          </span>
-          <span class="edge-cell"><b>{{ payload.system_status.fixture_feed.state }}</b></span>
-          <span class="prob-cell"><b>--</b><span class="mini-bar"><i style="width: 0%"></i></span></span>
-          <span class="row-arrow">·</span>
+    {% if best_pick %}
+      <article class="featured-pick">
+        <div class="featured-pick-top">
+          <div>
+            <p class="eyebrow cyan-text">{{ best_pick.competition_name }}</p>
+            <h3>{{ best_pick.home_team_name }} vs {{ best_pick.away_team_name }}</h3>
+            <p class="featured-subhead">{{ best_pick.kickoff_local }} | {{ best_pick.market_label }}</p>
+          </div>
+          <div class="featured-badges">
+            <span class="state-badge state-badge-positive">{{ best_pick.bet_state }}</span>
+            <span class="state-badge">{{ best_pick.risk_status }}</span>
+          </div>
         </div>
-      {% endfor %}
-    </div>
+
+        <div class="featured-pick-main">
+          <div class="featured-bet">
+            <span class="eyebrow">Selection</span>
+            <strong>{{ best_pick.bet_label }}</strong>
+            <small>{{ best_pick.bookmaker or 'Market source unavailable' }}</small>
+          </div>
+
+          <div class="featured-metrics">
+            <div>
+              <span>Probability</span>
+              <strong>{{ "{:.1%}".format(best_pick.model_probability|float) }}</strong>
+            </div>
+            <div>
+              <span>Market Odds</span>
+              <strong>{{ "{:.2f}".format(best_pick.market_odds|float) if best_pick.market_odds is not none else 'N/A' }}</strong>
+            </div>
+            <div>
+              <span>Fair Odds</span>
+              <strong>{{ "{:.2f}".format(best_pick.fair_odds|float) }}</strong>
+            </div>
+            <div>
+              <span>Edge</span>
+              <strong>{{ "{:+.2%}".format(best_pick.edge|float) if best_pick.edge is not none else 'N/A' }}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="featured-pick-footer">
+          <span>Risk / status: <b>{{ best_pick.risk_summary }}</b></span>
+          <a class="details-button" href="/matches/{{ best_pick.fixture_id }}">View fixture <span>-></span></a>
+        </div>
+      </article>
+
+      {% if payload.best_picks|length > 1 %}
+        <div class="pick-grid">
+          {% for pick in payload.best_picks[1:] %}
+            <article class="pick-card">
+              <div class="pick-card-top">
+                <div>
+                  <p class="eyebrow">{{ pick.competition_name }}</p>
+                  <h3>{{ pick.home_team_name }} vs {{ pick.away_team_name }}</h3>
+                  <p>{{ pick.kickoff_local }}</p>
+                </div>
+                <span class="state-badge state-badge-positive">{{ pick.bet_state }}</span>
+              </div>
+              <strong class="pick-label">{{ pick.bet_label }}</strong>
+              <div class="pick-card-metrics">
+                <div><span>Probability</span><b>{{ "{:.1%}".format(pick.model_probability|float) }}</b></div>
+                <div><span>Market</span><b>{{ "{:.2f}".format(pick.market_odds|float) if pick.market_odds is not none else 'N/A' }}</b></div>
+                <div><span>Fair</span><b>{{ "{:.2f}".format(pick.fair_odds|float) }}</b></div>
+                <div><span>Edge</span><b>{{ "{:+.2%}".format(pick.edge|float) if pick.edge is not none else 'N/A' }}</b></div>
+              </div>
+              <p class="pick-card-status">{{ pick.risk_summary }}</p>
+              <a class="rail-link" href="/matches/{{ pick.fixture_id }}">Open fixture <span>-></span></a>
+            </article>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% else %}
+      <article class="empty-state best-picks-empty">
+        <strong>No qualified picks currently meet the model, value and risk requirements.</strong>
+        <p>Blocked, rejected, and no-bet rows remain available in the existing deeper views, but they are intentionally excluded from this main board.</p>
+      </article>
+    {% endif %}
   </section>
 
   <aside class="right-rail">
-    <section class="rail-panel">
+    <section class="rail-panel truth-panel">
       <div class="panel-heading">
         <div>
-          <p class="eyebrow">Model intelligence</p>
-          <h2>Signal health</h2>
+          <p class="eyebrow">Agent truth</p>
+          <h2>Football model state</h2>
         </div>
         <span class="cyan-text">LIVE</span>
       </div>
-      <div class="health-score">
-        <strong>{{ counts.predictions_ready }}</strong>
-        <span>ready</span>
-        <div class="health-ring"><span>{{ payload.system_status.prediction_engine.state }}</span></div>
+      <div class="truth-list">
+        {% for agent in payload.agent_statuses %}
+          <div class="truth-row">
+            <div>
+              <strong>{{ agent.label }}</strong>
+              <small>{{ agent.note }}</small>
+            </div>
+            <span class="state-badge {% if agent.status == 'ACTIVE' %}state-badge-positive{% elif agent.status == 'REJECTED' %}state-badge-negative{% endif %}">
+              {{ agent.status }}
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+      <p class="truth-note">No fake multi-agent consensus is shown here. Route B remains the only active Football predictive agent in runtime.</p>
+    </section>
+
+    <section class="rail-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Board status</p>
+          <h2>Current operating truth</h2>
+        </div>
       </div>
       <div class="health-list">
         <div><span><i class="status-dot"></i> Fixture feed</span><b>{{ payload.system_status.fixture_feed.state }}</b></div>
         <div><span><i class="status-dot"></i> Prediction engine</span><b>{{ payload.system_status.prediction_engine.state }}</b></div>
-        <div><span><i class="status-dot"></i> xG safeguards</span><b>{{ payload.system_status.safeguards.state }}</b></div>
+        <div><span><i class="status-dot"></i> Odds feed</span><b>{{ payload.system_status.odds_feed.state }}</b></div>
+        <div><span><i class="status-dot"></i> Safeguards</span><b>{{ payload.system_status.safeguards.state }}</b></div>
       </div>
-    </section>
-
-    <section class="rail-panel next-match">
-      <p class="eyebrow cyan-text">Up next</p>
-      <div class="next-time">{{ next_fixture.kickoff_local if next_fixture else 'Waiting for fixture feed' }}</div>
-      <h3>
-        {% if next_fixture %}
-          {{ next_fixture.home_team_name }} <span>vs</span> {{ next_fixture.away_team_name }}
-        {% elif nearest %}
-          {{ nearest.home_team_name }} <span>vs</span> {{ nearest.away_team_name }}
-        {% else %}
-          No next fixture
-        {% endif %}
-      </h3>
-      <p>
-        {% if next_fixture %}
-          {{ next_fixture.competition_name }} | {{ next_fixture.prediction_eligibility_status }}
-        {% elif nearest %}
-          {{ nearest.competition_name }} | {{ nearest.prediction_status }}
-        {% else %}
-          {{ payload.system_status.fixture_feed.provider }}
-        {% endif %}
-      </p>
-      <div class="next-prediction">
-        <span>MODEL PREDICTION</span>
-        {% if next_fixture and next_fixture.prediction and next_fixture.prediction.prediction_status == 'READY' %}
-          <strong>
-            Home fair <b>{{ "%.2f"|format(next_fixture.prediction.fair_prices['1x2'].HOME.fair_decimal_price) }}</b>
-          </strong>
-          <small>
-            xG {{ "%.2f"|format(next_fixture.prediction.expected_home_goals) }} - {{ "%.2f"|format(next_fixture.prediction.expected_away_goals) }}
-          </small>
-        {% else %}
-          <strong>{{ payload.system_status.current_market_decision_ready }}</strong>
-          <small>{{ payload.system_status.fixture_feed.last_error or 'Prediction not ready yet.' }}</small>
-        {% endif %}
+      <div class="ops-callout">
+        <strong>Current board</strong>
+        <p>{{ payload.best_picks_summary.count }} qualified pick{% if payload.best_picks_summary.count != 1 %}s{% endif %} on the live board, {{ payload.system_status.market_sync.decision_count }} priced decision row{% if payload.system_status.market_sync.decision_count != 1 %}s{% endif %}, and {{ payload.system_status.paper_tracking.open_positions }} open paper position{% if payload.system_status.paper_tracking.open_positions != 1 %}s{% endif %}.</p>
       </div>
-      <a class="rail-link" href="{% if next_fixture %}/matches/{{ next_fixture.fixture_id }}{% else %}/status{% endif %}">
-        Open {% if next_fixture %}fixture{% else %}status{% endif %} <span>-></span>
-      </a>
+      <a class="rail-link" href="/status">Open system status <span>-></span></a>
     </section>
   </aside>
+</section>
+
+<section class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Board support</p>
+      <h2>Next Fixtures</h2>
+    </div>
+    <a class="filter-button" href="/matches?status_bucket=next">Open full board</a>
+  </div>
+  <div class="match-table">
+    <div class="table-head">
+      <span>MATCH</span>
+      <span>BEST SIGNAL</span>
+      <span>EDGE</span>
+      <span></span>
+    </div>
+    {% for fixture in payload.next_matches %}
+      <a class="match-row" href="/matches/{{ fixture.fixture_id }}">
+        <span class="match-info">
+          <span class="club-dot {% if fixture.competition_id == 'ESP1' %}purple{% endif %}"></span>
+          <span>
+            <b>{{ fixture.home_team_name }} <small>vs</small> {{ fixture.away_team_name }}</b>
+            <em>{{ fixture.competition_name }} | {{ fixture.kickoff_local }}</em>
+          </span>
+        </span>
+        <span class="edge-cell">
+          <b>{{ fixture.market_signal.decision if fixture.market_signal else fixture.prediction_eligibility_status }}</b>
+          <small class="{% if fixture.market_signal and fixture.market_signal.decision == 'PRELIMINARY_CANDIDATE' %}positive{% else %}negative{% endif %}">
+            {% if fixture.market_signal %}
+              {{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}
+            {% else %}
+              {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
+            {% endif %}
+          </small>
+        </span>
+        <span class="prob-cell">
+          {% if fixture.market_signal and fixture.market_signal.edge is not none %}
+            <b>{{ "{:+.1%}".format(fixture.market_signal.edge|float) }}</b>
+            <span class="mini-bar"><i style="width: {{ "%.0f"|format(([fixture.market_signal.edge * 200, 100]|min) if fixture.market_signal.edge > 0 else 0) }}%"></i></span>
+          {% else %}
+            <b>--</b>
+            <span class="mini-bar"><i style="width: 0%"></i></span>
+          {% endif %}
+        </span>
+        <span class="row-arrow">→</span>
+      </a>
+    {% else %}
+      <div class="match-row">
+        <span class="match-info">
+          <span class="club-dot"></span>
+          <span>
+            <b>No upcoming fixtures are currently staged</b>
+            <em>{{ payload.system_status.fixture_feed.state }}</em>
+          </span>
+        </span>
+        <span class="edge-cell"><b>--</b></span>
+        <span class="prob-cell"><b>--</b><span class="mini-bar"><i style="width: 0%"></i></span></span>
+        <span class="row-arrow">·</span>
+      </div>
+    {% endfor %}
+  </div>
 </section>
 
 <section class="schedule-layout">
@@ -323,11 +273,7 @@
         {% endfor %}
       {% else %}
         <article class="empty-state">
-          {% if nearest %}
-            Next supported fixture: {{ nearest.home_team_name }} vs {{ nearest.away_team_name }} on {{ nearest.kickoff_local }}
-          {% else %}
-            No upcoming supported fixtures are currently available.
-          {% endif %}
+          No supported upcoming fixtures are currently staged.
         </article>
       {% endif %}
     </div>

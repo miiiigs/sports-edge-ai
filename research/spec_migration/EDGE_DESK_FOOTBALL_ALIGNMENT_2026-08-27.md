@@ -98,3 +98,26 @@ Remaining later-phase work is unchanged:
 - value integration
 - risk integration
 - dashboard presentation improvements
+
+## Phase 3A Best Picks Dashboard
+
+Phase 3A adds a picks-first main dashboard view without changing model math or re-running qualification logic in the UI.
+
+- Route B remains `ACTIVE`
+- Route A remains `REJECTED`
+- Agent 3 remains not implemented
+- the main dashboard now prioritizes qualified current-market picks with human-readable market labels
+- blocked, rejected, and no-bet rows remain available in deeper views instead of cluttering the main board
+- the external `Edge-Desk-Design-Pack.html` reference was not present in the repository or nearby project reference roots at implementation time, so the dashboard was refocused using the existing Football dashboard visual language rather than a new redesign
+
+Existing persisted fields already available for the next performance-tracking phase include:
+
+- `fixture_id`, `kickoff`, competition, home team, and away team context
+- `market`, `selection`, and `line`
+- `model_probability` and `model_fair_price`
+- `available_market_price`, `bookmaker`, `entry_snapshot_id`, and captured timestamps
+- `edge`, `minimum_acceptable_price`, decision status, and safeguard state
+- paper-trade ledger state including open and settled positions
+- decision history and Edge Desk shadow consensus history
+
+The next dashboard phase should focus on pick settlement, hit rate, ROI, and performance tracking rather than more presentation-layer qualification work.

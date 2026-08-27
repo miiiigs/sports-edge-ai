@@ -13,7 +13,7 @@ from sports_ai.dashboard import storage as dashboard_storage
 from sports_ai.dashboard.day12_rolling_xg import SOURCE_IDENTIFIER, build_xg_inspection
 from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FixtureProviderError, FootballDataOrgFixtureProvider
 from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture, normalize_text_key
-from sports_ai.dashboard.services import DashboardConfig, DashboardServices
+from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _humanize_market_selection
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
 from sports_ai.storage import football_edge_desk, football_paper_trading
 
@@ -274,6 +274,37 @@ def _market_snapshot(
         reference_designation=reference_designation,
         reference_rank=1 if reference_designation == "reference" else None,
     )
+
+
+def _xg_factory_for_fixtures(*fixtures: NormalizedFixture):
+    fixture_map = {fixture.fixture_id: fixture for fixture in fixtures}
+
+    def factory(row, prediction, snapshots):
+        fixture = fixture_map[str(row["fixture_id"])]
+        expected_home = float(prediction["expected_home_goals"])
+        expected_away = float(prediction["expected_away_goals"])
+
+        def _row(role, recent):
+            return {
+                "fixture_id": fixture.fixture_id,
+                "team_role": role,
+                "recent_xg_for_per_match": recent,
+                "matches_in_window": 5,
+                "as_of": "2026-05-24T20:00:00+00:00",
+                "window_start_at": "2026-04-01T20:00:00+00:00",
+                "window_end_at": "2026-05-24T20:00:00+00:00",
+                "source": SOURCE_IDENTIFIER,
+                "competition_id": str(row["competition_id"]),
+            }
+
+        rows = {
+            (fixture.fixture_id, "HOME"): _row("HOME", expected_home),
+            (fixture.fixture_id, "AWAY"): _row("AWAY", expected_away),
+        }
+        inspection = build_xg_inspection(rows)
+        return lambda: (rows, inspection)
+
+    return factory
 
 
 def test_api_football_normalization_maps_status_and_score():
@@ -1131,3 +1162,136 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
     )
 
     asyncio.run(services.shutdown())
+
+
+def test_best_pick_market_labels_are_human_readable() -> None:
+    assert _humanize_market_selection(
+        market_family="1x2",
+        selection="HOME",
+        line=None,
+        home_team_name="Arsenal",
+        away_team_name="Chelsea",
+    )["bet_label"] == "Arsenal to Win"
+    assert _humanize_market_selection(
+        market_family="btts",
+        selection="YES",
+        line=None,
+        home_team_name="Arsenal",
+        away_team_name="Chelsea",
+    )["bet_label"] == "Both Teams to Score - Yes"
+    assert _humanize_market_selection(
+        market_family="goals_total",
+        selection="OVER",
+        line=2.5,
+        home_team_name="Arsenal",
+        away_team_name="Chelsea",
+    )["bet_label"] == "Over 2.5 Goals"
+    assert _humanize_market_selection(
+        market_family="corner_total",
+        selection="OVER",
+        line=9.5,
+        home_team_name="Arsenal",
+        away_team_name="Chelsea",
+    )["bet_label"] == "Over 9.5 Corners"
+    assert _humanize_market_selection(
+        market_family="asian_handicap",
+        selection="HOME",
+        line=-0.5,
+        home_team_name="Arsenal",
+        away_team_name="Chelsea",
+    )["bet_label"] == "Arsenal -0.5"
+
+
+def test_dashboard_services_best_picks_use_qualified_current_truth(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
+    qualified_fixture = _fixture(fixture_id="fake:arsenal_chelsea")
+    config = replace(_dashboard_config(tmp_path), current_xg_connected=True, enable_odds_sync=True)
+    market_provider = FakeMarketProvider()
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([qualified_fixture]),
+        market_provider=market_provider,
+        xg_profile_factory=_xg_factory_for_fixtures(qualified_fixture),
+    )
+
+    asyncio.run(services.initialize())
+    market_provider.snapshots_by_fixture[qualified_fixture.fixture_id] = [
+        _market_snapshot(
+            fixture=qualified_fixture,
+            bookmaker="Pinnacle",
+            market="1x2",
+            selection="HOME",
+            decimal_odds=2.05,
+            reference_designation="reference",
+            provider_market_id="pin-home-1",
+        ),
+        _market_snapshot(
+            fixture=qualified_fixture,
+            bookmaker="Pinnacle",
+            market="1x2",
+            selection="DRAW",
+            decimal_odds=3.35,
+            reference_designation="reference",
+            provider_market_id="pin-draw-1",
+        ),
+        _market_snapshot(
+            fixture=qualified_fixture,
+            bookmaker="Pinnacle",
+            market="1x2",
+            selection="AWAY",
+            decimal_odds=3.95,
+            reference_designation="reference",
+            provider_market_id="pin-away-1",
+        ),
+        _market_snapshot(
+            fixture=qualified_fixture,
+            bookmaker="bet365",
+            market="1x2",
+            selection="HOME",
+            decimal_odds=10.0,
+            reference_designation="available",
+            provider_market_id="b365-home-1",
+        ),
+    ]
+    asyncio.run(services.sync_once())
+
+    dashboard_payload = services.get_dashboard_payload()
+    candidates_payload = services.get_candidates_payload()
+
+    assert dashboard_payload["best_picks_summary"]["count"] == 1
+    assert {row["fixture_id"] for row in dashboard_payload["best_picks"]} == {qualified_fixture.fixture_id}
+    assert candidates_payload["preliminary_candidates"]
+
+    candidate = candidates_payload["preliminary_candidates"][0]
+    best_pick = dashboard_payload["best_picks"][0]
+    assert best_pick["bet_label"] == "Arsenal to Win"
+    assert best_pick["model_probability"] == candidate["model_probability"]
+    assert best_pick["market_odds"] == candidate["best_available_price"]
+    assert best_pick["fair_odds"] == candidate["model_fair_decimal_price"]
+    assert best_pick["edge"] == candidate["settlement_aware_edge"]
+    assert best_pick["paper_qualification_state"] == "QUALIFIED"
+
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -> None:
+    fixture = _fixture()
+    app = create_app(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Best Picks of the Day" in response.text
+    assert "No qualified picks currently meet the model, value and risk requirements." in response.text
+    assert "Route B Composite" in response.text
+    assert "Route A Direct Classifier" in response.text
+    assert "REJECTED" in response.text
+    assert "Agent 3" in response.text
+    assert "NOT IMPLEMENTED" in response.text
+    assert "Agent 1" not in response.text
+    assert "Agent 2" not in response.text
