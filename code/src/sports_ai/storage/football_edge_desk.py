@@ -15,14 +15,21 @@ from ..agents.football.route_a_classifier import (
     ROUTE_A_CONSENSUS_VALID_FROM,
     ROUTE_A_CONSENSUS_VERSION,
     ROUTE_A_METHOD_FAMILY,
+    summarize_market_capabilities,
+    validate_route_a_artifact_payload,
+    validate_route_a_manifest_payload,
 )
 from ..locking import canonical_hash
 
 ROUTE_B_COMPOSITE_AGENT_ID = "ROUTE_B_COMPOSITE"
 ACTIVE_AGENT_STATUS = "ACTIVE"
+PENDING_AGENT_STATUS = "PENDING_INDEPENDENT_REVIEW"
+REJECTED_AGENT_STATUS = "REJECTED"
 CAPABILITY_SUPPORTED = "SUPPORTED"
 CAPABILITY_NOT_SUPPORTED = "NOT_SUPPORTED"
 CAPABILITY_INACTIVE = "INACTIVE"
+CAPABILITY_PENDING_REVIEW = "PENDING_REVIEW"
+CAPABILITY_REJECTED = "REJECTED"
 GLOBAL_CONFIG_SCOPE_KEY = "__ALL__"
 PREDICTION_STATUSES = {"PREDICTED", "ABSTAINED", "BLOCKED", "NOT_APPLICABLE"}
 CONSENSUS_STATUSES = {"PASSED", "FAILED", "INSUFFICIENT_AGENTS", "NOT_EVALUABLE"}
@@ -69,7 +76,7 @@ SCHEMA_STATEMENTS = (
         version_tag TEXT NOT NULL,
         name TEXT NOT NULL,
         method_family TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('ACTIVE')),
+        status TEXT NOT NULL CHECK(status IN ('ACTIVE', 'PENDING_INDEPENDENT_REVIEW', 'REJECTED')),
         created_at TEXT NOT NULL,
         metadata_json TEXT NOT NULL,
         UNIQUE(agent_id, version_tag)
@@ -82,7 +89,7 @@ SCHEMA_STATEMENTS = (
         agent_version_tag TEXT NOT NULL,
         market_family TEXT NOT NULL,
         version_tag TEXT NOT NULL,
-        capability_status TEXT NOT NULL CHECK(capability_status IN ('SUPPORTED', 'NOT_SUPPORTED', 'INACTIVE')),
+        capability_status TEXT NOT NULL CHECK(capability_status IN ('SUPPORTED', 'NOT_SUPPORTED', 'INACTIVE', 'PENDING_REVIEW', 'REJECTED')),
         valid_from TEXT NOT NULL,
         created_at TEXT NOT NULL,
         metadata_json TEXT NOT NULL,
@@ -333,13 +340,22 @@ def ensure_route_a_foundation(
     artifact: dict[str, Any] | None,
 ) -> None:
     ensure_schema_only(conn)
-    if artifact is None or artifact.get("overall_route_a_status") != "ACTIVE":
+    if artifact is None:
+        return
+    artifact_valid, _ = validate_route_a_artifact_payload(artifact)
+    runtime_manifest = dict(artifact.get("runtime_manifest") or {})
+    manifest_valid, _ = validate_route_a_manifest_payload(runtime_manifest) if runtime_manifest else (False, None)
+    if not artifact_valid or not manifest_valid:
         return
 
     created_at = str(artifact.get("generated_at") or ROUTE_A_CONSENSUS_VALID_FROM)
-    model_as_of = str(artifact.get("model_as_of") or created_at)
+    training_cutoff = str(artifact.get("training_cutoff") or created_at)
     artifact_id = None if artifact.get("artifact_id") is None else str(artifact["artifact_id"])
     validation = dict(artifact.get("validation") or {})
+    market_capabilities = summarize_market_capabilities(artifact)
+    overall_status = str(artifact.get("overall_route_a_status") or PENDING_AGENT_STATUS)
+    if overall_status not in {ACTIVE_AGENT_STATUS, PENDING_AGENT_STATUS, REJECTED_AGENT_STATUS}:
+        overall_status = PENDING_AGENT_STATUS
 
     with conn:
         conn.execute(
@@ -353,15 +369,17 @@ def ensure_route_a_foundation(
                 ROUTE_A_AGENT_VERSION_TAG,
                 ROUTE_A_AGENT_NAME,
                 ROUTE_A_METHOD_FAMILY,
-                ACTIVE_AGENT_STATUS,
+                overall_status,
                 created_at,
                 _json_dumps(
                     {
                         "shadow_mode": True,
                         "artifact_id": artifact_id,
-                        "artifact_version": artifact.get("artifact_version"),
-                        "model_as_of": model_as_of,
-                        "validation_status": validation.get("overall_route_a_status"),
+                        "schema_version": artifact.get("schema_version"),
+                        "model_bundle_version": artifact.get("model_bundle_version"),
+                        "training_cutoff": training_cutoff,
+                        "validation_status": validation.get("validation_status"),
+                        "review_status": validation.get("review_status"),
                     }
                 ),
             ),
@@ -371,6 +389,7 @@ def ensure_route_a_foundation(
             metadata = {"shadow_mode": True}
             if market_family == "goals_total":
                 metadata["supported_lines"] = [2.5]
+            capability_status = market_capabilities[market_family]
             conn.execute(
                 """
                 INSERT OR IGNORE INTO edge_desk_agent_market_capabilities (
@@ -382,10 +401,16 @@ def ensure_route_a_foundation(
                     ROUTE_A_AGENT_VERSION_TAG,
                     market_family,
                     ROUTE_A_AGENT_VERSION_TAG,
-                    CAPABILITY_SUPPORTED,
+                    capability_status,
                     created_at,
                     created_at,
-                    _json_dumps(metadata),
+                    _json_dumps(
+                        {
+                            **metadata,
+                            "artifact_id": artifact_id,
+                            "overall_route_a_status": overall_status,
+                        }
+                    ),
                 ),
             )
 
@@ -463,6 +488,14 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row["name"]) for row in rows}
 
 
+def _table_sql(conn: sqlite3.Connection, table_name: str) -> str:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return "" if row is None or row["sql"] is None else str(row["sql"])
+
+
 def _needs_phase1a_schema_rebuild(conn: sqlite3.Connection) -> bool:
     required_columns = {
         "edge_desk_agent_market_capabilities": {"agent_version_tag"},
@@ -470,9 +503,19 @@ def _needs_phase1a_schema_rebuild(conn: sqlite3.Connection) -> bool:
         "edge_desk_agent_predictions": {"agent_version_tag"},
         "edge_desk_consensus_evaluations": {"config_scope_key"},
     }
-    return any(
+    if any(
         _table_exists(conn, table_name) and not columns.issubset(_table_columns(conn, table_name))
         for table_name, columns in required_columns.items()
+    ):
+        return True
+    registry_sql = _table_sql(conn, "edge_desk_agent_registry")
+    capability_sql = _table_sql(conn, "edge_desk_agent_market_capabilities")
+    return (
+        _table_exists(conn, "edge_desk_agent_registry")
+        and "PENDING_INDEPENDENT_REVIEW" not in registry_sql
+    ) or (
+        _table_exists(conn, "edge_desk_agent_market_capabilities")
+        and "PENDING_REVIEW" not in capability_sql
     )
 
 

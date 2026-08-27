@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sqlite3
@@ -14,6 +15,11 @@ from typing import Any
 import numpy as np
 
 from ..agents.football.gap_ratings import GapConfigEntry, GapObservation, GapRatingsEngine
+from ..agents.football.route_a_classifier import (
+    validate_route_a_artifact_payload,
+    validate_route_a_manifest_payload,
+    verify_route_a_manifest_against_artifact,
+)
 from ..locking import canonical_hash
 from .models import TeamResolution, normalize_text_key, slugify, utc_now_iso
 from .team_aliases import classify_unresolved_team, resolve_provider_team_alias, suggest_canonical_candidates
@@ -43,6 +49,7 @@ GAP_MANIFEST_FILENAMES = {
 }
 DAY9_MANIFEST_PATTERN = "football_day9_scoreline_model_*_manifest.json"
 ROUTE_A_ARTIFACT_PATTERN = "football_route_a_direct_classifier_*_artifact.json"
+ROUTE_A_MANIFEST_PATTERN = "football_route_a_direct_classifier_*_manifest.json"
 TEAM_ALIAS_FILENAME = "football_team_aliases.json"
 SNAPSHOT_MODEL_VERSION = "football_dashboard_current_snapshot_v1"
 
@@ -246,6 +253,44 @@ def _latest_optional_json(base_dir: Path, pattern: str) -> tuple[dict[str, Any] 
     if not isinstance(payload, dict):
         return None, None, "route a artifact must deserialize to a JSON object"
     return payload, str(path), None
+
+
+def _load_route_a_verified_bundle(
+    base_dir: Path,
+) -> tuple[dict[str, Any] | None, str | None, str | None, str | None]:
+    manifest, manifest_path, manifest_error = _latest_optional_json(base_dir, ROUTE_A_MANIFEST_PATTERN)
+    if manifest_path is None:
+        return None, None, None, None
+    if manifest_error is not None:
+        return None, None, manifest_path, manifest_error
+    assert manifest is not None
+    manifest_valid, manifest_validation_error = validate_route_a_manifest_payload(manifest)
+    if not manifest_valid:
+        return None, None, manifest_path, manifest_validation_error
+    artifact_reference = Path(str(manifest["artifact_reference"]))
+    if not artifact_reference.exists():
+        return None, None, manifest_path, "manifest-pinned route a artifact is missing"
+    try:
+        artifact = _load_json(artifact_reference)
+    except Exception as exc:  # pragma: no cover - defensive only
+        return None, None, manifest_path, f"{type(exc).__name__}: {exc}"
+    if not isinstance(artifact, dict):
+        return None, None, manifest_path, "route a artifact must deserialize to a JSON object"
+    artifact_valid, artifact_validation_error = validate_route_a_artifact_payload(artifact)
+    if not artifact_valid:
+        return None, None, manifest_path, artifact_validation_error
+    artifact_sha256 = hashlib.sha256(artifact_reference.read_bytes()).hexdigest()
+    bundle_valid, bundle_validation_error = verify_route_a_manifest_against_artifact(
+        manifest=manifest,
+        artifact=artifact,
+        artifact_path=artifact_reference,
+        artifact_sha256=artifact_sha256,
+    )
+    if not bundle_valid:
+        return None, None, manifest_path, bundle_validation_error
+    verified_artifact = dict(artifact)
+    verified_artifact["runtime_manifest"] = manifest
+    return verified_artifact, str(artifact_reference), manifest_path, None
 
 
 def _load_gap_manifests(research_root: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -508,12 +553,13 @@ def build_current_football_model_snapshot(
     manifests, manifest_paths = _load_gap_manifests(research_root)
     day9_manifest, day9_manifest_path = _load_day9_manifest(research_root)
     manifest_paths["day9"] = day9_manifest_path
-    route_a_artifact, route_a_artifact_path, route_a_artifact_error = _latest_optional_json(
-        research_root,
-        ROUTE_A_ARTIFACT_PATTERN,
+    route_a_artifact, route_a_artifact_path, route_a_manifest_path, route_a_artifact_error = _load_route_a_verified_bundle(
+        research_root
     )
     if route_a_artifact_path is not None:
         manifest_paths["route_a_artifact"] = route_a_artifact_path
+    if route_a_manifest_path is not None:
+        manifest_paths["route_a_manifest"] = route_a_manifest_path
 
     supported_competitions = {
         str(detail["competition_id"])
@@ -715,6 +761,7 @@ def build_current_football_model_snapshot(
             "route_a": {
                 "artifact_loaded": route_a_artifact is not None,
                 "artifact_path": route_a_artifact_path,
+                "manifest_path": route_a_manifest_path,
                 "artifact_error": route_a_artifact_error,
                 "overall_status": None if route_a_artifact is None else route_a_artifact.get("overall_route_a_status"),
                 "artifact_id": None if route_a_artifact is None else route_a_artifact.get("artifact_id"),

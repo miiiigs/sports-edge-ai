@@ -400,44 +400,37 @@ def test_dashboard_services_shadow_edge_desk_records_route_a_and_route_b_without
         edge_decisions = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture.fixture_id)
 
     assert edge_predictions
-    assert {row["agent_id"] for row in active_agents} == {
-        football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID,
-        "ROUTE_A_DIRECT_CLASSIFIER",
-    }
+    assert {row["agent_id"] for row in active_agents} == {football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID}
     assert any(row["agent_id"] == football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID for row in edge_predictions)
     assert any(row["agent_id"] == "ROUTE_A_DIRECT_CLASSIFIER" for row in edge_predictions)
-    assert all(row["prediction_status"] == "PREDICTED" for row in edge_predictions)
+    assert all(
+        row["prediction_status"] == "PREDICTED"
+        for row in edge_predictions
+        if row["agent_id"] == football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID
+    )
     assert {
         row["market_family"]
         for row in edge_predictions
         if row["agent_id"] == "ROUTE_A_DIRECT_CLASSIFIER"
     } == {"btts", "goals_total"}
-    assert edge_consensus
-    assert any(
-        row["market_family"] == "btts"
-        and set(row["participating_agents"]) == {"ROUTE_A_DIRECT_CLASSIFIER", football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID}
-        and row["status"] in {"PASSED", "FAILED"}
-        for row in edge_consensus
+    assert all(
+        row["prediction_status"] == "BLOCKED"
+        and row["block_reason"] == "MARKET_REJECTED"
+        for row in edge_predictions
+        if row["agent_id"] == "ROUTE_A_DIRECT_CLASSIFIER"
     )
+    assert edge_consensus
+    assert any(row["market_family"] == "btts" and row["status"] == "INSUFFICIENT_AGENTS" for row in edge_consensus)
     assert any(
-        row["market_family"] == "goals_total"
-        and row["line"] == 2.5
-        and set(row["participating_agents"]) == {"ROUTE_A_DIRECT_CLASSIFIER", football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID}
-        and row["status"] in {"PASSED", "FAILED"}
+        row["market_family"] == "goals_total" and row["line"] == 2.5 and row["status"] == "INSUFFICIENT_AGENTS"
         for row in edge_consensus
     )
     assert all(
         row["status"] == "INSUFFICIENT_AGENTS"
         for row in edge_consensus
-        if row["market_family"] in {"1x2", "corner_total", "asian_handicap"}
     )
     assert edge_decisions
-    assert any(row["decision_status"] == "CONSENSUS_PASSED" for row in edge_decisions if row["market_family"] in {"btts", "goals_total"})
-    assert all(
-        row["decision_status"] == "NO_BET"
-        for row in edge_decisions
-        if row["market_family"] in {"1x2", "corner_total", "asian_handicap"}
-    )
+    assert all(row["decision_status"] == "NO_BET" for row in edge_decisions)
     status = services.get_system_status()
     assert status["storage"]["edge_desk_shadow"]["available"] is True
     assert status["storage"]["edge_desk_shadow"]["state"] == "READY"
@@ -1124,7 +1117,7 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
         for row in edge_consensus
     )
     assert any(
-        row["market_family"] == "btts" and row["status"] in {"PASSED", "FAILED"}
+        row["market_family"] == "btts" and row["status"] == "INSUFFICIENT_AGENTS"
         for row in edge_consensus
     )
     assert edge_decisions
@@ -1133,7 +1126,7 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
         for row in edge_decisions
     )
     assert any(
-        row["market_family"] in {"btts", "goals_total"} and row["decision_status"] in {"NO_BET", "CONSENSUS_PASSED"}
+        row["market_family"] in {"btts", "goals_total"} and row["decision_status"] == "NO_BET"
         for row in edge_decisions
     )
 

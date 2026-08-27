@@ -1,61 +1,56 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
 import numpy as np
 
 from sports_ai.agents.football import route_a_classifier
-from sports_ai.experiments.football_day8_goal_conversion import Day8JoinedRow
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _artifact_path() -> Path:
+    return _repo_root() / "research" / "football_research" / "football_route_a_direct_classifier_2026-08-27_artifact.json"
+
+
+def _manifest_path() -> Path:
+    return _repo_root() / "research" / "football_research" / "football_route_a_direct_classifier_2026-08-27_manifest.json"
+
+
 def _route_a_artifact() -> dict[str, object]:
-    path = _repo_root() / "research" / "football_research" / "football_route_a_direct_classifier_2026-08-27_artifact.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(_artifact_path().read_text(encoding="utf-8"))
 
 
-def test_route_a_training_rows_reject_as_of_after_kickoff(monkeypatch) -> None:
-    row = Day8JoinedRow(
-        event_id="event-1",
-        competition_id="ENG1",
-        competition_name="Premier League",
-        season_code="2526",
-        division_code="E0",
-        match_date="2026-08-27",
-        kickoff_time="20:00",
-        as_of="2026-08-27T20:00:01+00:00",
-        home_team_id="home",
-        away_team_id="away",
-        gap_model_version_shots="shots_v1",
-        gap_model_version_shots_on_target="sot_v1",
-        gap_model_version_corners="corners_v1",
-        predicted_home_shots=14.0,
-        predicted_away_shots=10.0,
-        predicted_home_shots_on_target=5.0,
-        predicted_away_shots_on_target=3.0,
-        predicted_home_corners=6.0,
-        predicted_away_corners=4.0,
-        home_team_pre_match_competition_matches=10,
-        away_team_pre_match_competition_matches=10,
-        actual_home_goals=2,
-        actual_away_goals=1,
-        actual_home_corners=6,
-        actual_away_corners=4,
+def _route_a_manifest() -> dict[str, object]:
+    return json.loads(_manifest_path().read_text(encoding="utf-8"))
+
+
+def _runtime_artifact(
+    *,
+    validation_status: str = route_a_classifier.ROUTE_A_VALIDATION_STATUS_PASSED,
+    review_status: str = route_a_classifier.ROUTE_A_REVIEW_STATUS_APPROVED,
+    btts_status: str = route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED,
+    ou25_status: str = route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED,
+) -> dict[str, object]:
+    artifact = _route_a_artifact()
+    artifact["validation"]["validation_status"] = validation_status
+    artifact["validation"]["review_status"] = review_status
+    artifact["validation"]["market_validation_status"] = {
+        route_a_classifier.MARKET_KEY_BTTS: btts_status,
+        route_a_classifier.MARKET_KEY_OU25: ou25_status,
+    }
+    artifact["markets"][route_a_classifier.MARKET_KEY_BTTS]["market_validation_status"] = btts_status
+    artifact["markets"][route_a_classifier.MARKET_KEY_OU25]["market_validation_status"] = ou25_status
+    artifact["overall_route_a_status"] = (
+        route_a_classifier.ROUTE_A_REVIEW_STATUS_PENDING
+        if review_status != route_a_classifier.ROUTE_A_REVIEW_STATUS_APPROVED
+        else "ACTIVE"
     )
-
-    monkeypatch.setattr(route_a_classifier, "_load_day7_selected_gap_results", lambda **kwargs: ({}, {}))
-    monkeypatch.setattr(route_a_classifier, "_join_day7_predictions", lambda **kwargs: [row])
-
-    try:
-        route_a_classifier.build_route_a_training_rows(research_db_path="unused.sqlite")
-    except ValueError as exc:
-        assert "chronology violation" in str(exc)
-    else:  # pragma: no cover - explicit failure branch
-        raise AssertionError("expected chronology violation")
+    return artifact
 
 
 def test_route_a_logistic_training_is_deterministic() -> None:
@@ -76,15 +71,19 @@ def test_route_a_logistic_training_is_deterministic() -> None:
     assert np.allclose(first, second)
 
 
-def test_route_a_artifact_is_active_for_btts_and_ou25() -> None:
+def test_committed_route_a_artifact_is_rejected_after_clean_remediation() -> None:
     artifact = _route_a_artifact()
 
-    assert artifact["overall_route_a_status"] == "ACTIVE"
-    assert artifact["validation"]["market_results"]["btts"]["accepted"] is True
-    assert artifact["validation"]["market_results"]["goals_total_2.5"]["accepted"] is True
+    assert artifact["schema_version"] == route_a_classifier.ROUTE_A_ARTIFACT_SCHEMA_VERSION
+    assert artifact["validation"]["validation_status"] == route_a_classifier.ROUTE_A_VALIDATION_STATUS_FAILED
+    assert artifact["validation"]["market_validation_status"] == {
+        route_a_classifier.MARKET_KEY_BTTS: route_a_classifier.ROUTE_A_MARKET_STATUS_REJECTED,
+        route_a_classifier.MARKET_KEY_OU25: route_a_classifier.ROUTE_A_MARKET_STATUS_REJECTED,
+    }
+    assert artifact["overall_route_a_status"] == route_a_classifier.ROUTE_A_RUNTIME_STATUS_REJECTED
 
 
-def test_route_a_calibration_windows_do_not_look_forward() -> None:
+def test_route_a_clean_windows_do_not_look_forward() -> None:
     artifact = _route_a_artifact()
     season_order = {season: index for index, season in enumerate(artifact["validation"]["seasons"])}
 
@@ -95,11 +94,69 @@ def test_route_a_calibration_windows_do_not_look_forward() -> None:
                 assert season_order[train_season] < test_index
             for calibration_season in fold["calibration_seasons"]:
                 assert season_order[calibration_season] < test_index
-                assert calibration_season in fold["train_seasons"]
 
 
-def test_route_a_predicts_probabilities_within_unit_interval() -> None:
+def test_route_a_manifest_and_artifact_contract_validate() -> None:
     artifact = _route_a_artifact()
+    manifest = _route_a_manifest()
+
+    artifact_valid, artifact_error = route_a_classifier.validate_route_a_artifact_payload(artifact)
+    manifest_valid, manifest_error = route_a_classifier.validate_route_a_manifest_payload(manifest)
+    bundle_valid, bundle_error = route_a_classifier.verify_route_a_manifest_against_artifact(
+        manifest=manifest,
+        artifact=artifact,
+        artifact_path=_artifact_path(),
+        artifact_sha256=manifest["artifact_sha256"],
+    )
+
+    assert artifact_valid is True, artifact_error
+    assert manifest_valid is True, manifest_error
+    assert bundle_valid is True, bundle_error
+
+
+def test_checksum_mismatch_blocks_manifest_verification() -> None:
+    bundle_valid, bundle_error = route_a_classifier.verify_route_a_manifest_against_artifact(
+        manifest=_route_a_manifest(),
+        artifact=_route_a_artifact(),
+        artifact_path=_artifact_path(),
+        artifact_sha256="0" * 64,
+    )
+
+    assert bundle_valid is False
+    assert bundle_error == "artifact checksum mismatch"
+
+
+def test_fake_active_json_cannot_validate_as_runtime_artifact() -> None:
+    active_only = {
+        "overall_route_a_status": "ACTIVE",
+        "validation": {"overall_route_a_status": "ACTIVE"},
+    }
+    artifact_valid, artifact_error = route_a_classifier.validate_route_a_artifact_payload(active_only)
+
+    assert artifact_valid is False
+    assert artifact_error == "artifact schema_version mismatch"
+
+
+def test_rejected_markets_block_route_a_predictions() -> None:
+    artifact = _route_a_artifact()
+
+    for market_key in (route_a_classifier.MARKET_KEY_BTTS, route_a_classifier.MARKET_KEY_OU25):
+        payload = route_a_classifier.predict_route_a_market(
+            artifact,
+            market_key=market_key,
+            competition_id="ENG1",
+            predicted_home_shots=13.2,
+            predicted_away_shots=10.9,
+            predicted_home_corners=5.6,
+            predicted_away_corners=4.3,
+            as_of="2026-08-27T00:00:00+00:00",
+        )
+        assert payload["prediction_status"] == "BLOCKED"
+        assert payload["block_reason"] == "MARKET_REJECTED"
+
+
+def test_route_a_predicts_with_approved_runtime_contract() -> None:
+    artifact = _runtime_artifact()
 
     btts = route_a_classifier.predict_route_a_market(
         artifact,
@@ -128,26 +185,8 @@ def test_route_a_predicts_probabilities_within_unit_interval() -> None:
         assert 0.0 <= payload["negative_probability"] <= 1.0
 
 
-def test_route_a_unsupported_market_is_not_applicable() -> None:
-    artifact = _route_a_artifact()
-
-    payload = route_a_classifier.predict_route_a_market(
-        artifact,
-        market_key="1x2",
-        competition_id="ENG1",
-        predicted_home_shots=13.2,
-        predicted_away_shots=10.9,
-        predicted_home_corners=5.6,
-        predicted_away_corners=4.3,
-        as_of="2026-08-27T00:00:00+00:00",
-    )
-
-    assert payload["prediction_status"] == "NOT_APPLICABLE"
-    assert payload["block_reason"] == "MARKET_NOT_SUPPORTED"
-
-
-def test_route_a_missing_gap_inputs_block_prediction() -> None:
-    artifact = _route_a_artifact()
+def test_route_a_missing_gap_inputs_block_prediction_when_runtime_is_approved() -> None:
+    artifact = _runtime_artifact()
 
     payload = route_a_classifier.predict_route_a_market(
         artifact,
@@ -164,15 +203,39 @@ def test_route_a_missing_gap_inputs_block_prediction() -> None:
     assert payload["block_reason"] == "MISSING_GAP_FEATURES"
 
 
-def test_route_a_market_capability_truth_matches_active_artifact() -> None:
-    artifact = _route_a_artifact()
+def test_route_a_market_capability_truth_matches_pending_and_rejected_states() -> None:
+    pending_artifact = _runtime_artifact(
+        review_status=route_a_classifier.ROUTE_A_REVIEW_STATUS_PENDING,
+    )
+    rejected_artifact = _route_a_artifact()
 
-    capabilities = route_a_classifier.summarize_market_capabilities(artifact)
-
-    assert capabilities == {
+    assert route_a_classifier.summarize_market_capabilities(pending_artifact) == {
         "1x2": "NOT_SUPPORTED",
-        "btts": "SUPPORTED",
-        "goals_total": "SUPPORTED",
+        "btts": route_a_classifier.ROUTE_A_RUNTIME_STATUS_PENDING,
+        "goals_total": route_a_classifier.ROUTE_A_RUNTIME_STATUS_PENDING,
         "asian_handicap": "NOT_SUPPORTED",
         "corner_total": "NOT_SUPPORTED",
     }
+    assert route_a_classifier.summarize_market_capabilities(rejected_artifact) == {
+        "1x2": "NOT_SUPPORTED",
+        "btts": route_a_classifier.ROUTE_A_RUNTIME_STATUS_REJECTED,
+        "goals_total": route_a_classifier.ROUTE_A_RUNTIME_STATUS_REJECTED,
+        "asian_handicap": "NOT_SUPPORTED",
+        "corner_total": "NOT_SUPPORTED",
+    }
+
+
+def test_route_a_unsupported_market_is_not_applicable() -> None:
+    payload = route_a_classifier.predict_route_a_market(
+        _runtime_artifact(),
+        market_key="1x2",
+        competition_id="ENG1",
+        predicted_home_shots=13.2,
+        predicted_away_shots=10.9,
+        predicted_home_corners=5.6,
+        predicted_away_corners=4.3,
+        as_of="2026-08-27T00:00:00+00:00",
+    )
+
+    assert payload["prediction_status"] == "NOT_APPLICABLE"
+    assert payload["block_reason"] == "MARKET_NOT_SUPPORTED"

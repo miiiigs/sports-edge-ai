@@ -29,3 +29,15 @@ This matrix is used to decide which ideas are honestly testable before building 
 | serve_percentage | tennis | A_BLIND | yes | yes | tennis stats feeds | yes | medium | unknown | Pack ATP loop | T03 | PACK_V1_PRIORITY |
 | return_percentage | tennis | A_BLIND | yes | yes | tennis stats feeds | yes | medium | unknown | Pack ATP loop | T04 | PACK_V1_PRIORITY |
 | hold_break_profile | tennis | A_BLIND | yes | yes | derived tennis stats | yes | medium | unknown | Pack ATP loop | T05 | PACK_V1_PRIORITY |
+
+## Football Route A Note
+
+Updated: `2026-08-27`
+
+The Football Route A direct-classification lane was revalidated using only internal Day 7 process-stat features with nested historical GAP fitting and a manifest-gated runtime contract.
+
+Result on Thursday, August 27, 2026:
+
+- no additional external data source was required for the remediation
+- the clean point-in-time rebuild still rejected both Route A markets
+- Route B remains the only active Football runtime agent
