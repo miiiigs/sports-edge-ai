@@ -1,0 +1,26 @@
+{
+  "agent_code": "ROUTE_A_DIRECT_CLASSIFIER",
+  "artifact_reference": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_route_a_direct_classifier_2026-08-27_artifact.json",
+  "artifact_sha256": "0a09382612115ef41077dd075e41ee1ce78869ed73c731a4844b37a5d1666589",
+  "created_at": "2026-08-27T18:38:50+00:00",
+  "feature_version": "route_a_gap_shots_corners_nested_pit_v2",
+  "market_validation_status": {
+    "btts": "REJECTED",
+    "goals_total_2.5": "REJECTED"
+  },
+  "model_bundle_version": "football_route_a_direct_classifier_bundle_v2",
+  "overall_route_a_status": "REJECTED",
+  "review_status": "PENDING_INDEPENDENT_REVIEW",
+  "schema_version": "football_route_a_direct_classifier_manifest_v2",
+  "stable_model_id": "route_a_model_81df7cf6e60f03fb52a7a8a3ec9c66db8bf0ddae6764c69f1197ae7b9c02977e",
+  "supported_markets": [
+    "btts",
+    "goals_total_2.5"
+  ],
+  "technical_artifacts": {
+    "artifact_json": "C:\\dev\\sports-edge-ai\\research\\football_research\\football_route_a_direct_classifier_2026-08-27_artifact.json",
+    "validation_markdown": "C:\\dev\\sports-edge-ai\\research\\product_outputs\\football\\route_a\\ROUTE_A_VALIDATION.md"
+  },
+  "training_cutoff": "2025-05-25T20:00:00+00:00",
+  "validation_status": "FAILED"
+}

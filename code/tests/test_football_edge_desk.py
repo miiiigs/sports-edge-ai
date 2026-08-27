@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
+from sports_ai.agents.football import route_a_classifier
 from sports_ai.storage import football_edge_desk
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
 def _fixture(fixture_id: str = "fake:arsenal_chelsea") -> dict[str, object]:
@@ -124,6 +131,146 @@ def _blocked_prediction() -> dict[str, object]:
         "team_resolution": {
             "home": {"canonical_team_name": "Arsenal"},
             "away": {"canonical_team_name": "Chelsea"},
+        },
+    }
+
+
+def _route_a_activation_artifact(
+    *,
+    active: bool = True,
+    review_status: str | None = None,
+    btts_status: str | None = None,
+    ou25_status: str | None = None,
+    validation_status: str | None = None,
+) -> dict[str, object]:
+    path = _repo_root() / "research" / "football_research" / "football_route_a_direct_classifier_2026-08-27_artifact.json"
+    artifact = json.loads(path.read_text(encoding="utf-8"))
+    resolved_validation_status = (
+        validation_status
+        if validation_status is not None
+        else (
+            route_a_classifier.ROUTE_A_VALIDATION_STATUS_PASSED
+            if active
+            else route_a_classifier.ROUTE_A_VALIDATION_STATUS_FAILED
+        )
+    )
+    resolved_review_status = (
+        review_status
+        if review_status is not None
+        else (
+            route_a_classifier.ROUTE_A_REVIEW_STATUS_APPROVED
+            if active
+            else route_a_classifier.ROUTE_A_REVIEW_STATUS_PENDING
+        )
+    )
+    resolved_btts_status = (
+        btts_status
+        if btts_status is not None
+        else (
+            route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED
+            if active
+            else route_a_classifier.ROUTE_A_MARKET_STATUS_REJECTED
+        )
+    )
+    resolved_ou25_status = (
+        ou25_status
+        if ou25_status is not None
+        else (
+            route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED
+            if active
+            else route_a_classifier.ROUTE_A_MARKET_STATUS_REJECTED
+        )
+    )
+    manifest = {
+        "schema_version": route_a_classifier.ROUTE_A_MANIFEST_SCHEMA_VERSION,
+        "agent_code": route_a_classifier.ROUTE_A_AGENT_ID,
+        "artifact_reference": str(path),
+        "artifact_sha256": "0" * 64,
+        "model_bundle_version": route_a_classifier.ROUTE_A_MODEL_BUNDLE_VERSION,
+        "feature_version": route_a_classifier.ROUTE_A_FEATURE_VERSION,
+        "training_cutoff": artifact["training_cutoff"],
+        "validation_status": resolved_validation_status,
+        "market_validation_status": {
+            route_a_classifier.MARKET_KEY_BTTS: resolved_btts_status,
+            route_a_classifier.MARKET_KEY_OU25: resolved_ou25_status,
+        },
+        "review_status": resolved_review_status,
+        "supported_markets": list(route_a_classifier.SUPPORTED_MARKETS),
+        "created_at": artifact["generated_at"],
+        "stable_model_id": artifact["stable_model_id"],
+        "overall_route_a_status": (
+            "ACTIVE"
+            if resolved_validation_status == route_a_classifier.ROUTE_A_VALIDATION_STATUS_PASSED
+            and resolved_review_status == route_a_classifier.ROUTE_A_REVIEW_STATUS_APPROVED
+            and resolved_btts_status == route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED
+            and resolved_ou25_status == route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED
+            else (
+                route_a_classifier.ROUTE_A_REVIEW_STATUS_PENDING
+                if resolved_review_status != route_a_classifier.ROUTE_A_REVIEW_STATUS_APPROVED
+                else route_a_classifier.ROUTE_A_RUNTIME_STATUS_REJECTED
+            )
+        ),
+    }
+    artifact["validation"]["validation_status"] = manifest["validation_status"]
+    artifact["validation"]["review_status"] = manifest["review_status"]
+    artifact["validation"]["market_validation_status"] = dict(manifest["market_validation_status"])
+    artifact["markets"][route_a_classifier.MARKET_KEY_BTTS]["market_validation_status"] = manifest["market_validation_status"][route_a_classifier.MARKET_KEY_BTTS]
+    artifact["markets"][route_a_classifier.MARKET_KEY_OU25]["market_validation_status"] = manifest["market_validation_status"][route_a_classifier.MARKET_KEY_OU25]
+    artifact["overall_route_a_status"] = manifest["overall_route_a_status"]
+    artifact["runtime_manifest"] = manifest
+    return artifact
+
+
+def _shadow_bundle_prediction(
+    *,
+    route_b_market_rows: list[dict[str, object]],
+    route_a_market_rows: list[dict[str, object]] | None = None,
+    route_a_status: str = "PREDICTED",
+    route_a_blockers: list[str] | None = None,
+    prediction_version: str = "shadow_bundle_v1",
+) -> dict[str, object]:
+    return {
+        "prediction_id": f"prediction_{prediction_version}",
+        "fixture_id": "fake:arsenal_chelsea",
+        "generated_at": "2026-08-27T13:00:00+00:00",
+        "model_as_of": "2026-08-27T12:59:00+00:00",
+        "model_snapshot_id": "snapshot_v1",
+        "prediction_version": prediction_version,
+        "version_key": prediction_version,
+        "prediction_status": "READY",
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "home_team_name": "Arsenal",
+        "away_team_name": "Chelsea",
+        "kickoff_utc": "2026-08-28T20:00:00+00:00",
+        "edge_desk_shadow_bundle": {
+            "agents": [
+                {
+                    "agent_id": football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID,
+                    "agent_version_tag": football_edge_desk.FOUNDATION_VERSION,
+                    "prediction_status": "PREDICTED",
+                    "generated_at": "2026-08-27T13:00:00+00:00",
+                    "model_snapshot_id": "snapshot_v1",
+                    "source_prediction_version": prediction_version,
+                    "market_rows": route_b_market_rows,
+                },
+                {
+                    "agent_id": route_a_classifier.ROUTE_A_AGENT_ID,
+                    "agent_version_tag": route_a_classifier.ROUTE_A_AGENT_VERSION_TAG,
+                    "prediction_status": route_a_status,
+                    "generated_at": "2026-08-27T13:00:00+00:00",
+                    "model_snapshot_id": "snapshot_v1",
+                    "source_prediction_version": prediction_version,
+                    "model_version": route_a_classifier.ROUTE_A_AGENT_VERSION_TAG,
+                    "model_as_of": "2026-08-27T12:59:00+00:00",
+                    "market_rows": [] if route_a_market_rows is None else route_a_market_rows,
+                    "market_contexts": [
+                        {"market_family": "btts", "line": None},
+                        {"market_family": "goals_total", "line": 2.5},
+                    ],
+                    "blockers": list(route_a_blockers or []),
+                },
+            ]
         },
     }
 
@@ -333,6 +480,50 @@ def test_edge_desk_registry_contains_only_route_b_active_agent(tmp_path):
 
     assert [agent["agent_id"] for agent in agents] == [football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID]
     assert agents[0]["method_family"] == "GAP_TO_XG_TO_DIXON_COLES_TO_PRICING"
+
+
+def test_route_a_foundation_rejected_artifact_does_not_become_active(tmp_path) -> None:
+    with football_edge_desk.connect(tmp_path / "edge_desk.sqlite") as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=False))
+        active_agents = football_edge_desk.list_active_agents(conn)
+        route_a_capabilities = football_edge_desk.list_market_capabilities(conn, agent_id=route_a_classifier.ROUTE_A_AGENT_ID)
+        route_a_configs = [
+            row
+            for row in conn.execute("SELECT * FROM edge_desk_consensus_configs WHERE config_id = ?", (route_a_classifier.ROUTE_A_CONSENSUS_CONFIG_ID,))
+        ]
+
+    assert [agent["agent_id"] for agent in active_agents] == [
+        football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID,
+    ]
+    assert {(row["market_family"], row["capability_status"]) for row in route_a_capabilities} == {
+        ("1x2", football_edge_desk.CAPABILITY_NOT_SUPPORTED),
+        ("asian_handicap", football_edge_desk.CAPABILITY_NOT_SUPPORTED),
+        ("btts", football_edge_desk.CAPABILITY_REJECTED),
+        ("corner_total", football_edge_desk.CAPABILITY_NOT_SUPPORTED),
+        ("goals_total", football_edge_desk.CAPABILITY_REJECTED),
+    }
+    assert {row["market_family"] for row in route_a_configs} == {"btts", "goals_total"}
+
+
+def test_route_a_foundation_approved_artifact_activates_in_isolation(tmp_path) -> None:
+    with football_edge_desk.connect(tmp_path / "edge_desk.sqlite") as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=True))
+        active_agents = football_edge_desk.list_active_agents(conn)
+        route_a_capabilities = football_edge_desk.list_market_capabilities(conn, agent_id=route_a_classifier.ROUTE_A_AGENT_ID)
+
+    assert [agent["agent_id"] for agent in active_agents] == [
+        football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID,
+        route_a_classifier.ROUTE_A_AGENT_ID,
+    ]
+    assert {(row["market_family"], row["capability_status"]) for row in route_a_capabilities} == {
+        ("1x2", football_edge_desk.CAPABILITY_NOT_SUPPORTED),
+        ("asian_handicap", football_edge_desk.CAPABILITY_NOT_SUPPORTED),
+        ("btts", football_edge_desk.CAPABILITY_SUPPORTED),
+        ("corner_total", football_edge_desk.CAPABILITY_NOT_SUPPORTED),
+        ("goals_total", football_edge_desk.CAPABILITY_SUPPORTED),
+    }
 
 
 def test_route_b_output_shadows_into_agent_prediction_rows_and_is_idempotent(tmp_path):
@@ -735,6 +926,271 @@ def test_passed_consensus_is_recorded_as_pending_value_and_risk_not_qualified(tm
     assert stored_consensus["status"] == "PASSED"
     assert stored_decision["decision_status"] == "CONSENSUS_PASSED"
     assert stored_decision["reason_code"] == "VALUE_RISK_PENDING"
+
+
+def test_route_a_and_route_b_same_direction_pass_consensus_once_per_market(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = _shadow_bundle_prediction(
+        route_b_market_rows=[
+            _market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72),
+            _market_row(market_family="btts", selection="NO", probability=0.42, fair_price=2.38),
+        ],
+        route_a_market_rows=[
+            _market_row(
+                market_family="btts",
+                selection="YES",
+                probability=0.56,
+                fair_price=1.79,
+                pricing_model_version="ROUTE_A_LOGISTIC_V1_BTTS",
+            ),
+            _market_row(
+                market_family="btts",
+                selection="NO",
+                probability=0.44,
+                fair_price=2.27,
+                pricing_model_version="ROUTE_A_LOGISTIC_V1_BTTS",
+            ),
+        ],
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=True))
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+        decision_rows = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture["fixture_id"])
+
+    assert len(consensus_rows) == 1
+    assert consensus_rows[0]["status"] == "PASSED"
+    assert consensus_rows[0]["reason"] == "CONSENSUS_PASSED"
+    assert consensus_rows[0]["agreed_selection"] == "YES"
+    assert consensus_rows[0]["probability_spread"] == pytest.approx(0.02)
+    assert len(decision_rows) == 1
+    assert decision_rows[0]["decision_status"] == "CONSENSUS_PASSED"
+    assert decision_rows[0]["reason_code"] == "VALUE_RISK_PENDING"
+
+
+def test_route_a_and_route_b_direction_disagreement_fails_consensus(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = _shadow_bundle_prediction(
+        route_b_market_rows=[
+            _market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72),
+            _market_row(market_family="btts", selection="NO", probability=0.42, fair_price=2.38),
+        ],
+        route_a_market_rows=[
+            _market_row(
+                market_family="btts",
+                selection="YES",
+                probability=0.43,
+                fair_price=2.33,
+                pricing_model_version="ROUTE_A_LOGISTIC_V1_BTTS",
+            ),
+            _market_row(
+                market_family="btts",
+                selection="NO",
+                probability=0.57,
+                fair_price=1.75,
+                pricing_model_version="ROUTE_A_LOGISTIC_V1_BTTS",
+            ),
+        ],
+        prediction_version="shadow_bundle_direction_fail",
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=True))
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+        decision_rows = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture["fixture_id"])
+
+    assert consensus_rows[0]["status"] == "FAILED"
+    assert consensus_rows[0]["reason"] == "CONSENSUS_DIRECTIONAL_DISAGREEMENT"
+    assert decision_rows[0]["decision_status"] == "NO_BET"
+    assert decision_rows[0]["reason_code"] == "CONSENSUS_DIRECTIONAL_DISAGREEMENT"
+
+
+def test_route_a_and_route_b_spread_above_threshold_fails_consensus(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = _shadow_bundle_prediction(
+        route_b_market_rows=[
+            _market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72),
+            _market_row(market_family="btts", selection="NO", probability=0.42, fair_price=2.38),
+        ],
+        route_a_market_rows=[
+            _market_row(
+                market_family="btts",
+                selection="YES",
+                probability=0.50,
+                fair_price=2.0,
+                pricing_model_version="ROUTE_A_LOGISTIC_V1_BTTS",
+            ),
+            _market_row(
+                market_family="btts",
+                selection="NO",
+                probability=0.50,
+                fair_price=2.0,
+                pricing_model_version="ROUTE_A_LOGISTIC_V1_BTTS",
+            ),
+        ],
+        prediction_version="shadow_bundle_spread_fail",
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=True))
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+        decision_rows = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture["fixture_id"])
+
+    assert consensus_rows[0]["status"] == "FAILED"
+    assert consensus_rows[0]["reason"] == "CONSENSUS_PROBABILITY_SPREAD"
+    assert consensus_rows[0]["probability_spread"] == pytest.approx(0.08)
+    assert decision_rows[0]["decision_status"] == "NO_BET"
+    assert decision_rows[0]["reason_code"] == "CONSENSUS_PROBABILITY_SPREAD"
+
+
+@pytest.mark.parametrize(
+    ("route_a_probability", "expected_status"),
+    [
+        (0.520001, "PASSED"),
+        (0.520000, "PASSED"),
+        (0.519999, "FAILED"),
+    ],
+)
+def test_route_a_consensus_spread_boundary_is_exact(tmp_path, route_a_probability: float, expected_status: str) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = _shadow_bundle_prediction(
+        route_b_market_rows=[
+            _market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72),
+            _market_row(market_family="btts", selection="NO", probability=0.42, fair_price=2.38),
+        ],
+        route_a_market_rows=[
+            _market_row(
+                market_family="btts",
+                selection="YES",
+                probability=route_a_probability,
+                fair_price=1.0 / route_a_probability,
+                pricing_model_version="ROUTE_A_LOGISTIC_V2_BTTS",
+            ),
+            _market_row(
+                market_family="btts",
+                selection="NO",
+                probability=1.0 - route_a_probability,
+                fair_price=1.0 / (1.0 - route_a_probability),
+                pricing_model_version="ROUTE_A_LOGISTIC_V2_BTTS",
+            ),
+        ],
+        prediction_version=f"boundary_{route_a_probability:.6f}",
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=True))
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+
+    assert len(consensus_rows) == 1
+    assert consensus_rows[0]["status"] == expected_status
+    assert consensus_rows[0]["probability_spread"] == pytest.approx(abs(0.58 - route_a_probability))
+
+
+def test_pending_review_route_a_foundation_does_not_enable_voting(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = _shadow_bundle_prediction(
+        route_b_market_rows=[
+            _market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72),
+            _market_row(market_family="btts", selection="NO", probability=0.42, fair_price=2.38),
+        ],
+        route_a_market_rows=None,
+        route_a_status="BLOCKED",
+        route_a_blockers=["MODEL_REVIEW_PENDING"],
+        prediction_version="route_a_pending_review",
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(
+            conn,
+            artifact=_route_a_activation_artifact(
+                active=False,
+                review_status=route_a_classifier.ROUTE_A_REVIEW_STATUS_PENDING,
+                validation_status=route_a_classifier.ROUTE_A_VALIDATION_STATUS_PASSED,
+                btts_status=route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED,
+                ou25_status=route_a_classifier.ROUTE_A_MARKET_STATUS_VALIDATED,
+            ),
+        )
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+        route_a_capabilities = football_edge_desk.list_market_capabilities(conn, agent_id=route_a_classifier.ROUTE_A_AGENT_ID)
+
+    assert any(row["capability_status"] == football_edge_desk.CAPABILITY_PENDING_REVIEW for row in route_a_capabilities if row["market_family"] == "btts")
+    assert consensus_rows[0]["status"] == "INSUFFICIENT_AGENTS"
+
+
+def test_fake_active_json_cannot_register_route_a_foundation(tmp_path) -> None:
+    with football_edge_desk.connect(tmp_path / "edge_desk.sqlite") as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(
+            conn,
+            artifact={"overall_route_a_status": "ACTIVE", "validation": {"overall_route_a_status": "ACTIVE"}},
+        )
+        active_agents = football_edge_desk.list_active_agents(conn)
+        route_a_capabilities = football_edge_desk.list_market_capabilities(conn, agent_id=route_a_classifier.ROUTE_A_AGENT_ID)
+
+    assert [agent["agent_id"] for agent in active_agents] == [football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID]
+    assert route_a_capabilities == []
+
+
+def test_route_a_blocked_row_is_persisted_without_false_consensus_pass(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = _shadow_bundle_prediction(
+        route_b_market_rows=[
+            _market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72),
+            _market_row(market_family="btts", selection="NO", probability=0.42, fair_price=2.38),
+        ],
+        route_a_market_rows=None,
+        route_a_status="BLOCKED",
+        route_a_blockers=["MODEL_ARTIFACT_MISSING"],
+        prediction_version="shadow_bundle_route_a_blocked",
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=True))
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+        decision_rows = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture["fixture_id"])
+        prediction_rows = football_edge_desk.fetch_agent_predictions(conn, fixture_id=fixture["fixture_id"])
+
+    assert any(row["agent_id"] == route_a_classifier.ROUTE_A_AGENT_ID and row["prediction_status"] == "BLOCKED" for row in prediction_rows)
+    assert consensus_rows[0]["status"] == "NOT_EVALUABLE"
+    assert consensus_rows[0]["reason"] == "AGENT_BLOCKED"
+    assert decision_rows[0]["decision_status"] == "NO_BET"
+    assert decision_rows[0]["reason_code"] == "AGENT_BLOCKED"
+
+
+def test_one_agent_markets_remain_insufficient_after_route_a_activation(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.ensure_route_a_foundation(conn, artifact=_route_a_activation_artifact(active=True))
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=_ready_prediction())
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+
+    one_x_two = [row for row in consensus_rows if row["market_family"] == "1x2"]
+    goals_total_35 = [row for row in consensus_rows if row["market_family"] == "goals_total" and row["line"] == 3.5]
+
+    assert one_x_two and all(row["status"] == "INSUFFICIENT_AGENTS" for row in one_x_two)
+    assert goals_total_35 and all(row["status"] == "INSUFFICIENT_AGENTS" for row in goals_total_35)
 
 
 def test_direct_sql_constraints_reject_invalid_domain_values_and_orphans(tmp_path):
