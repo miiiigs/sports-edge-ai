@@ -1,281 +1,262 @@
 {% set counts = payload.system_status.fixture_feed.counts %}
-{% set best_pick = payload.best_picks[0] if payload.best_picks else none %}
+{% set fixture_state = payload.system_status.current_fixture_state %}
+{% set market_sync = payload.system_status.market_sync %}
+{% set nearest_fixture = payload.system_status.fixture_feed.nearest_supported_fixture %}
+{% set fixture_feed_ready = payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] %}
+{% set market_feed_ready = payload.system_status.odds_feed.state in ['CONNECTED', 'READY', 'IDLE', 'NO_CURRENT_EVENTS'] %}
 
-<section class="page-heading">
+<section class="page-heading edge-desk-heading">
   <div>
-    <p class="eyebrow cyan-text">{{ payload.system_status.current_time_local }}</p>
-    <h1>Best Picks of the Day.</h1>
-    <p class="subhead">Qualified Football bets appear first, with probability, market price, fair price, edge, and honest bet status shown in plain language.</p>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Football Today</p>
+    <h1>Best Picks of the Day</h1>
+    <p class="subhead desk-page-subhead">The Football homepage now follows the design pack's glance-first desk layout while preserving the same pick, edge, paper, and agent truth underneath.</p>
   </div>
   <a class="refresh-button" href="/candidates">Open candidates view</a>
 </section>
 
-<section class="kpi-grid">
-  <article class="kpi">
-    <span class="kpi-label">QUALIFIED PICKS</span>
-    <strong>{{ payload.best_picks_summary.count }}</strong>
-    <small>Existing model, value, and risk truth only</small>
-  </article>
-  <article class="kpi">
-    <span class="kpi-label">TODAY'S BOARD</span>
-    <strong>{{ counts.today }}</strong>
-    <small>{{ counts.predictions_ready }} prediction-ready fixtures</small>
-  </article>
-  <article class="kpi">
-    <span class="kpi-label">PAPER ENTRIES</span>
-    <strong>{{ payload.system_status.market_sync.paper_entry_count }}</strong>
-    <small>Qualified picks already persisted to paper tracking</small>
-  </article>
-  <article class="kpi kpi-muted">
-    <span class="kpi-label">MARKET SYNC</span>
-    <strong>{{ payload.system_status.market_sync.state }}</strong>
-    <small>{{ payload.system_status.odds_feed.state }} odds feed</small>
-  </article>
-</section>
-
-<section class="workspace-grid best-picks-layout">
-  <section class="watchlist-panel best-picks-panel">
-    <div class="panel-heading">
-      <div>
-        <p class="eyebrow">Main board</p>
-        <h2>Best Picks of the Day</h2>
-      </div>
-      <span class="pill">{{ payload.best_picks_summary.source }}</span>
-    </div>
-
-    {% if best_pick %}
-      <article class="featured-pick">
-        <div class="featured-pick-top">
-          <div>
-            <p class="eyebrow cyan-text">{{ best_pick.competition_name }}</p>
-            <h3>{{ best_pick.home_team_name }} vs {{ best_pick.away_team_name }}</h3>
-            <p class="featured-subhead">{{ best_pick.kickoff_local }} | {{ best_pick.market_label }}</p>
-          </div>
-          <div class="featured-badges">
-            <span class="state-badge state-badge-positive">{{ best_pick.bet_state }}</span>
-            <span class="state-badge">{{ best_pick.risk_status }}</span>
-          </div>
-        </div>
-
-        <div class="featured-pick-main">
-          <div class="featured-bet">
-            <span class="eyebrow">Selection</span>
-            <strong>{{ best_pick.bet_label }}</strong>
-            <small>{{ best_pick.bookmaker or 'Market source unavailable' }}</small>
-          </div>
-
-          <div class="featured-metrics">
-            <div>
-              <span>Probability</span>
-              <strong>{{ "{:.1%}".format(best_pick.model_probability|float) }}</strong>
-            </div>
-            <div>
-              <span>Market Odds</span>
-              <strong>{{ "{:.2f}".format(best_pick.market_odds|float) if best_pick.market_odds is not none else 'N/A' }}</strong>
-            </div>
-            <div>
-              <span>Fair Odds</span>
-              <strong>{{ "{:.2f}".format(best_pick.fair_odds|float) }}</strong>
-            </div>
-            <div>
-              <span>Edge</span>
-              <strong>{{ "{:+.2%}".format(best_pick.edge|float) if best_pick.edge is not none else 'N/A' }}</strong>
-            </div>
-          </div>
-        </div>
-
-        <div class="featured-pick-footer">
-          <span>Risk / status: <b>{{ best_pick.risk_summary }}</b></span>
-          <a class="details-button" href="/matches/{{ best_pick.fixture_id }}">View fixture <span>-></span></a>
-        </div>
-      </article>
-
-      {% if payload.best_picks|length > 1 %}
-        <div class="pick-grid">
-          {% for pick in payload.best_picks[1:] %}
-            <article class="pick-card">
-              <div class="pick-card-top">
-                <div>
-                  <p class="eyebrow">{{ pick.competition_name }}</p>
-                  <h3>{{ pick.home_team_name }} vs {{ pick.away_team_name }}</h3>
-                  <p>{{ pick.kickoff_local }}</p>
-                </div>
-                <span class="state-badge state-badge-positive">{{ pick.bet_state }}</span>
-              </div>
-              <strong class="pick-label">{{ pick.bet_label }}</strong>
-              <div class="pick-card-metrics">
-                <div><span>Probability</span><b>{{ "{:.1%}".format(pick.model_probability|float) }}</b></div>
-                <div><span>Market</span><b>{{ "{:.2f}".format(pick.market_odds|float) if pick.market_odds is not none else 'N/A' }}</b></div>
-                <div><span>Fair</span><b>{{ "{:.2f}".format(pick.fair_odds|float) }}</b></div>
-                <div><span>Edge</span><b>{{ "{:+.2%}".format(pick.edge|float) if pick.edge is not none else 'N/A' }}</b></div>
-              </div>
-              <p class="pick-card-status">{{ pick.risk_summary }}</p>
-              <a class="rail-link" href="/matches/{{ pick.fixture_id }}">Open fixture <span>-></span></a>
-            </article>
-          {% endfor %}
-        </div>
+<section class="edge-desk-today">
+  <div class="desk-topline">
+    <span class="desk-logo">EDGE <b>DESK</b></span>
+    <span class="desk-date">{{ payload.system_status.current_time_local }}</span>
+    <span class="desk-top-status {% if fixture_feed_ready and market_feed_ready %}desk-top-status-live{% else %}desk-top-status-muted{% endif %}">
+      {% if fixture_feed_ready and market_feed_ready %}
+        ALL FEEDS LIVE
+      {% elif fixture_feed_ready %}
+        FIXTURES LIVE · MARKET LIMITED
+      {% else %}
+        FIXTURE FEED DEGRADED
       {% endif %}
-    {% else %}
-      <article class="empty-state best-picks-empty">
-        <strong>No qualified picks currently meet the model, value and risk requirements.</strong>
-        <p>Blocked, rejected, and no-bet rows remain available in the existing deeper views, but they are intentionally excluded from this main board.</p>
-      </article>
-    {% endif %}
-  </section>
-
-  <aside class="right-rail">
-    <section class="rail-panel truth-panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Agent truth</p>
-          <h2>Football model state</h2>
-        </div>
-        <span class="cyan-text">LIVE</span>
-      </div>
-      <div class="truth-list">
-        {% for agent in payload.agent_statuses %}
-          <div class="truth-row">
-            <div>
-              <strong>{{ agent.label }}</strong>
-              <small>{{ agent.note }}</small>
-            </div>
-            <span class="state-badge {% if agent.status == 'ACTIVE' %}state-badge-positive{% elif agent.status == 'REJECTED' %}state-badge-negative{% endif %}">
-              {{ agent.status }}
-            </span>
-          </div>
-        {% endfor %}
-      </div>
-      <p class="truth-note">No fake multi-agent consensus is shown here. Route B remains the only active Football predictive agent in runtime.</p>
-    </section>
-
-    <section class="rail-panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Board status</p>
-          <h2>Current operating truth</h2>
-        </div>
-      </div>
-      <div class="health-list">
-        <div><span><i class="status-dot"></i> Fixture feed</span><b>{{ payload.system_status.fixture_feed.state }}</b></div>
-        <div><span><i class="status-dot"></i> Prediction engine</span><b>{{ payload.system_status.prediction_engine.state }}</b></div>
-        <div><span><i class="status-dot"></i> Odds feed</span><b>{{ payload.system_status.odds_feed.state }}</b></div>
-        <div><span><i class="status-dot"></i> Safeguards</span><b>{{ payload.system_status.safeguards.state }}</b></div>
-      </div>
-      <div class="ops-callout">
-        <strong>Current board</strong>
-        <p>{{ payload.best_picks_summary.count }} qualified pick{% if payload.best_picks_summary.count != 1 %}s{% endif %} on the live board, {{ payload.system_status.market_sync.decision_count }} priced decision row{% if payload.system_status.market_sync.decision_count != 1 %}s{% endif %}, and {{ payload.system_status.paper_tracking.open_positions }} open paper position{% if payload.system_status.paper_tracking.open_positions != 1 %}s{% endif %}.</p>
-      </div>
-      <a class="rail-link" href="/status">Open system status <span>-></span></a>
-    </section>
-  </aside>
-</section>
-
-<section class="section-block">
-  <div class="section-heading">
-    <div>
-      <p class="eyebrow">Board support</p>
-      <h2>Next Fixtures</h2>
-    </div>
-    <a class="filter-button" href="/matches?status_bucket=next">Open full board</a>
+    </span>
+    <span class="desk-chip">Sport: <b>Football</b></span>
+    <span class="desk-chip">Agent: <b>Route B</b></span>
   </div>
-  <div class="match-table">
-    <div class="table-head">
-      <span>MATCH</span>
-      <span>BEST SIGNAL</span>
-      <span>EDGE</span>
-      <span></span>
-    </div>
-    {% for fixture in payload.next_matches %}
-      <a class="match-row" href="/matches/{{ fixture.fixture_id }}">
-        <span class="match-info">
-          <span class="club-dot {% if fixture.competition_id == 'ESP1' %}purple{% endif %}"></span>
-          <span>
-            <b>{{ fixture.home_team_name }} <small>vs</small> {{ fixture.away_team_name }}</b>
-            <em>{{ fixture.competition_name }} | {{ fixture.kickoff_local }}</em>
-          </span>
-        </span>
-        <span class="edge-cell">
-          <b>{{ fixture.market_signal.decision if fixture.market_signal else fixture.prediction_eligibility_status }}</b>
-          <small class="{% if fixture.market_signal and fixture.market_signal.decision == 'PRELIMINARY_CANDIDATE' %}positive{% else %}negative{% endif %}">
-            {% if fixture.market_signal %}
-              {{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}
-            {% else %}
-              {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
-            {% endif %}
-          </small>
-        </span>
-        <span class="prob-cell">
-          {% if fixture.market_signal and fixture.market_signal.edge is not none %}
-            <b>{{ "{:+.1%}".format(fixture.market_signal.edge|float) }}</b>
-            <span class="mini-bar"><i style="width: {{ "%.0f"|format(([fixture.market_signal.edge * 200, 100]|min) if fixture.market_signal.edge > 0 else 0) }}%"></i></span>
-          {% else %}
-            <b>--</b>
-            <span class="mini-bar"><i style="width: 0%"></i></span>
-          {% endif %}
-        </span>
-        <span class="row-arrow">→</span>
-      </a>
-    {% else %}
-      <div class="match-row">
-        <span class="match-info">
-          <span class="club-dot"></span>
-          <span>
-            <b>No upcoming fixtures are currently staged</b>
-            <em>{{ payload.system_status.fixture_feed.state }}</em>
-          </span>
-        </span>
-        <span class="edge-cell"><b>--</b></span>
-        <span class="prob-cell"><b>--</b><span class="mini-bar"><i style="width: 0%"></i></span></span>
-        <span class="row-arrow">·</span>
-      </div>
+
+  <div class="desk-kpi-strip" role="group" aria-label="Today's card">
+    {% for metric in payload.glance_metrics %}
+      <article class="desk-kpi">
+        <div class="desk-kpi-label">{{ metric.label }}</div>
+        <div class="desk-kpi-value">{{ metric.value }}</div>
+        <div class="desk-kpi-note">{{ metric.note }}</div>
+      </article>
     {% endfor %}
   </div>
-</section>
 
-<section class="schedule-layout">
-  <section class="section-block">
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">Same-day board</p>
-        <h2>Today</h2>
+  <div class="desk-main-grid">
+    <section class="desk-panel desk-panel-primary">
+      <div class="desk-panel-head">
+        <div>
+          <span class="desk-panel-title">Today's Picks</span>
+          <span class="desk-panel-note">sorted by kickoff · real desk decisions only</span>
+        </div>
+        <span class="desk-panel-meta">{{ payload.today_working_summary.bet_count }} BET / {{ payload.today_working_summary.no_bet_count }} NO BET</span>
       </div>
-      <span>{{ payload.today|length }} matches</span>
-    </div>
-    <div class="card-grid">
-      {% if payload.today %}
-        {% for fixture in payload.today %}
-          {% include "_match_card.html" %}
-        {% endfor %}
+
+      {% if payload.best_picks %}
+        <div class="desk-best-strip" aria-label="Best bets">
+          {% for pick in payload.best_picks[:3] %}
+            <a class="desk-best-link" href="/matches/{{ pick.fixture_id }}">
+              <span class="desk-best-tag">BEST BET {{ loop.index }}</span>
+              <strong>{{ pick.bet_label }}</strong>
+              <small>{{ pick.home_team_name }} vs {{ pick.away_team_name }} · {{ "{:+.2%}".format(pick.edge|float) if pick.edge is not none else 'N/A' }}</small>
+            </a>
+          {% endfor %}
+        </div>
       {% else %}
-        <article class="empty-state">
-          {% if payload.system_status.fixture_feed.last_error %}
-            {{ payload.system_status.fixture_feed.last_error }}
-          {% else %}
-            No supported same-day fixtures are currently staged.
-          {% endif %}
+        <div class="desk-best-empty">
+          <strong>No qualified BET rows are currently available.</strong>
+          <p>{{ payload.best_picks_summary.empty_message }}</p>
+        </div>
+      {% endif %}
+
+      {% if payload.today_working_rows %}
+        <div class="desk-table-wrap">
+          <table class="desk-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Match</th>
+                <th>Market / Pick</th>
+                <th class="num">AI %</th>
+                <th class="num">Odds</th>
+                <th class="num">Impl. %</th>
+                <th class="num">Edge</th>
+                <th>Confidence / Risk</th>
+                <th>Desk</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in payload.today_working_rows %}
+                <tr class="{% if not row.is_actionable %}desk-row-dim{% endif %}{% if row.is_featured %} desk-row-featured{% endif %}">
+                  <td class="desk-time">{{ row.kickoff_time_local }}</td>
+                  <td class="desk-match-cell">
+                    <a class="desk-match-link" href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+                    <span class="desk-cell-sub">{{ row.competition_name }}</span>
+                  </td>
+                  <td class="desk-market-cell">
+                    <span>{{ row.market_label }}</span>
+                    <b>{{ row.bet_label }}</b>
+                  </td>
+                  <td class="num">{{ "{:.1%}".format(row.model_probability|float) }}</td>
+                  <td class="num">{{ "{:.2f}".format(row.market_odds|float) if row.market_odds is not none else 'N/A' }}</td>
+                  <td class="num">{{ "{:.1%}".format(row.implied_probability|float) if row.implied_probability is not none else 'N/A' }}</td>
+                  <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">
+                    {{ "{:+.2%}".format(row.edge|float) if row.edge is not none else 'N/A' }}
+                  </td>
+                  <td class="desk-risk-cell">
+                    <span class="desk-confidence">{{ row.confidence_label }}</span>
+                    <small>{{ row.risk_summary }}</small>
+                  </td>
+                  <td class="desk-decision-cell">
+                    <span class="desk-pill {% if row.is_actionable %}desk-pill-bet{% else %}desk-pill-nobet{% endif %}">{{ row.desk_label }}</span>
+                    {% if row.desk_note %}
+                      <small>{{ row.desk_note }}</small>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <span class="desk-pill {% if row.status_tone == 'live' %}desk-pill-live{% elif row.status_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">
+                      {{ row.status_label }}
+                    </span>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <article class="empty-state desk-empty-state">
+          <strong>{{ payload.today_working_summary.empty_message }}</strong>
+          <p>No fake desk rows are generated when current market evaluations are unavailable.</p>
         </article>
       {% endif %}
+    </section>
+
+    <aside class="desk-rail">
+      <section class="desk-panel">
+        <div class="desk-panel-head">
+          <div>
+            <span class="desk-panel-title">Model State</span>
+            <span class="desk-panel-note">runtime truth</span>
+          </div>
+        </div>
+        <div class="desk-rail-list">
+          {% for agent in payload.agent_statuses %}
+            <div class="desk-rail-row">
+              <div>
+                <strong>{{ agent.label }}</strong>
+                <small>{{ agent.note }}</small>
+              </div>
+              <span class="desk-pill {% if agent.status == 'ACTIVE' %}desk-pill-bet{% elif agent.status == 'REJECTED' %}desk-pill-lost{% else %}desk-pill-final{% endif %}">{{ agent.status }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="desk-panel">
+        <div class="desk-panel-head">
+          <div>
+            <span class="desk-panel-title">Board Context</span>
+            <span class="desk-panel-note">cheap, truthful support only</span>
+          </div>
+        </div>
+        <div class="desk-context-list">
+          <div><span>Today fixtures</span><b>{{ fixture_state.today_count }}</b></div>
+          <div><span>Decision rows</span><b>{{ market_sync.decision_count }}</b></div>
+          <div><span>Paper entries</span><b>{{ market_sync.paper_entry_count }}</b></div>
+          <div><span>Open paper</span><b>{{ payload.system_status.paper_tracking.open_positions }}</b></div>
+        </div>
+        {% if nearest_fixture %}
+          <div class="desk-mini-callout">
+            <span class="desk-panel-title">Nearest supported fixture</span>
+            <strong>{{ nearest_fixture.home_team_name }} vs {{ nearest_fixture.away_team_name }}</strong>
+            <small>{{ nearest_fixture.kickoff_local }} · {{ nearest_fixture.prediction_status }}</small>
+          </div>
+        {% endif %}
+        <a class="rail-link" href="/status">Open system status <span>-></span></a>
+      </section>
+    </aside>
+  </div>
+</section>
+
+<section class="desk-secondary-grid">
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head">
+      <div>
+        <span class="desk-panel-title">Next Fixtures</span>
+        <span class="desk-panel-note">below-the-fold board context</span>
+      </div>
+      <a class="filter-button" href="/matches?status_bucket=next">Open full board</a>
+    </div>
+    <div class="match-table">
+      <div class="table-head">
+        <span>Match</span>
+        <span>Best Signal</span>
+        <span>Edge</span>
+        <span></span>
+      </div>
+      {% for fixture in payload.next_matches %}
+        <a class="match-row" href="/matches/{{ fixture.fixture_id }}">
+          <span class="match-info">
+            <span class="club-dot {% if fixture.competition_id == 'ESP1' %}purple{% endif %}"></span>
+            <span>
+              <b>{{ fixture.home_team_name }} <small>vs</small> {{ fixture.away_team_name }}</b>
+              <em>{{ fixture.competition_name }} | {{ fixture.kickoff_local }}</em>
+            </span>
+          </span>
+          <span class="edge-cell">
+            <b>{{ fixture.market_signal.decision if fixture.market_signal else fixture.prediction_eligibility_status }}</b>
+            <small class="{% if fixture.market_signal and fixture.market_signal.decision == 'PRELIMINARY_CANDIDATE' %}positive{% else %}negative{% endif %}">
+              {% if fixture.market_signal %}
+                {{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}
+              {% else %}
+                {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
+              {% endif %}
+            </small>
+          </span>
+          <span class="prob-cell">
+            {% if fixture.market_signal and fixture.market_signal.edge is not none %}
+              <b>{{ "{:+.1%}".format(fixture.market_signal.edge|float) }}</b>
+              <span class="mini-bar"><i style="width: {{ "%.0f"|format(([fixture.market_signal.edge * 200, 100]|min) if fixture.market_signal.edge > 0 else 0) }}%"></i></span>
+            {% else %}
+              <b>--</b>
+              <span class="mini-bar"><i style="width: 0%"></i></span>
+            {% endif %}
+          </span>
+          <span class="row-arrow">-></span>
+        </a>
+      {% else %}
+        <div class="match-row">
+          <span class="match-info">
+            <span class="club-dot"></span>
+            <span>
+              <b>No upcoming fixtures are currently staged</b>
+              <em>{{ payload.system_status.fixture_feed.state }}</em>
+            </span>
+          </span>
+          <span class="edge-cell"><b>--</b></span>
+          <span class="prob-cell"><b>--</b><span class="mini-bar"><i style="width: 0%"></i></span></span>
+          <span class="row-arrow">.</span>
+        </div>
+      {% endfor %}
     </div>
   </section>
 
-  <section class="section-block">
-    <div class="section-heading">
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head">
       <div>
-        <p class="eyebrow">Forward horizon</p>
-        <h2>Upcoming</h2>
+        <span class="desk-panel-title">Desk Funnel</span>
+        <span class="desk-panel-note">current counts only</span>
       </div>
-      <span>{{ payload.upcoming|length }} matches</span>
     </div>
-    <div class="card-grid">
-      {% if payload.upcoming %}
-        {% for fixture in payload.upcoming %}
-          {% include "_match_card.html" %}
-        {% endfor %}
-      {% else %}
-        <article class="empty-state">
-          No supported upcoming fixtures are currently staged.
+    <div class="desk-funnel-grid">
+      {% for item in payload.desk_funnel %}
+        <article class="desk-funnel-step">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+          <small>{{ item.note }}</small>
         </article>
-      {% endif %}
+      {% endfor %}
     </div>
+    <p class="desk-funnel-note">Deeper settlement history, hit rate, P/L, ROI, and calibration stay deferred to the later analytics phase.</p>
   </section>
 </section>

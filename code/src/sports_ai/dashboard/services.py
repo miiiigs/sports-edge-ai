@@ -212,6 +212,11 @@ def _humanize_pick_status(row: dict[str, Any]) -> tuple[str, str]:
     return ("BET" if row.get("paper_entry_eligible") else "NO BET", " · ".join(note for note in notes if note))
 
 
+def _humanize_row_reason_codes(row: dict[str, Any]) -> str:
+    reason_codes = [str(code).replace("_", " ").title() for code in (row.get("reason_codes") or [])[:2]]
+    return " / ".join(reason_codes)
+
+
 @dataclass(frozen=True)
 class DashboardConfig:
     repo_root: Path
@@ -2129,6 +2134,124 @@ class DashboardServices:
             ),
         )
 
+    def _working_row_status(self, fixture: dict[str, Any]) -> tuple[str, str]:
+        status = str(fixture.get("status") or "")
+        if status in FIXTURE_LIVE_STATUSES:
+            elapsed_minute = fixture.get("elapsed_minute")
+            if elapsed_minute is not None:
+                try:
+                    minute = int(elapsed_minute)
+                except (TypeError, ValueError):
+                    minute = None
+                if minute is not None:
+                    return (f"LIVE {minute}'", "live")
+            return ("LIVE", "live")
+        if status == FIXTURE_STATUS_FINISHED:
+            return ("FINAL", "final")
+        return ("PENDING", "pending")
+
+    def _build_today_working_rows(self, fixture_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        today_fixture_map = {
+            str(row["fixture_id"]): self.serialize_fixture_row(row)
+            for row in self._filter_fixture_rows(bucket="today", fixture_rows=fixture_rows)
+        }
+        working_rows: list[dict[str, Any]] = []
+        for evaluation in self._market_evaluation_map().values():
+            for row in evaluation.get("decision_rows") or []:
+                if row.get("decision") not in {"PRELIMINARY_CANDIDATE", "NO_BET"}:
+                    continue
+                fixture = today_fixture_map.get(str(row["fixture_id"]))
+                if fixture is None:
+                    continue
+                if str(fixture.get("status")) in FIXTURE_TERMINAL_STATUSES:
+                    continue
+                labels = _humanize_market_selection(
+                    market_family=str(row["market_family"]),
+                    selection=str(row["selection"]),
+                    line=None if row.get("line") is None else float(row["line"]),
+                    home_team_name=str(fixture["home_team_name"]),
+                    away_team_name=str(fixture["away_team_name"]),
+                )
+                desk_label, risk_summary = _humanize_pick_status(row)
+                status_label, status_tone = self._working_row_status(fixture)
+                market_odds = None if row.get("best_available_price") is None else float(row["best_available_price"])
+                implied_probability = None
+                if market_odds is not None and market_odds > 0:
+                    implied_probability = 1.0 / market_odds
+                working_rows.append(
+                    {
+                        "fixture_id": str(row["fixture_id"]),
+                        "kickoff_utc": str(fixture["kickoff_utc"]),
+                        "kickoff_local": str(fixture["kickoff_local"]),
+                        "kickoff_time_local": parse_iso_datetime(str(fixture["kickoff_utc"]))
+                        .astimezone(ZoneInfo(self.config.display_timezone))
+                        .strftime("%H:%M"),
+                        "competition_name": str(fixture["competition_name"]),
+                        "home_team_name": str(fixture["home_team_name"]),
+                        "away_team_name": str(fixture["away_team_name"]),
+                        "market_label": labels["market_label"],
+                        "bet_label": labels["bet_label"],
+                        "selection_label": labels["selection_label"],
+                        "model_probability": float(row["model_probability"]),
+                        "market_odds": market_odds,
+                        "implied_probability": implied_probability,
+                        "edge": None if row.get("settlement_aware_edge") is None else float(row["settlement_aware_edge"]),
+                        "market_freshness": None if row.get("market_freshness") is None else str(row["market_freshness"]),
+                        "confidence_label": "Qualified" if row.get("paper_entry_eligible") else "Tracked",
+                        "risk_summary": risk_summary,
+                        "desk_label": desk_label,
+                        "desk_note": _humanize_row_reason_codes(row),
+                        "status_label": status_label,
+                        "status_tone": status_tone,
+                        "is_actionable": bool(row.get("paper_entry_eligible")),
+                        "is_featured": False,
+                    }
+                )
+        working_rows.sort(
+            key=lambda row: (
+                row["kickoff_utc"],
+                0 if row["is_actionable"] else 1,
+                -float(row.get("edge") or 0.0),
+                str(row["fixture_id"]),
+                str(row["bet_label"]),
+            )
+        )
+        for row in working_rows:
+            if row["is_actionable"]:
+                row["is_featured"] = True
+                break
+        return working_rows
+
+    @staticmethod
+    def _glance_metrics(
+        *,
+        analysed_count: int,
+        working_rows: list[dict[str, Any]],
+        approved_count: int,
+        paper_entry_count: int,
+        live_count: int,
+        pending_count: int,
+    ) -> list[dict[str, str]]:
+        return [
+            {"label": "Analysed", "value": str(analysed_count), "note": "today fixtures"},
+            {"label": "Predictions", "value": str(len(working_rows)), "note": "desk rows"},
+            {"label": "Approved", "value": str(approved_count), "note": "qualified"},
+            {"label": "Suggested Bets", "value": str(paper_entry_count), "note": "paper tracked"},
+            {"label": "Live", "value": str(live_count), "note": "in play"},
+            {"label": "Pending", "value": str(pending_count), "note": "awaiting kickoff"},
+        ]
+
+    @staticmethod
+    def _desk_funnel(*, working_rows: list[dict[str, Any]], paper_entry_count: int) -> list[dict[str, str]]:
+        bet_count = sum(1 for row in working_rows if row["is_actionable"])
+        no_bet_count = sum(1 for row in working_rows if not row["is_actionable"])
+        return [
+            {"label": "Desk rows", "value": str(len(working_rows)), "note": "today working surface"},
+            {"label": "Suggested bets", "value": str(paper_entry_count), "note": "paper entries created"},
+            {"label": "BET rows", "value": str(bet_count), "note": "actionable now"},
+            {"label": "NO BET rows", "value": str(no_bet_count), "note": "tracked, not actionable"},
+        ]
+
     def get_dashboard_payload(self) -> dict[str, Any]:
         fixture_rows = self._all_fixtures_with_predictions()
         live_rows = [self.serialize_fixture_row(row) for row in self._filter_fixture_rows(bucket="live", fixture_rows=fixture_rows)]
@@ -2148,6 +2271,11 @@ class DashboardServices:
             if row.get("prediction") and row["prediction"].get("prediction_status") == PREDICTION_STATUS_READY
         ][:6]
         best_picks = self._build_best_pick_rows(fixture_rows)
+        today_working_rows = self._build_today_working_rows(fixture_rows)
+        system_status = self.get_system_status()
+        paper_entry_count = int(system_status["market_sync"].get("paper_entry_count") or 0)
+        live_working_count = sum(1 for row in today_working_rows if row["status_tone"] == "live")
+        pending_working_count = sum(1 for row in today_working_rows if row["status_tone"] == "pending")
         return {
             "live": live_rows,
             "today": today_rows,
@@ -2160,8 +2288,27 @@ class DashboardServices:
                 "empty_message": "No qualified picks currently meet the model, value and risk requirements.",
                 "source": "Current qualified market-evaluation rows with existing value and safeguard truth.",
             },
+            "today_working_rows": today_working_rows,
+            "today_working_summary": {
+                "count": len(today_working_rows),
+                "bet_count": sum(1 for row in today_working_rows if row["is_actionable"]),
+                "no_bet_count": sum(1 for row in today_working_rows if not row["is_actionable"]),
+                "empty_message": "No current market decision rows are available for today's Football board.",
+            },
+            "glance_metrics": self._glance_metrics(
+                analysed_count=int((system_status["fixture_feed"].get("counts") or {}).get("today") or len(today_rows)),
+                working_rows=today_working_rows,
+                approved_count=len(best_picks),
+                paper_entry_count=paper_entry_count,
+                live_count=live_working_count,
+                pending_count=pending_working_count,
+            ),
+            "desk_funnel": self._desk_funnel(
+                working_rows=today_working_rows,
+                paper_entry_count=paper_entry_count,
+            ),
             "agent_statuses": self._dashboard_agent_statuses(),
-            "system_status": self.get_system_status(),
+            "system_status": system_status,
         }
 
     def get_matches_payload(

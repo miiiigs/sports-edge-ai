@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -1274,6 +1275,87 @@ def test_dashboard_services_best_picks_use_qualified_current_truth(tmp_path: Pat
     asyncio.run(services.shutdown())
 
 
+def test_dashboard_services_today_working_rows_keep_bet_and_no_bet_truth(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    kickoff_one = (datetime.now(timezone.utc) + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0).isoformat()
+    kickoff_two = (datetime.now(timezone.utc) + timedelta(hours=5)).replace(minute=0, second=0, microsecond=0).isoformat()
+    bet_fixture = replace(_fixture(fixture_id="fake:bet_row"), kickoff_utc=kickoff_one)
+    no_bet_fixture = replace(
+        _fixture(
+            fixture_id="fake:no_bet_row",
+            home_team_name="Sevilla",
+            away_team_name="Betis",
+        ),
+        kickoff_utc=kickoff_two,
+    )
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([bet_fixture, no_bet_fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    fixture_rows = [
+        bet_fixture.to_dict(timezone_name="UTC"),
+        no_bet_fixture.to_dict(timezone_name="UTC"),
+    ]
+
+    monkeypatch.setattr(
+        services,
+        "_filter_fixture_rows",
+        lambda *, bucket, fixture_rows: fixture_rows if bucket == "today" else [],
+    )
+    monkeypatch.setattr(
+        services,
+        "_market_evaluation_map",
+        lambda: {
+            "bet": {
+                "decision_rows": [
+                    {
+                        "fixture_id": bet_fixture.fixture_id,
+                        "decision": "PRELIMINARY_CANDIDATE",
+                        "market_family": "1x2",
+                        "selection": "HOME",
+                        "line": None,
+                        "model_probability": 0.63,
+                        "best_available_price": 2.05,
+                        "settlement_aware_edge": 0.042,
+                        "paper_entry_eligible": True,
+                        "market_freshness": "FRESH",
+                        "day12_state": "PASS",
+                        "reason_codes": [],
+                    },
+                    {
+                        "fixture_id": no_bet_fixture.fixture_id,
+                        "market_family": "1x2",
+                        "selection": "HOME",
+                        "line": None,
+                        "model_probability": 0.71,
+                        "best_available_price": 1.30,
+                        "settlement_aware_edge": -0.059,
+                        "paper_entry_eligible": False,
+                        "market_freshness": "FRESH",
+                        "day12_state": "PASS",
+                        "decision": "NO_BET",
+                        "reason_codes": ["PRICE_NO_VALUE"],
+                    },
+                ],
+            }
+        },
+    )
+
+    rows = services._build_today_working_rows(fixture_rows)
+
+    assert [row["desk_label"] for row in rows] == ["BET", "NO BET"]
+    assert rows[0]["is_actionable"] is True
+    assert rows[0]["is_featured"] is True
+    assert rows[0]["bet_label"] == "Arsenal to Win"
+    assert rows[0]["market_odds"] == 2.05
+    assert math.isclose(rows[0]["implied_probability"], 1 / 2.05, rel_tol=0.0, abs_tol=1e-9)
+    assert rows[1]["is_actionable"] is False
+    assert rows[1]["desk_note"] == "Price No Value"
+    assert rows[1]["bet_label"] == "Sevilla to Win"
+
 def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -> None:
     fixture = _fixture()
     app = create_app(
@@ -1287,7 +1369,10 @@ def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -
 
     assert response.status_code == 200
     assert "Best Picks of the Day" in response.text
+    assert "Today's Picks" in response.text
+    assert "Desk Funnel" in response.text
     assert "No qualified picks currently meet the model, value and risk requirements." in response.text
+    assert "No current market decision rows are available" in response.text
     assert "Route B Composite" in response.text
     assert "Route A Direct Classifier" in response.text
     assert "REJECTED" in response.text
