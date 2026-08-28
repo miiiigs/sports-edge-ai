@@ -129,17 +129,20 @@ def test_paper_trading_store_prevents_duplicate_entry_signatures(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("market", "selection", "line", "home_goals", "away_goals", "expected_state"),
+    ("market", "selection", "line", "home_goals", "away_goals", "actual_total_corners", "expected_state"),
     [
-        ("1x2", "HOME", None, 2, 1, "WON"),
-        ("1x2", "HOME", None, 0, 1, "LOST"),
-        ("btts", "YES", None, 1, 1, "WON"),
-        ("btts", "YES", None, 2, 0, "LOST"),
-        ("btts", "NO", None, 2, 0, "WON"),
-        ("btts", "NO", None, 1, 1, "LOST"),
-        ("goals_total", "OVER", 2.5, 2, 1, "WON"),
-        ("goals_total", "UNDER", 2.5, 1, 1, "WON"),
-        ("goals_total", "OVER", 3.0, 2, 1, "PUSH"),
+        ("1x2", "HOME", None, 2, 1, None, "WON"),
+        ("1x2", "HOME", None, 0, 1, None, "LOST"),
+        ("btts", "YES", None, 1, 1, None, "WON"),
+        ("btts", "YES", None, 2, 0, None, "LOST"),
+        ("btts", "NO", None, 2, 0, None, "WON"),
+        ("btts", "NO", None, 1, 1, None, "LOST"),
+        ("goals_total", "OVER", 2.5, 2, 1, None, "WON"),
+        ("goals_total", "UNDER", 2.5, 1, 1, None, "WON"),
+        ("goals_total", "OVER", 3.0, 2, 1, None, "PUSH"),
+        ("corner_total", "OVER", 9.5, 0, 0, 11, "WON"),
+        ("corner_total", "UNDER", 9.5, 0, 0, 8, "WON"),
+        ("corner_total", "OVER", 10.0, 0, 0, 10, "PUSH"),
     ],
 )
 def test_settlement_state_for_supported_live_paper_markets(
@@ -148,6 +151,7 @@ def test_settlement_state_for_supported_live_paper_markets(
     line,
     home_goals,
     away_goals,
+    actual_total_corners,
     expected_state,
 ):
     assert (
@@ -157,6 +161,7 @@ def test_settlement_state_for_supported_live_paper_markets(
             line=line,
             actual_home_goals=home_goals,
             actual_away_goals=away_goals,
+            actual_total_corners=actual_total_corners,
         )
         == expected_state
     )

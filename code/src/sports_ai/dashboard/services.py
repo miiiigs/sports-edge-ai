@@ -23,7 +23,9 @@ from . import storage
 from .current_market import build_fixture_market_evaluation
 from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
 from .fixture_provider import (
+    API_FOOTBALL_PROVIDER,
     ApiFootballFixtureProvider,
+    AuthoritativeFixtureStatistics,
     FootballDataOrgFixtureProvider,
     FixtureProvider,
     FixtureProviderError,
@@ -99,6 +101,10 @@ def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
     return NotConfiguredMarketProvider(
         provider_label="no-odds-provider-key" if config.current_odds_connected else "waiting-for-approved-odds-provider"
     )
+
+
+def _default_statistics_provider() -> ApiFootballFixtureProvider:
+    return ApiFootballFixtureProvider()
 
 
 def _env_int(name: str, default: int) -> int:
@@ -397,11 +403,13 @@ class DashboardServices:
         *,
         fixture_provider: FixtureProvider | None = None,
         market_provider: CurrentMarketProvider | None = None,
+        statistics_provider: ApiFootballFixtureProvider | None = None,
         xg_profile_factory: Any | None = None,
     ):
         self.config = DashboardConfig.default() if config is None else config
         self.fixture_provider = fixture_provider or _default_fixture_provider()
         self.market_provider = market_provider or _default_market_provider(self.config)
+        self.statistics_provider = statistics_provider or _default_statistics_provider()
         self._xg_profile_factory = xg_profile_factory
         self.snapshot: CurrentFootballModelSnapshot | None = None
         self.snapshot_error: str | None = None
@@ -592,6 +600,7 @@ class DashboardServices:
                 {"role": "paper_trading", "path": str(self.config.paper_trading_db_path)},
             ],
             "edge_desk_shadow": self._edge_desk_shadow_state(),
+            "corner_result_sync": dict(existing.get("corner_result_sync") or self._empty_corner_result_sync_state()),
         }
         storage.put_runtime_state(
             conn,
@@ -651,6 +660,124 @@ class DashboardServices:
             "predictions_pending": 0,
             "candidates_available": 0,
         }
+
+    def _empty_corner_result_sync_state(self) -> dict[str, Any]:
+        configured = bool(self.statistics_provider.configured())
+        return {
+            "provider": self.statistics_provider.provider_name(),
+            "configured": configured,
+            "state": "IDLE" if configured else "NOT_CONFIGURED",
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "last_error": None,
+            "fixtures_considered": 0,
+            "fixtures_updated": 0,
+            "results_available": 0,
+            "results_unavailable": 0,
+            "fixtures_unmatched": 0,
+            "fixtures_ambiguous": 0,
+            "query_count": 0,
+        }
+
+    def _statistics_provider_sync_diagnostics(self) -> dict[str, Any]:
+        diagnostics = getattr(self.statistics_provider, "sync_diagnostics", None)
+        if callable(diagnostics):
+            return diagnostics()
+        return {
+            "provider": self.statistics_provider.provider_name(),
+            "query_count": 0,
+            "has_errors": False,
+            "last_error": None,
+            "queries": [],
+        }
+
+    @staticmethod
+    def _apply_corner_result_to_fixture(fixture: dict[str, Any], result_row: dict[str, Any]) -> None:
+        fixture["statistics_provider"] = result_row.get("statistics_provider")
+        fixture["statistics_provider_fixture_id"] = result_row.get("statistics_provider_fixture_id")
+        fixture["home_corners"] = result_row.get("home_corners")
+        fixture["away_corners"] = result_row.get("away_corners")
+        fixture["total_corners"] = result_row.get("total_corners")
+        fixture["corner_result_source_timestamp"] = result_row.get("source_timestamp")
+        fixture["corner_result_captured_at"] = result_row.get("captured_at")
+
+    def _sync_authoritative_corner_results(self, rows_with_predictions: list[dict[str, Any]]) -> None:
+        diagnostics_state = self._empty_corner_result_sync_state()
+        diagnostics_state["last_attempt_at"] = utc_now_iso()
+        fixture_rows = {str(row["fixture_id"]): row for row in rows_with_predictions}
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as paper_conn:
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(paper_conn)
+
+        eligible_fixture_ids = sorted(
+            {
+                str(row["fixture_id"])
+                for row in paper_rows
+                if str(row.get("market") or "") == "corner_total"
+                and str(row.get("trade_state") or "PENDING") in PAPER_ACTIVE_STATES
+                and str((fixture_rows.get(str(row["fixture_id"])) or {}).get("status") or "") == FIXTURE_STATUS_FINISHED
+            }
+        )
+        diagnostics_state["fixtures_considered"] = len(eligible_fixture_ids)
+        if not eligible_fixture_ids:
+            self._storage_runtime_state["corner_result_sync"] = diagnostics_state
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                self._persist_storage_runtime_state(conn, updated_at=diagnostics_state["last_attempt_at"])
+            return
+
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            for fixture_id in eligible_fixture_ids:
+                existing_result = storage.fetch_fixture_result(conn, fixture_id)
+                if existing_result is not None:
+                    self._apply_corner_result_to_fixture(fixture_rows[fixture_id], existing_result)
+                fixture = fixture_rows[fixture_id]
+                if fixture.get("home_corners") is not None and fixture.get("away_corners") is not None:
+                    diagnostics_state["results_available"] += 1
+                    continue
+                if not self.statistics_provider.configured():
+                    diagnostics_state["state"] = "NOT_CONFIGURED"
+                    diagnostics_state["last_error"] = "statistics provider not configured"
+                    continue
+                try:
+                    result = self.statistics_provider.get_authoritative_corner_statistics(fixture)
+                except FixtureProviderNotConfiguredError as exc:
+                    diagnostics_state["state"] = "NOT_CONFIGURED"
+                    diagnostics_state["last_error"] = str(exc)
+                    continue
+                except FixtureProviderError as exc:
+                    message = str(exc)
+                    diagnostics_state["state"] = "DEGRADED"
+                    diagnostics_state["last_error"] = message
+                    if "STATS_FIXTURE_AMBIGUOUS" in message:
+                        diagnostics_state["fixtures_ambiguous"] += 1
+                    elif "STATS_FIXTURE_UNMATCHED" in message:
+                        diagnostics_state["fixtures_unmatched"] += 1
+                    continue
+                storage.upsert_fixture_result(
+                    conn,
+                    fixture_id=str(fixture["fixture_id"]),
+                    statistics_provider=result.provider,
+                    statistics_provider_fixture_id=result.provider_fixture_id,
+                    home_corners=result.home_corners,
+                    away_corners=result.away_corners,
+                    total_corners=result.total_corners,
+                    source_timestamp=result.source_timestamp,
+                    captured_at=result.captured_at,
+                )
+                stored_result = storage.fetch_fixture_result(conn, str(fixture["fixture_id"]))
+                if stored_result is not None:
+                    self._apply_corner_result_to_fixture(fixture, stored_result)
+                diagnostics_state["fixtures_updated"] += 1
+                diagnostics_state["last_success_at"] = result.captured_at
+                if result.home_corners is None or result.away_corners is None:
+                    diagnostics_state["results_unavailable"] += 1
+                else:
+                    diagnostics_state["results_available"] += 1
+            if diagnostics_state["state"] == "IDLE" and diagnostics_state["fixtures_updated"] > 0:
+                diagnostics_state["state"] = "READY"
+            diagnostics = self._statistics_provider_sync_diagnostics()
+            diagnostics_state["query_count"] = int(diagnostics.get("query_count") or 0)
+            self._storage_runtime_state["corner_result_sync"] = diagnostics_state
+            self._persist_storage_runtime_state(conn, updated_at=diagnostics_state["last_attempt_at"])
 
     def _provider_reset_sync_diagnostics(self) -> None:
         reset = getattr(self.fixture_provider, "reset_sync_diagnostics", None)
@@ -904,9 +1031,18 @@ class DashboardServices:
             settlement_context = latest_payload.get("settlement_context") or {}
             actual_home_goals = settlement_context.get("actual_home_goals")
             actual_away_goals = settlement_context.get("actual_away_goals")
+            actual_home_corners = settlement_context.get("actual_home_corners")
+            actual_away_corners = settlement_context.get("actual_away_corners")
+            actual_total_corners = settlement_context.get("actual_total_corners")
             final_score = None
             if actual_home_goals is not None and actual_away_goals is not None:
                 final_score = f"{int(actual_home_goals)}-{int(actual_away_goals)}"
+            final_corners = None
+            if actual_home_corners is not None and actual_away_corners is not None:
+                final_corners = f"{int(actual_home_corners)}-{int(actual_away_corners)}"
+            result_summary = final_score
+            if str(row.get("market") or "") == "corner_total" and final_corners is not None and actual_total_corners is not None:
+                result_summary = f"{final_corners} (Total {int(actual_total_corners)})"
             trade_state = str(row.get("trade_state") or "PENDING")
             kickoff_value = row.get("kickoff") or (fixture or {}).get("kickoff_utc") or row.get("decision_timestamp")
             kickoff_local = "N/A"
@@ -930,10 +1066,19 @@ class DashboardServices:
                     "is_settled": trade_state in PAPER_FINAL_STATES,
                     "is_open": trade_state in PAPER_ACTIVE_STATES,
                     "final_score": final_score,
+                    "final_corners": final_corners,
+                    "final_total_corners": actual_total_corners,
+                    "result_summary": result_summary,
                     "settled_at": row.get("updated_at") if trade_state in PAPER_FINAL_STATES else None,
-                    "result_provider": settlement_context.get("provider"),
-                    "result_provider_fixture_id": settlement_context.get("provider_fixture_id"),
-                    "result_captured_at": settlement_context.get("result_captured_at"),
+                    "result_provider": settlement_context.get("statistics_provider")
+                    if str(row.get("market") or "") == "corner_total" and settlement_context.get("statistics_provider")
+                    else settlement_context.get("provider"),
+                    "result_provider_fixture_id": settlement_context.get("statistics_provider_fixture_id")
+                    if str(row.get("market") or "") == "corner_total" and settlement_context.get("statistics_provider_fixture_id")
+                    else settlement_context.get("provider_fixture_id"),
+                    "result_captured_at": settlement_context.get("corner_result_captured_at")
+                    if str(row.get("market") or "") == "corner_total" and settlement_context.get("corner_result_captured_at")
+                    else settlement_context.get("result_captured_at"),
                     "final_status": settlement_context.get("final_status"),
                 }
             )
@@ -1437,8 +1582,12 @@ class DashboardServices:
                     "fixture_id": str(fixture["fixture_id"]),
                     "provider": str(fixture.get("provider") or ""),
                     "provider_fixture_id": fixture.get("provider_fixture_id"),
+                    "statistics_provider": fixture.get("statistics_provider"),
+                    "statistics_provider_fixture_id": fixture.get("statistics_provider_fixture_id"),
                     "final_status": str(fixture.get("status") or ""),
                     "result_captured_at": fixture.get("last_provider_update"),
+                    "corner_result_captured_at": fixture.get("corner_result_captured_at"),
+                    "corner_result_source_timestamp": fixture.get("corner_result_source_timestamp"),
                 }
                 kickoff_utc = str(row["kickoff"])
                 kickoff = parse_iso_datetime(kickoff_utc)
@@ -1489,6 +1638,8 @@ class DashboardServices:
                         actual_total_corners=actual_total_corners,
                     )
                 except ValueError:
+                    if str(row.get("trade_state") or "") == "UNSETTLED":
+                        continue
                     football_paper_trading.append_trade_update(
                         conn,
                         football_paper_trading.build_trade_update_payload(
@@ -1512,6 +1663,8 @@ class DashboardServices:
                                 **result_context,
                                 "actual_home_goals": int(fixture.get("home_score") or 0),
                                 "actual_away_goals": int(fixture.get("away_score") or 0),
+                                "actual_home_corners": fixture.get("home_corners"),
+                                "actual_away_corners": fixture.get("away_corners"),
                                 "actual_total_corners": actual_total_corners,
                             },
                             odds=float(row.get("entry_odds") or row["available_market_price"]),
@@ -1942,6 +2095,7 @@ class DashboardServices:
                 )
                 evaluations[str(row["fixture_id"])] = evaluation
 
+            self._sync_authoritative_corner_results(rows_with_predictions)
             self._process_paper_trading_updates(rows_with_predictions)
             paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
 
@@ -2432,6 +2586,7 @@ class DashboardServices:
             "first_initialized_at": self._storage_runtime_state.get("first_initialized_at"),
             "operational_db_paths": operational_paths,
             "edge_desk_shadow": dict(self._storage_runtime_state.get("edge_desk_shadow") or {}),
+            "corner_result_sync": dict(self._storage_runtime_state.get("corner_result_sync") or self._empty_corner_result_sync_state()),
             "mutable_storage_class": "OPERATIONAL_RUNTIME",
             "immutable_storage_class": "RESEARCH_REFERENCE",
         }
@@ -2654,6 +2809,14 @@ class DashboardServices:
             final_score = None
             if settlement_context.get("actual_home_goals") is not None and settlement_context.get("actual_away_goals") is not None:
                 final_score = f"{int(settlement_context['actual_home_goals'])}-{int(settlement_context['actual_away_goals'])}"
+            final_corners = None
+            if settlement_context.get("actual_home_corners") is not None and settlement_context.get("actual_away_corners") is not None:
+                final_corners = (
+                    f"{int(settlement_context['actual_home_corners'])}-{int(settlement_context['actual_away_corners'])}"
+                )
+            result_summary = final_score
+            if str(row.get("market_family") or "") == "corner_total" and final_corners is not None and settlement_context.get("actual_total_corners") is not None:
+                result_summary = f"{final_corners} (Total {int(settlement_context['actual_total_corners'])})"
             entry_model_probability = (
                 row["model_probability"]
                 if paper_row is None or paper_row.get("model_probability") is None
@@ -2702,6 +2865,8 @@ class DashboardServices:
                     "paper_trade_state": str((paper_row or {}).get("trade_state") or "PENDING"),
                     "paper_result_tone": self._paper_result_tone(str((paper_row or {}).get("trade_state") or "PENDING")),
                     "final_score": final_score,
+                    "final_corners": final_corners,
+                    "result_summary": result_summary,
                 }
             )
         return decorated_rows

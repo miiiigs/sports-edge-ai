@@ -127,7 +127,9 @@
                   </td>
                   <td>
                     <span class="desk-pill {% if row.paper_result_tone == 'bet' %}desk-pill-bet{% elif row.paper_result_tone == 'lost' %}desk-pill-lost{% elif row.paper_result_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">{{ row.paper_trade_state }}</span>
-                    {% if row.final_score %}
+                    {% if row.result_summary %}
+                      <div class="row-sub">Result {{ row.result_summary }}</div>
+                    {% elif row.final_score %}
                       <div class="row-sub">Final {{ row.final_score }}</div>
                     {% endif %}
                   </td>

@@ -49,6 +49,19 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS dashboard_fixture_results (
+        fixture_id TEXT PRIMARY KEY,
+        statistics_provider TEXT NOT NULL,
+        statistics_provider_fixture_id TEXT,
+        home_corners INTEGER,
+        away_corners INTEGER,
+        total_corners INTEGER,
+        source_timestamp TEXT,
+        captured_at TEXT NOT NULL,
+        FOREIGN KEY(fixture_id) REFERENCES dashboard_fixtures(fixture_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS dashboard_team_mappings (
         mapping_key TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
@@ -101,6 +114,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     with conn:
         for statement in SCHEMA_STATEMENTS:
             conn.execute(statement)
+
+
+def _merge_fixture_result(payload: dict[str, Any], result_row: dict[str, Any] | None) -> dict[str, Any]:
+    if result_row is None:
+        return payload
+    merged = dict(payload)
+    merged.update(
+        {
+            "statistics_provider": result_row.get("statistics_provider"),
+            "statistics_provider_fixture_id": result_row.get("statistics_provider_fixture_id"),
+            "home_corners": result_row.get("home_corners"),
+            "away_corners": result_row.get("away_corners"),
+            "total_corners": result_row.get("total_corners"),
+            "corner_result_source_timestamp": result_row.get("source_timestamp"),
+            "corner_result_captured_at": result_row.get("captured_at"),
+        }
+    )
+    return merged
 
 
 def upsert_fixtures(
@@ -169,6 +200,8 @@ def upsert_fixtures(
 
 def fetch_all_fixtures(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     ensure_schema(conn)
+    result_rows = fetch_fixture_results(conn)
+    result_map = {str(row["fixture_id"]): row for row in result_rows}
     rows = conn.execute(
         """
         SELECT payload_json
@@ -176,7 +209,11 @@ def fetch_all_fixtures(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         ORDER BY kickoff_utc, fixture_id
         """
     ).fetchall()
-    return [json.loads(str(row["payload_json"])) for row in rows]
+    merged_rows: list[dict[str, Any]] = []
+    for row in rows:
+        payload = json.loads(str(row["payload_json"]))
+        merged_rows.append(_merge_fixture_result(payload, result_map.get(str(payload.get("fixture_id") or ""))))
+    return merged_rows
 
 
 def fetch_fixture(conn: sqlite3.Connection, fixture_id: str) -> dict[str, Any] | None:
@@ -191,7 +228,77 @@ def fetch_fixture(conn: sqlite3.Connection, fixture_id: str) -> dict[str, Any] |
     ).fetchone()
     if row is None:
         return None
-    return json.loads(str(row["payload_json"]))
+    payload = json.loads(str(row["payload_json"]))
+    return _merge_fixture_result(payload, fetch_fixture_result(conn, fixture_id))
+
+
+def upsert_fixture_result(
+    conn: sqlite3.Connection,
+    *,
+    fixture_id: str,
+    statistics_provider: str,
+    statistics_provider_fixture_id: str | None,
+    home_corners: int | None,
+    away_corners: int | None,
+    total_corners: int | None,
+    source_timestamp: str | None,
+    captured_at: str,
+) -> None:
+    ensure_schema(conn)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO dashboard_fixture_results (
+                fixture_id, statistics_provider, statistics_provider_fixture_id,
+                home_corners, away_corners, total_corners, source_timestamp, captured_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(fixture_id) DO UPDATE SET
+                statistics_provider=excluded.statistics_provider,
+                statistics_provider_fixture_id=excluded.statistics_provider_fixture_id,
+                home_corners=excluded.home_corners,
+                away_corners=excluded.away_corners,
+                total_corners=excluded.total_corners,
+                source_timestamp=excluded.source_timestamp,
+                captured_at=excluded.captured_at
+            """,
+            (
+                fixture_id,
+                statistics_provider,
+                statistics_provider_fixture_id,
+                home_corners,
+                away_corners,
+                total_corners,
+                source_timestamp,
+                captured_at,
+            ),
+        )
+
+
+def fetch_fixture_result(conn: sqlite3.Connection, fixture_id: str) -> dict[str, Any] | None:
+    ensure_schema(conn)
+    row = conn.execute(
+        """
+        SELECT fixture_id, statistics_provider, statistics_provider_fixture_id,
+               home_corners, away_corners, total_corners, source_timestamp, captured_at
+        FROM dashboard_fixture_results
+        WHERE fixture_id = ?
+        """,
+        (fixture_id,),
+    ).fetchone()
+    return None if row is None else dict(row)
+
+
+def fetch_fixture_results(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    ensure_schema(conn)
+    rows = conn.execute(
+        """
+        SELECT fixture_id, statistics_provider, statistics_provider_fixture_id,
+               home_corners, away_corners, total_corners, source_timestamp, captured_at
+        FROM dashboard_fixture_results
+        ORDER BY fixture_id
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def save_prediction(

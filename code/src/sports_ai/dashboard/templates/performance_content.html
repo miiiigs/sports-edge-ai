@@ -187,7 +187,7 @@
             <th>Edge</th>
             <th>Result</th>
             <th>P&amp;L</th>
-            <th>Final Score</th>
+            <th>Result</th>
             <th>Settled At</th>
           </tr>
         </thead>
@@ -203,7 +203,7 @@
               <td>{{ '{:+.2%}'.format(row.edge|float) if row.edge is not none else 'NOT AVAILABLE' }}</td>
               <td>{{ row.trade_state }}</td>
               <td>{{ '{:+.2f}'.format(row.net_pnl|float) if row.net_pnl is not none else 'NOT AVAILABLE' }}</td>
-              <td>{{ row.final_score or 'NOT AVAILABLE' }}</td>
+              <td>{{ row.result_summary or row.final_score or 'NOT AVAILABLE' }}</td>
               <td>{{ row.settled_at or 'NOT AVAILABLE' }}</td>
             </tr>
           {% endfor %}
