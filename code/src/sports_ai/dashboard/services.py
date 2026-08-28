@@ -1269,6 +1269,25 @@ class DashboardServices:
             "system_status": self.get_system_status(),
         }
 
+    def _scheduled_refresh_dates(self, *, today_local: date) -> list[date]:
+        refresh_dates: set[date] = {today_local}
+        timezone_name = ZoneInfo(self.config.display_timezone)
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        for row in paper_rows:
+            if str(row.get("trade_state") or "PENDING") not in PAPER_ACTIVE_STATES:
+                continue
+            kickoff_value = str(row.get("kickoff") or "").strip()
+            if not kickoff_value:
+                continue
+            try:
+                kickoff_local = parse_iso_datetime(kickoff_value).astimezone(timezone_name).date()
+            except ValueError:
+                continue
+            if kickoff_local <= today_local:
+                refresh_dates.add(kickoff_local)
+        return sorted(refresh_dates)
+
     async def sync_once(
         self,
         *,
@@ -1317,7 +1336,8 @@ class DashboardServices:
                     today_local = now_utc.astimezone(ZoneInfo(self.config.display_timezone)).date()
                     live = self.fixture_provider.get_live_fixtures()
                     if include_schedule:
-                        today = self.fixture_provider.get_fixtures_for_date(today_local)
+                        for refresh_date in self._scheduled_refresh_dates(today_local=today_local):
+                            today.extend(self.fixture_provider.get_fixtures_for_date(refresh_date))
                         next_local_day = today_local + timedelta(days=1)
                         upcoming_start = (
                             datetime.combine(next_local_day, time.min, tzinfo=ZoneInfo(self.config.display_timezone))
