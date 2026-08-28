@@ -3,7 +3,7 @@
   <div>
     <p class="eyebrow desk-page-kicker">{{ payload.fixture.competition_name }}</p>
     <h1>{{ payload.fixture.home_team_name }} vs {{ payload.fixture.away_team_name }}</h1>
-    <p class="subhead desk-page-subhead">{{ payload.fixture.kickoff_local }} · fixture {{ payload.fixture.fixture_id }} · existing prediction and current-market context only.</p>
+    <p class="subhead desk-page-subhead">{{ payload.fixture.kickoff_local }} · fixture {{ payload.fixture.fixture_id }}</p>
   </div>
   <div class="page-actions page-actions-stack">
     {% if payload.fixture.status in ['LIVE', 'HALFTIME'] %}
@@ -29,7 +29,7 @@
         <div>
           <p class="eyebrow">Glance</p>
           <h2>Fixture And Prediction State</h2>
-          <p class="section-intro">The top-line football and model state for this fixture before reviewing fair prices or deeper technical detail.</p>
+          <p class="section-intro">Top-line match, model, and market status.</p>
         </div>
       </div>
       <div class="hero-strip">
@@ -57,7 +57,7 @@
         <div>
           <p class="eyebrow">Truth</p>
           <h2>Desk State</h2>
-          <span>Current Football invariants</span>
+          <span>Current Football status</span>
         </div>
       </div>
       <div class="data-list">
@@ -150,7 +150,7 @@
 
     <article class="detail-card">
       <p class="eyebrow">Investigate</p>
-      <h3>Manager / Day 12</h3>
+      <h3>Decision Gates</h3>
       <div class="data-list">
         <div><span>Manager</span><strong>{{ payload.prediction.manager_decision_status }}</strong></div>
         <div><span>Safeguard</span><strong>{{ payload.prediction.safeguard_status }}</strong></div>
@@ -166,7 +166,7 @@
       <div>
         <p class="eyebrow">Investigate</p>
         <h2>Current-Market Evaluation</h2>
-        <p class="section-intro">A technical market scan for this one fixture using the current backend market snapshot and the existing decision logic.</p>
+        <p class="section-intro">Current market scan for this fixture.</p>
       </div>
       {{ status_badge(payload.market_evaluation.state if payload.market_evaluation else 'NOT_SYNCED', 'positive' if payload.market_evaluation and payload.market_evaluation.state == 'READY' else 'inactive') }}
     </div>
@@ -194,22 +194,26 @@
           <thead>
             <tr>
               <th>Market</th>
+              <th>Probability</th>
               <th>Model Fair</th>
               <th>Best Offer</th>
+              <th>Min Odds</th>
               <th>Edge</th>
               <th>Decision</th>
-              <th>Day 12</th>
+              <th>Risk</th>
             </tr>
           </thead>
           <tbody>
             {% for row in payload.market_evaluation.display_rows %}
               <tr>
                 <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+                <td>{{ "{:.1%}".format(row.model_probability|float) }}</td>
                 <td>{{ "{:.2f}".format(row.model_fair_decimal_price|float) }}</td>
                 <td>{{ row.best_available_bookmaker or 'N/A' }}{% if row.best_available_price is not none %} @ {{ "{:.2f}".format(row.best_available_price|float) }}{% endif %}</td>
+                <td>{{ "{:.2f}".format(row.minimum_acceptable_price|float) if row.minimum_acceptable_price is not none else 'N/A' }}</td>
                 <td>{{ "{:+.2%}".format(row.settlement_aware_edge|float) if row.settlement_aware_edge is not none else 'N/A' }}</td>
-                <td>{{ status_badge(row.decision, 'warning' if row.decision != 'PRELIMINARY_CANDIDATE' else 'positive') }}</td>
-                <td>{{ status_badge(row.day12_state, 'positive' if row.day12_state == 'PASS' else 'inactive') }}</td>
+                <td>{{ status_badge(row.current_decision_state or row.decision, 'positive' if (row.current_decision_state or row.decision) == 'BET' else 'inactive') }}</td>
+                <td>{{ status_badge(row.safeguard_label or row.day12_state, 'positive' if (row.safeguard_label or row.day12_state) == 'PASS' else 'inactive') }}</td>
               </tr>
             {% endfor %}
           </tbody>

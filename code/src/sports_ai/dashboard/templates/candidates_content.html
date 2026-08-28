@@ -3,11 +3,11 @@
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Candidate Review</p>
     <h1>Current-Market Candidates</h1>
-    <p class="subhead desk-page-subhead">The desk review surface for preliminary candidates, blocked rows, and truthful NO BET outcomes using the current market sync and existing qualification rules without recomputation.</p>
+    <p class="subhead desk-page-subhead">Current market decisions for today's Football board.</p>
   </div>
   <div class="page-actions">
     {{ status_badge(payload.system_status.market_sync.state, 'positive' if payload.system_status.market_sync.state == 'READY' else 'warning') }}
-    <span class="page-stat">{{ payload.preliminary_candidates|length }} prelim</span>
+    <span class="page-stat">{{ payload.preliminary_candidates|length }} bets</span>
   </div>
 </section>
 
@@ -16,7 +16,7 @@
     <div>
       <p class="eyebrow">Decision Layer</p>
       <h2>Desk Summary</h2>
-      <p class="section-intro">A glance strip for current market sync state before drilling into candidate, blocked, and priced-out rows.</p>
+      <p class="section-intro">Current market decision status.</p>
     </div>
     {{ status_badge(payload.system_status.market_sync.state, 'positive' if payload.system_status.market_sync.state == 'READY' else 'warning') }}
   </div>
@@ -50,9 +50,9 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Preliminary</p>
-      <h2>Eligible Current-Market Signals</h2>
-      <p class="section-intro">Only rows that are already present in the current market evaluation and still pass the existing desk checks appear here.</p>
+      <p class="eyebrow">Bets</p>
+      <h2>Qualified BET Rows</h2>
+      <p class="section-intro">Only rows that passed prediction, price, freshness, and safeguard checks appear here.</p>
     </div>
     <span>{{ payload.preliminary_candidates|length }} rows</span>
   </div>
@@ -65,7 +65,7 @@
           <th>Offer</th>
           <th>Fair</th>
           <th>Edge</th>
-          <th>Day 12</th>
+          <th>Risk</th>
         </tr>
       </thead>
       <tbody>
@@ -76,11 +76,11 @@
             <td>{{ row.best_available_bookmaker or 'N/A' }} @ {{ "{:.2f}".format(row.best_available_price|float) if row.best_available_price is not none else 'N/A' }}</td>
             <td>{{ "{:.2f}".format(row.model_fair_decimal_price|float) }}</td>
             <td>{{ "{:+.2%}".format(row.settlement_aware_edge|float) if row.settlement_aware_edge is not none else 'N/A' }}</td>
-            <td>{{ status_badge(row.day12_state, 'positive' if row.day12_state == 'PASS' else 'inactive') }}</td>
+            <td>{{ status_badge(row.safeguard_label, 'positive' if row.safeguard_label == 'PASS' else 'inactive') }}</td>
           </tr>
         {% else %}
           <tr>
-            <td colspan="6">No preliminary current-market candidates are available yet.</td>
+            <td colspan="6">No qualified current-market bets are available yet.</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -92,8 +92,8 @@
   <div class="section-heading">
     <div>
       <p class="eyebrow">Blocked</p>
-      <h2>Rejected Or Missing-Market Rows</h2>
-      <p class="section-intro">Truthful exclusions stay visible so the desk can see why a fixture or market never advanced.</p>
+      <h2>Blocked Or Unsupported Rows</h2>
+      <p class="section-intro">Non-actionable rows stay visible with their current blocker.</p>
     </div>
     <span>{{ payload.blocked_candidates|length }} rows</span>
   </div>
@@ -112,7 +112,7 @@
           <tr>
             <td><a class="table-link" href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
             <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
-            <td>{{ status_badge(row.decision, 'warning' if 'BLOCK' in row.decision or 'REJECT' in row.decision else 'inactive') }}</td>
+            <td>{{ status_badge(row.current_decision_state, 'warning' if row.current_decision_group == 'blocked' else 'inactive') }}</td>
             <td>{{ row.reason_codes|join(', ') }}</td>
           </tr>
         {% else %}
@@ -129,8 +129,8 @@
   <div class="section-heading">
     <div>
       <p class="eyebrow">No Bet</p>
-      <h2>Priced But Below Threshold</h2>
-      <p class="section-intro">Rows stay on the board when the market is available but the current edge does not justify a bet.</p>
+      <h2>No Bet Rows</h2>
+      <p class="section-intro">Rows stay on the board when a market exists but does not qualify for a bet.</p>
     </div>
     <span>{{ payload.no_bet_candidates|length }} rows</span>
   </div>

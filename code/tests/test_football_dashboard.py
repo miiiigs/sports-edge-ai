@@ -902,13 +902,13 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
 
         performance_page = client.get("/performance")
         assert performance_page.status_code == 200
-        assert "Football Performance And Readiness" in performance_page.text
+        assert "Football model and betting performance." in performance_page.text
         assert 'href="/static/dashboard.css"' in performance_page.text
         assert 'src="/static/dashboard.js"' in performance_page.text
 
         status_page = client.get("/status")
         assert status_page.status_code == 200
-        assert "Operations &amp; Runtime Status" in status_page.text
+        assert "System health, feeds and model readiness." in status_page.text
         assert "Route B Composite" in status_page.text
         assert "Route A Direct Classifier" in status_page.text
         assert "NOT IMPLEMENTED" in status_page.text
@@ -1051,7 +1051,12 @@ def test_dashboard_services_recovers_after_provider_failure(tmp_path: Path):
 def test_dashboard_services_current_market_candidate_creates_idempotent_paper_entry(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
     fixture = _fixture()
-    config = replace(_dashboard_config(tmp_path), current_xg_connected=True, enable_odds_sync=True)
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        current_xg_connected=True,
+        enable_odds_sync=True,
+    )
     market_provider = FakeMarketProvider()
 
     def xg_factory(row, prediction, snapshots):
@@ -1221,7 +1226,12 @@ def test_best_pick_market_labels_are_human_readable() -> None:
 def test_dashboard_services_best_picks_use_qualified_current_truth(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
     qualified_fixture = _fixture(fixture_id="fake:arsenal_chelsea")
-    config = replace(_dashboard_config(tmp_path), current_xg_connected=True, enable_odds_sync=True)
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        current_xg_connected=True,
+        enable_odds_sync=True,
+    )
     market_provider = FakeMarketProvider()
     services = DashboardServices(
         config=config,
@@ -1384,7 +1394,8 @@ def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -
 
     assert response.status_code == 200
     assert "Best Picks of the Day" in response.text
-    assert "Today's Picks" in response.text
+    assert "Today's qualified Football selections." in response.text
+    assert "Other Desk Decisions" in response.text
     assert "Desk Funnel" in response.text
     assert "No qualified picks currently meet the model, value and risk requirements." in response.text
     assert "No current market decision rows are available" in response.text

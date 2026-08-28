@@ -2,8 +2,8 @@
 <section class="page-heading edge-page-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Performance Snapshot</p>
-    <h1>Football Performance And Readiness</h1>
-    <p class="subhead desk-page-subhead">This phase only re-presents the performance data that already exists: historical validation outputs, current paper-trading readiness, and persisted ledger summaries. Phase 3B metrics remain deferred.</p>
+    <h1>Performance</h1>
+    <p class="subhead desk-page-subhead">Football model and betting performance.</p>
   </div>
   <div class="page-actions">
     {{ status_badge('Historical Validation ' ~ payload.performance_status.historical_validation.state, 'positive' if payload.performance_status.historical_validation.state == 'READY' else 'inactive') }}

@@ -3,7 +3,7 @@
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Prediction Log</p>
     <h1>Current Football Predictions</h1>
-    <p class="subhead desk-page-subhead">Persisted pre-match model output, current lock state, and market-context visibility for the live Football slate. Technical provenance stays available, but secondary to the desk working columns.</p>
+    <p class="subhead desk-page-subhead">Persisted pre-match model output and current market readiness.</p>
   </div>
   <div class="page-actions">
     {{ status_badge(payload.system_status.prediction_engine.state, 'positive' if payload.system_status.prediction_engine.state == 'READY' else 'warning') }}
@@ -16,7 +16,7 @@
     <div>
       <p class="eyebrow">Operational Output</p>
       <h2>Prediction Table</h2>
-      <p class="section-intro">Fixture, probability context, market-state support, and safeguard truth in one shared desk table.</p>
+      <p class="section-intro">Current Football prediction table.</p>
     </div>
     <span>{{ payload.rows|length }} rows</span>
   </div>
@@ -84,7 +84,7 @@
             </td>
             <td>
               {% if row.fixture.market_signal %}
-                {{ row.fixture.market_signal.decision }} | {{ row.fixture.market_signal.selection }}{% if row.fixture.market_signal.line is not none %} {{ row.fixture.market_signal.line }}{% endif %}
+                {{ row.fixture.market_signal.current_decision_state or row.fixture.market_signal.decision }} | {{ row.fixture.market_signal.selection }}{% if row.fixture.market_signal.line is not none %} {{ row.fixture.market_signal.line }}{% endif %}
                 {% if row.fixture.market_signal.edge is not none %}
                   <div class="row-sub">{{ "{:+.2%}".format(row.fixture.market_signal.edge|float) }}</div>
                 {% endif %}
@@ -92,7 +92,7 @@
                 {{ row.prediction.manager_decision_status }}
               {% endif %}
             </td>
-            <td>{{ status_badge(row.fixture.market_signal.day12_state if row.fixture.market_signal else row.prediction.safeguard_status, 'positive' if (row.fixture.market_signal.day12_state if row.fixture.market_signal else row.prediction.safeguard_status) == 'PASS' else 'inactive') }}</td>
+            <td>{{ status_badge((row.fixture.market_signal.safeguard_label if row.fixture.market_signal else row.prediction.safeguard_status), 'positive' if ((row.fixture.market_signal.safeguard_label if row.fixture.market_signal else row.prediction.safeguard_status) == 'PASS') else 'inactive') }}</td>
             <td><a class="table-link" href="/matches/{{ row.fixture.fixture_id }}">Open fixture</a></td>
           </tr>
         {% else %}

@@ -23,6 +23,7 @@ from . import storage
 from .current_market import build_fixture_market_evaluation
 from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
 from .fixture_provider import (
+    ApiFootballFixtureProvider,
     FootballDataOrgFixtureProvider,
     FixtureProvider,
     FixtureProviderError,
@@ -58,11 +59,23 @@ DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR = "SPORTS_AI_ODDS_SYNC_ONCE_TOKEN"
 logger = logging.getLogger(__name__)
 
 
+def _default_fixture_provider() -> FixtureProvider:
+    primary = FootballDataOrgFixtureProvider()
+    if primary.configured():
+        return primary
+    fallback = ApiFootballFixtureProvider()
+    if fallback.configured():
+        return fallback
+    return primary
+
+
 def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
-    if not config.current_odds_connected:
-        return NotConfiguredMarketProvider(provider_label="waiting-for-approved-odds-provider")
     provider = TheOddsApiProvider()
-    return provider if provider.configured() else NotConfiguredMarketProvider(provider_label="no-odds-provider-key")
+    if provider.configured():
+        return provider
+    return NotConfiguredMarketProvider(
+        provider_label="no-odds-provider-key" if config.current_odds_connected else "waiting-for-approved-odds-provider"
+    )
 
 
 def _env_int(name: str, default: int) -> int:
@@ -217,6 +230,74 @@ def _humanize_row_reason_codes(row: dict[str, Any]) -> str:
     return " / ".join(reason_codes)
 
 
+_MISSING_PRICE_REASON_CODES = {
+    "INCOMPLETE_REFERENCE_MARKET",
+    "MISSING_AVAILABLE_PRICE",
+    "MISSING_REFERENCE_MARKET",
+}
+_UNSUPPORTED_REASON_CODES = {
+    "REJECT_CUP_MARKET_NOT_ALLOWED",
+    "REJECT_TEAM_LEVEL_OUT_OF_SCOPE",
+}
+
+
+def _current_decision_state(row: dict[str, Any]) -> str:
+    decision = str(row.get("decision") or "")
+    day12_state = str(row.get("day12_state") or "")
+    reason_codes = {str(code) for code in (row.get("reason_codes") or [])}
+    market_freshness = str(row.get("market_freshness") or row.get("freshness_state") or "")
+
+    if row.get("paper_entry_eligible"):
+        return "BET"
+    if decision == "PRELIMINARY_CANDIDATE":
+        if market_freshness != "FRESH":
+            return "NO_BET_STALE_MARKET"
+        if day12_state == "BLOCKED_MISSING_XG_DATA":
+            return "BLOCKED"
+        if day12_state in {"DAY12_REVIEW_REQUIRED", "REJECTED_BY_XG_VETO"}:
+            return "NO_BET_SAFEGUARD"
+        return "BLOCKED"
+    if decision == "NO_BET":
+        return "NO_BET_VALUE"
+    if decision == "STALE_MARKET":
+        return "NO_BET_STALE_MARKET"
+    if decision == "MISSING_REQUIRED_MARKET_DATA":
+        return "NO_BET_MISSING_PRICE" if reason_codes & _MISSING_PRICE_REASON_CODES else "BLOCKED"
+    if decision == "REJECTED_RULE":
+        return "UNSUPPORTED" if reason_codes & _UNSUPPORTED_REASON_CODES else "BLOCKED"
+    return "BLOCKED"
+
+
+def _decision_group(state: str) -> str:
+    if state == "BET":
+        return "bet"
+    if state.startswith("NO_BET"):
+        return "no_bet"
+    if state == "UNSUPPORTED":
+        return "unsupported"
+    return "blocked"
+
+
+def _decision_state_detail(state: str) -> str:
+    return state.replace("_", " ").title()
+
+
+def _safeguard_label(row: dict[str, Any]) -> str:
+    day12_state = str(row.get("day12_state") or "")
+    if day12_state in {"PASS", "PASSED"}:
+        return "PASS"
+    if day12_state == "REJECTED_BY_XG_VETO":
+        return "FAIL"
+    if day12_state == "DAY12_REVIEW_REQUIRED":
+        return "REVIEW"
+    if day12_state == "BLOCKED_MISSING_XG_DATA":
+        return "BLOCKED"
+    market_freshness = str(row.get("market_freshness") or "")
+    if market_freshness and market_freshness != "FRESH":
+        return market_freshness
+    return "N/A"
+
+
 @dataclass(frozen=True)
 class DashboardConfig:
     repo_root: Path
@@ -277,7 +358,7 @@ class DashboardServices:
         xg_profile_factory: Any | None = None,
     ):
         self.config = DashboardConfig.default() if config is None else config
-        self.fixture_provider = fixture_provider or FootballDataOrgFixtureProvider()
+        self.fixture_provider = fixture_provider or _default_fixture_provider()
         self.market_provider = market_provider or _default_market_provider(self.config)
         self._xg_profile_factory = xg_profile_factory
         self.snapshot: CurrentFootballModelSnapshot | None = None
@@ -598,6 +679,92 @@ class DashboardServices:
             "captured_at": diagnostics.get("captured_at"),
             "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
             "quota": diagnostics.get("quota"),
+        }
+
+    def _fixture_feed_runtime_requirements(self) -> dict[str, Any]:
+        provider = self.fixture_provider.provider_name()
+        if provider == "football-data.org":
+            competitions = os.environ.get("SPORTS_AI_FOOTBALL_DATA_COMPETITIONS", "").strip()
+            return {
+                "implementation_ready": "YES",
+                "required_env_vars": ["SPORTS_AI_FOOTBALL_DATA_TOKEN"],
+                "optional_env_vars": ["SPORTS_AI_FOOTBALL_DATA_COMPETITIONS"],
+                "configuration_path": None,
+                "configured_competitions": competitions or "default supported football-data.org competition map",
+                "fallback_provider_available": "YES" if ApiFootballFixtureProvider().configured() else "NO",
+            }
+        if provider == "api-football":
+            return {
+                "implementation_ready": "YES",
+                "required_env_vars": [
+                    "SPORTS_AI_API_FOOTBALL_TOKEN",
+                    "SPORTS_AI_API_FOOTBALL_LEAGUE_MAP",
+                ],
+                "optional_env_vars": [],
+                "configuration_path": os.environ.get("SPORTS_AI_API_FOOTBALL_LEAGUE_MAP", "").strip() or None,
+                "configured_competitions": "league map driven",
+                "fallback_provider_available": "NO",
+            }
+        return {
+            "implementation_ready": "UNKNOWN",
+            "required_env_vars": [],
+            "optional_env_vars": [],
+            "configuration_path": None,
+            "configured_competitions": None,
+            "fallback_provider_available": "UNKNOWN",
+        }
+
+    def _odds_feed_runtime_requirements(self) -> dict[str, Any]:
+        provider_probe = TheOddsApiProvider()
+        reference_bookmakers = os.environ.get("SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS", "").strip() or "pinnacle"
+        freshness = os.environ.get("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "").strip() or "unset"
+        current_provider = self.market_provider.provider_name()
+        if current_provider not in {"the-odds-api", "no-odds-provider-key", "waiting-for-approved-odds-provider"}:
+            return {
+                "implementation_ready": "UNKNOWN",
+                "required_env_vars": [],
+                "optional_env_vars": [],
+                "supported_markets": [],
+                "reference_price_method": None,
+                "freshness_rule": None,
+            }
+        return {
+            "implementation_ready": "YES",
+            "provider_key_configured": "YES" if provider_probe.configured() else "NO",
+            "approval_enabled": "YES" if self.config.current_odds_connected else "NO",
+            "automatic_sync_enabled": "YES" if self.config.enable_odds_sync else "NO",
+            "required_env_vars": [
+                "SPORTS_AI_THE_ODDS_API_KEY",
+                "SPORTS_AI_CURRENT_ODDS_CONNECTED",
+                "SPORTS_AI_ENABLE_ODDS_SYNC",
+            ],
+            "optional_env_vars": [
+                "SPORTS_AI_ODDS_REGION",
+                "SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS",
+                "SPORTS_AI_MARKET_MAX_AGE_MINUTES",
+            ],
+            "supported_markets": ["1x2", "goals_total", "btts"],
+            "reference_price_method": f"Shin de-vig on reference bookmakers ({reference_bookmakers})",
+            "freshness_rule": f"Market source timestamp must be within SPORTS_AI_MARKET_MAX_AGE_MINUTES (current: {freshness})",
+        }
+
+    def _xg_runtime_status(self) -> dict[str, Any]:
+        derived_available = bool(self.snapshot is not None and self.config.research_db_path.exists())
+        enabled = bool(self.config.current_xg_connected)
+        return {
+            "state": "AVAILABLE" if enabled else "MISSING",
+            "implementation_ready": "YES",
+            "enabled": "YES" if enabled else "NO",
+            "derived_input_available": "YES" if derived_available else "NO",
+            "source": "sports_edge_day8_historical_rolling_xg_v1" if derived_available else None,
+            "path": str(self.config.research_db_path) if derived_available else None,
+            "missing_requirement": None
+            if enabled
+            else (
+                "Set SPORTS_AI_CURRENT_XG_CONNECTED=1 to enable the existing derived rolling xG safeguard input."
+                if derived_available
+                else "Historical research store access is required for the derived rolling xG safeguard input."
+            ),
         }
 
     def _performance_summary_path(self) -> Path:
@@ -1325,13 +1492,36 @@ class DashboardServices:
             )
             return
 
+        if not self.config.current_odds_connected and not force_once:
+            self._market_runtime_state.update(
+                {
+                    "state": "SYNC_DISABLED",
+                    "automatic_odds_sync": "DISABLED",
+                    "last_sync_at": utc_now_iso(),
+                    "last_error": "Set SPORTS_AI_CURRENT_ODDS_CONNECTED=1 to enable the approved live odds path.",
+                    "fixtures_considered": 0,
+                    "fixtures_matched": 0,
+                    "market_snapshots": 0,
+                    "markets_covered": [],
+                    "freshness": "UNKNOWN",
+                    "unresolved_fixture_count": 0,
+                    "stale_market_count": 0,
+                    "candidate_count": 0,
+                    "paper_entry_count": 0,
+                    "settlement_queue_count": 0,
+                    "decision_count": 0,
+                    "evaluations": {},
+                }
+            )
+            return
+
         if not self.config.enable_odds_sync and not force_once:
             self._market_runtime_state.update(
                 {
-                    "state": market_state["state"],
+                    "state": "SYNC_DISABLED",
                     "automatic_odds_sync": "DISABLED",
                     "last_sync_at": utc_now_iso(),
-                    "last_error": None,
+                    "last_error": "Set SPORTS_AI_ENABLE_ODDS_SYNC=1 to sync current market snapshots.",
                     "fixtures_considered": 0,
                     "fixtures_matched": 0,
                     "market_snapshots": 0,
@@ -1475,6 +1665,10 @@ class DashboardServices:
                     provider_market_id = decision_row.get("best_available_provider_market_id")
                     if provider_market_id is not None:
                         decision_row["entry_snapshot_id"] = entry_snapshot_ids.get(str(provider_market_id))
+                    current_state = _current_decision_state(decision_row)
+                    decision_row["current_decision_state"] = current_state
+                    decision_row["current_decision_group"] = _decision_group(current_state)
+                    decision_row["safeguard_label"] = _safeguard_label(decision_row)
                 created = self._maybe_create_paper_entries(conn, prediction=prediction, evaluation=evaluation)
                 paper_entries_created += created
                 candidate_count += int(evaluation["counts"]["preliminary_candidates"])
@@ -1491,7 +1685,11 @@ class DashboardServices:
 
         self._market_runtime_state.update(
             {
-                "state": market_state["state"],
+                "state": (
+                    "READY"
+                    if evaluations and any((value.get("decision_rows") or []) for value in evaluations.values())
+                    else market_state["state"]
+                ),
                 "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
                 "last_sync_at": utc_now_iso(),
                 "last_successful_snapshot_at": last_successful_snapshot_at,
@@ -2019,6 +2217,11 @@ class DashboardServices:
         top_market_row = None
         if market_evaluation and market_evaluation.get("display_rows"):
             top_market_row = market_evaluation["display_rows"][0]
+        if top_market_row is not None:
+            current_state = str(top_market_row.get("current_decision_state") or _current_decision_state(top_market_row))
+            top_market_row["current_decision_state"] = current_state
+            top_market_row["current_decision_group"] = _decision_group(current_state)
+            top_market_row["safeguard_label"] = _safeguard_label(top_market_row)
         return {
             **fixture_row,
             "kickoff_local": local_kickoff,
@@ -2031,7 +2234,9 @@ class DashboardServices:
                 "state": market_evaluation["state"],
                 "edge": top_market_row.get("settlement_aware_edge"),
                 "decision": top_market_row.get("decision"),
+                "current_decision_state": top_market_row.get("current_decision_state"),
                 "day12_state": top_market_row.get("day12_state"),
+                "safeguard_label": top_market_row.get("safeguard_label"),
                 "market_family": top_market_row.get("market_family"),
                 "selection": top_market_row.get("selection"),
                 "line": top_market_row.get("line"),
@@ -2077,9 +2282,8 @@ class DashboardServices:
         best_picks: list[dict[str, Any]] = []
         for evaluation in self._market_evaluation_map().values():
             for row in evaluation.get("decision_rows") or []:
-                if row.get("decision") != "PRELIMINARY_CANDIDATE":
-                    continue
-                if not row.get("paper_entry_eligible"):
+                current_state = str(row.get("current_decision_state") or _current_decision_state(row))
+                if current_state != "BET":
                     continue
                 fixture = fixture_map.get(str(row["fixture_id"]))
                 if fixture is None:
@@ -2101,6 +2305,9 @@ class DashboardServices:
                         "competition_name": str(row["competition_name"]),
                         "kickoff_utc": str(fixture["kickoff_utc"]),
                         "kickoff_local": str(fixture["kickoff_local"]),
+                        "kickoff_time_local": parse_iso_datetime(str(fixture["kickoff_utc"]))
+                        .astimezone(ZoneInfo(self.config.display_timezone))
+                        .strftime("%H:%M"),
                         "home_team_name": str(fixture["home_team_name"]),
                         "away_team_name": str(fixture["away_team_name"]),
                         "market_family": str(row["market_family"]),
@@ -2109,15 +2316,20 @@ class DashboardServices:
                         "bet_label": labels["bet_label"],
                         "line": None if row.get("line") is None else float(row["line"]),
                         "model_probability": float(row["model_probability"]),
-                        "fair_odds": float(row["model_fair_decimal_price"]),
+                        "fair_odds": None
+                        if row.get("model_fair_decimal_price") is None
+                        else float(row["model_fair_decimal_price"]),
                         "market_odds": None if row.get("best_available_price") is None else float(row["best_available_price"]),
                         "edge": None if row.get("settlement_aware_edge") is None else float(row["settlement_aware_edge"]),
                         "bookmaker": None if row.get("best_available_bookmaker") is None else str(row["best_available_bookmaker"]),
+                        "market_timestamp": row.get("best_available_source_timestamp"),
+                        "minimum_acceptable_odds": row.get("minimum_acceptable_price"),
                         "bet_state": bet_state,
-                        "risk_status": "Qualified",
+                        "risk_status": _safeguard_label(row),
                         "risk_summary": risk_summary,
                         "market_freshness": None if row.get("market_freshness") is None else str(row["market_freshness"]),
                         "paper_qualification_state": "QUALIFIED",
+                        "current_decision_state": current_state,
                         "day12_state": str(row.get("day12_state") or "NOT_APPLICABLE"),
                         "decision": str(row["decision"]),
                         "reason_codes": list(row.get("reason_codes") or []),
@@ -2158,13 +2370,13 @@ class DashboardServices:
         working_rows: list[dict[str, Any]] = []
         for evaluation in self._market_evaluation_map().values():
             for row in evaluation.get("decision_rows") or []:
-                if row.get("decision") not in {"PRELIMINARY_CANDIDATE", "NO_BET"}:
-                    continue
                 fixture = today_fixture_map.get(str(row["fixture_id"]))
                 if fixture is None:
                     continue
                 if str(fixture.get("status")) in FIXTURE_TERMINAL_STATUSES:
                     continue
+                current_state = str(row.get("current_decision_state") or _current_decision_state(row))
+                decision_group = _decision_group(current_state)
                 labels = _humanize_market_selection(
                     market_family=str(row["market_family"]),
                     selection=str(row["selection"]),
@@ -2172,7 +2384,15 @@ class DashboardServices:
                     home_team_name=str(fixture["home_team_name"]),
                     away_team_name=str(fixture["away_team_name"]),
                 )
-                desk_label, risk_summary = _humanize_pick_status(row)
+                if decision_group == "bet":
+                    desk_label = "BET"
+                elif decision_group == "no_bet":
+                    desk_label = "NO BET"
+                elif decision_group == "unsupported":
+                    desk_label = "UNSUPPORTED"
+                else:
+                    desk_label = "BLOCKED"
+                _, risk_summary = _humanize_pick_status(row)
                 status_label, status_tone = self._working_row_status(fixture)
                 market_odds = None if row.get("best_available_price") is None else float(row["best_available_price"])
                 implied_probability = None
@@ -2194,23 +2414,35 @@ class DashboardServices:
                         "selection_label": labels["selection_label"],
                         "model_probability": float(row["model_probability"]),
                         "market_odds": market_odds,
+                        "fair_odds": None
+                        if row.get("model_fair_decimal_price") is None
+                        else float(row["model_fair_decimal_price"]),
                         "implied_probability": implied_probability,
                         "edge": None if row.get("settlement_aware_edge") is None else float(row["settlement_aware_edge"]),
+                        "bookmaker": None if row.get("best_available_bookmaker") is None else str(row["best_available_bookmaker"]),
+                        "market_timestamp": row.get("best_available_source_timestamp"),
+                        "minimum_acceptable_odds": row.get("minimum_acceptable_price"),
                         "market_freshness": None if row.get("market_freshness") is None else str(row["market_freshness"]),
-                        "confidence_label": "Qualified" if row.get("paper_entry_eligible") else "Tracked",
+                        "confidence_label": _safeguard_label(row),
                         "risk_summary": risk_summary,
                         "desk_label": desk_label,
-                        "desk_note": _humanize_row_reason_codes(row),
+                        "desk_note": _humanize_row_reason_codes(row) or _decision_state_detail(current_state),
+                        "current_decision_state": current_state,
+                        "current_decision_group": decision_group,
                         "status_label": status_label,
                         "status_tone": status_tone,
-                        "is_actionable": bool(row.get("paper_entry_eligible")),
+                        "is_actionable": current_state == "BET",
                         "is_featured": False,
                     }
                 )
         working_rows.sort(
             key=lambda row: (
+                0
+                if row["current_decision_group"] == "bet"
+                else 1
+                if row["current_decision_group"] == "no_bet"
+                else 2,
                 row["kickoff_utc"],
-                0 if row["is_actionable"] else 1,
                 -float(row.get("edge") or 0.0),
                 str(row["fixture_id"]),
                 str(row["bet_label"]),
@@ -2272,6 +2504,7 @@ class DashboardServices:
         ][:6]
         best_picks = self._build_best_pick_rows(fixture_rows)
         today_working_rows = self._build_today_working_rows(fixture_rows)
+        other_decision_rows = [row for row in today_working_rows if not row["is_actionable"]]
         system_status = self.get_system_status()
         paper_entry_count = int(system_status["market_sync"].get("paper_entry_count") or 0)
         live_working_count = sum(1 for row in today_working_rows if row["status_tone"] == "live")
@@ -2286,14 +2519,22 @@ class DashboardServices:
             "best_picks_summary": {
                 "count": len(best_picks),
                 "empty_message": "No qualified picks currently meet the model, value and risk requirements.",
-                "source": "Current qualified market-evaluation rows with existing value and safeguard truth.",
+                "source": "Current qualified BET rows.",
             },
             "today_working_rows": today_working_rows,
+            "other_decision_rows": other_decision_rows,
             "today_working_summary": {
                 "count": len(today_working_rows),
                 "bet_count": sum(1 for row in today_working_rows if row["is_actionable"]),
                 "no_bet_count": sum(1 for row in today_working_rows if not row["is_actionable"]),
                 "empty_message": "No current market decision rows are available for today's Football board.",
+            },
+            "other_decision_summary": {
+                "count": len(other_decision_rows),
+                "blocked_count": sum(1 for row in other_decision_rows if row["current_decision_group"] == "blocked"),
+                "no_bet_count": sum(1 for row in other_decision_rows if row["current_decision_group"] == "no_bet"),
+                "unsupported_count": sum(1 for row in other_decision_rows if row["current_decision_group"] == "unsupported"),
+                "empty_message": "No additional Football desk decisions are currently on the board.",
             },
             "glance_metrics": self._glance_metrics(
                 analysed_count=int((system_status["fixture_feed"].get("counts") or {}).get("today") or len(today_rows)),
@@ -2404,15 +2645,25 @@ class DashboardServices:
         no_bets = []
         for evaluation in evaluations:
             for row in evaluation.get("decision_rows") or []:
-                if row["decision"] == "PRELIMINARY_CANDIDATE":
+                current_state = str(row.get("current_decision_state") or _current_decision_state(row))
+                row["current_decision_state"] = current_state
+                row["current_decision_group"] = _decision_group(current_state)
+                row["safeguard_label"] = _safeguard_label(row)
+                if current_state == "BET":
                     preliminary.append(row)
-                elif row["decision"] == "NO_BET":
+                elif current_state in {"NO_BET_VALUE", "NO_BET_SAFEGUARD"}:
                     no_bets.append(row)
                 else:
                     blocked.append(row)
         return {
-            "connected": market_state["configured"],
-            "reason": market_state["reason"] or "Current market decision service unavailable until a current odds provider is configured.",
+            "connected": bool(
+                market_state["configured"]
+                and self.config.current_odds_connected
+                and (self.config.enable_odds_sync or bool(self.config.odds_sync_once_token.strip()))
+            ),
+            "reason": self._market_runtime_state.get("last_error")
+            or market_state["reason"]
+            or "Current market decision service unavailable until a current odds provider is configured.",
             "experimental_candidates": [],
             "preliminary_candidates": sorted(
                 preliminary,
@@ -2507,6 +2758,9 @@ class DashboardServices:
     def get_system_status(self) -> dict[str, Any]:
         snapshot_state = "READY" if self.snapshot is not None else "BLOCKED"
         market_state = self._market_provider_state()
+        fixture_requirements = self._fixture_feed_runtime_requirements()
+        odds_requirements = self._odds_feed_runtime_requirements()
+        xg_status = self._xg_runtime_status()
         summary_payload = self._load_json_file(self._performance_summary_path())
         _, paper_status = self._paper_positions()
         performance_status = self._performance_status(summary_payload, paper_status)
@@ -2558,6 +2812,7 @@ class DashboardServices:
                     "future_refresh_seconds": int(self.config.future_refresh_interval_seconds),
                     "manual_refresh_cooldown_seconds": int(self.config.manual_refresh_cooldown_seconds),
                 },
+                "requirements": fixture_requirements,
             },
             "current_fixture_state": {
                 "fixtures_discovered": int((self._provider_state.get("last_counts") or {}).get("normalized", 0)),
@@ -2591,17 +2846,16 @@ class DashboardServices:
                 "state": market_state["state"],
                 "provider": market_state["provider"],
                 "reason": market_state["reason"],
+                "requirements": odds_requirements,
             },
             "storage": storage_state,
             "market_sync": dict(self._market_runtime_state),
             "one_shot_sync": dict(self._one_shot_sync_state),
-            "xg": {
-                "state": "AVAILABLE" if self.config.current_xg_connected else "MISSING",
-            },
+            "xg": xg_status,
             "safeguards": {
-                "state": "BLOCKED" if not self.config.current_xg_connected else "READY",
-                "xg_availability": "AVAILABLE" if self.config.current_xg_connected else "POINT_IN_TIME_XG_MISSING",
-                "blocked_reason": None if self.config.current_xg_connected else "POINT-IN-TIME XG NOT AVAILABLE",
+                "state": "READY" if self.config.current_xg_connected else "BLOCKED",
+                "xg_availability": "AVAILABLE" if self.config.current_xg_connected else "DERIVED_XG_DISABLED",
+                "blocked_reason": xg_status["missing_requirement"],
             },
             "dashboard_ui_ready": "YES",
             "historical_validation": performance_status["historical_validation"],
@@ -2623,13 +2877,19 @@ class DashboardServices:
             if self.snapshot is not None
             else "NO",
             "current_market_decision_ready": "YES"
-            if market_state["configured"] and self._provider_state["configured"]
+            if market_state["configured"] and self._provider_state["configured"] and self.config.current_odds_connected
             else "NO",
             "current_paper_tracking_active": "YES"
             if int(self._market_runtime_state.get("paper_entry_count") or 0) > 0
             else "NO",
             "live_paper_pipeline_ready": "YES"
-            if market_state["configured"] and self._provider_state["configured"] and self.config.current_xg_connected
+            if (
+                market_state["configured"]
+                and self._provider_state["configured"]
+                and self.config.current_odds_connected
+                and self.config.enable_odds_sync
+                and self.config.current_xg_connected
+            )
             else "NO",
         }
 

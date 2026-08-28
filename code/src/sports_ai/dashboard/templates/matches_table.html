@@ -3,7 +3,7 @@
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Match Board</p>
     <h1>Matches &amp; Live Monitor</h1>
-    <p class="subhead desk-page-subhead">Operational fixture coverage across live, today, next, and finished windows using the current Football feed, prediction state, and market truth already persisted by the backend.</p>
+    <p class="subhead desk-page-subhead">Fixtures, status, predictions, and market readiness.</p>
   </div>
   <div class="page-actions">
     {{ status_badge(payload.system_status.fixture_feed.state, 'positive' if payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] else 'warning') }}
@@ -16,7 +16,7 @@
     <div>
       <p class="eyebrow">Working Surface</p>
       <h2>Fixture Slate</h2>
-      <p class="section-intro">Compact filters and one dense board for kickoff timing, eligibility, market state, and paper-readiness context.</p>
+      <p class="section-intro">Current Football fixture slate.</p>
     </div>
     <span>{{ payload.rows|length }} fixtures</span>
   </div>
@@ -133,7 +133,7 @@
             </td>
             <td>
               {% if row.market_signal %}
-                {{ row.market_signal.decision }} | {{ row.market_signal.selection }}{% if row.market_signal.line is not none %} {{ row.market_signal.line }}{% endif %}
+                {{ row.market_signal.current_decision_state or row.market_signal.decision }} | {{ row.market_signal.selection }}{% if row.market_signal.line is not none %} {{ row.market_signal.line }}{% endif %}
                 {% if row.market_signal.edge is not none %}<div class="row-sub">{{ "{:+.2%}".format(row.market_signal.edge|float) }}</div>{% endif %}
               {% else %}
                 {{ row.prediction.manager_decision_status if row.prediction else 'N/A' }}
@@ -141,7 +141,7 @@
             </td>
             <td>
               {% if row.market_signal %}
-                {{ status_badge(row.market_signal.day12_state, 'positive' if row.market_signal.day12_state == 'PASS' else 'inactive') }}
+                {{ status_badge(row.market_signal.safeguard_label or row.market_signal.day12_state, 'positive' if (row.market_signal.safeguard_label or row.market_signal.day12_state) == 'PASS' else 'inactive') }}
               {% else %}
                 {% if row.prediction %}
                   {{ status_badge(row.prediction.safeguard_status, 'positive' if row.prediction.safeguard_status == 'PASS' else 'inactive') }}

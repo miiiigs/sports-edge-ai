@@ -9,7 +9,7 @@
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Football Today</p>
     <h1>Best Picks of the Day</h1>
-    <p class="subhead desk-page-subhead">The Football homepage now follows the design pack's glance-first desk layout while preserving the same pick, edge, paper, and agent truth underneath.</p>
+    <p class="subhead desk-page-subhead">Today's qualified Football selections.</p>
   </div>
   <a class="refresh-button" href="/candidates">Open candidates view</a>
 </section>
@@ -45,10 +45,10 @@
     <section class="desk-panel desk-panel-primary">
       <div class="desk-panel-head">
         <div>
-          <span class="desk-panel-title">Today's Picks</span>
-          <span class="desk-panel-note">sorted by kickoff · real desk decisions only</span>
+          <span class="desk-panel-title">Best Picks</span>
+          <span class="desk-panel-note">Qualified BET rows only</span>
         </div>
-        <span class="desk-panel-meta">{{ payload.today_working_summary.bet_count }} BET / {{ payload.today_working_summary.no_bet_count }} NO BET</span>
+        <span class="desk-panel-meta">{{ payload.today_working_summary.bet_count }} BET</span>
       </div>
 
       {% if payload.best_picks %}
@@ -68,55 +68,45 @@
         </div>
       {% endif %}
 
-      {% if payload.today_working_rows %}
+      {% if payload.best_picks %}
         <div class="desk-table-wrap">
           <table class="desk-table">
             <thead>
               <tr>
                 <th>Time</th>
                 <th>Match</th>
-                <th>Market / Pick</th>
-                <th class="num">AI %</th>
-                <th class="num">Odds</th>
-                <th class="num">Impl. %</th>
+                <th>Bet</th>
+                <th class="num">Model %</th>
+                <th class="num">Market Odds</th>
+                <th class="num">Fair Odds</th>
                 <th class="num">Edge</th>
-                <th>Confidence / Risk</th>
-                <th>Desk</th>
+                <th>Risk / Safeguard</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody>
-              {% for row in payload.today_working_rows %}
-                <tr class="{% if not row.is_actionable %}desk-row-dim{% endif %}{% if row.is_featured %} desk-row-featured{% endif %}">
+              {% for row in payload.best_picks %}
+                <tr class="desk-row-featured">
                   <td class="desk-time">{{ row.kickoff_time_local }}</td>
                   <td class="desk-match-cell">
                     <a class="desk-match-link" href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
                     <span class="desk-cell-sub">{{ row.competition_name }}</span>
                   </td>
                   <td class="desk-market-cell">
-                    <span>{{ row.market_label }}</span>
                     <b>{{ row.bet_label }}</b>
                   </td>
                   <td class="num">{{ "{:.1%}".format(row.model_probability|float) }}</td>
                   <td class="num">{{ "{:.2f}".format(row.market_odds|float) if row.market_odds is not none else 'N/A' }}</td>
-                  <td class="num">{{ "{:.1%}".format(row.implied_probability|float) if row.implied_probability is not none else 'N/A' }}</td>
+                  <td class="num">{{ "{:.2f}".format(row.fair_odds|float) if row.fair_odds is not none else 'N/A' }}</td>
                   <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">
                     {{ "{:+.2%}".format(row.edge|float) if row.edge is not none else 'N/A' }}
                   </td>
                   <td class="desk-risk-cell">
-                    <span class="desk-confidence">{{ row.confidence_label }}</span>
+                    <span class="desk-confidence">{{ row.risk_status }}</span>
                     <small>{{ row.risk_summary }}</small>
                   </td>
-                  <td class="desk-decision-cell">
-                    <span class="desk-pill {% if row.is_actionable %}desk-pill-bet{% else %}desk-pill-nobet{% endif %}">{{ row.desk_label }}</span>
-                    {% if row.desk_note %}
-                      <small>{{ row.desk_note }}</small>
-                    {% endif %}
-                  </td>
                   <td>
-                    <span class="desk-pill {% if row.status_tone == 'live' %}desk-pill-live{% elif row.status_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">
-                      {{ row.status_label }}
-                    </span>
+                    <span class="desk-pill desk-pill-pending">PENDING</span>
                   </td>
                 </tr>
               {% endfor %}
@@ -126,7 +116,7 @@
       {% else %}
         <article class="empty-state desk-empty-state">
           <strong>{{ payload.today_working_summary.empty_message }}</strong>
-          <p>No fake desk rows are generated when current market evaluations are unavailable.</p>
+          <p>Only qualified BET rows appear here.</p>
         </article>
       {% endif %}
     </section>
@@ -156,7 +146,7 @@
         <div class="desk-panel-head">
           <div>
             <span class="desk-panel-title">Board Context</span>
-            <span class="desk-panel-note">cheap, truthful support only</span>
+            <span class="desk-panel-note">Current board totals</span>
           </div>
         </div>
         <div class="desk-context-list">
@@ -182,8 +172,75 @@
   <section class="section-block desk-panel">
     <div class="desk-panel-head">
       <div>
+        <span class="desk-panel-title">Other Desk Decisions</span>
+        <span class="desk-panel-note">NO BET, blocked, and unsupported rows</span>
+      </div>
+      <span class="desk-panel-meta">{{ payload.other_decision_summary.count }} rows</span>
+    </div>
+    {% if payload.other_decision_rows %}
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Match</th>
+              <th>Bet</th>
+              <th class="num">Model %</th>
+              <th class="num">Market Odds</th>
+              <th class="num">Fair Odds</th>
+              <th class="num">Edge</th>
+              <th>Risk / Safeguard</th>
+              <th>Desk</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payload.other_decision_rows %}
+              <tr class="desk-row-dim">
+                <td class="desk-time">{{ row.kickoff_time_local }}</td>
+                <td class="desk-match-cell">
+                  <a class="desk-match-link" href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+                  <span class="desk-cell-sub">{{ row.competition_name }}</span>
+                </td>
+                <td class="desk-market-cell"><b>{{ row.bet_label }}</b></td>
+                <td class="num">{{ "{:.1%}".format(row.model_probability|float) }}</td>
+                <td class="num">{{ "{:.2f}".format(row.market_odds|float) if row.market_odds is not none else 'N/A' }}</td>
+                <td class="num">{{ "{:.2f}".format(row.fair_odds|float) if row.fair_odds is not none else 'N/A' }}</td>
+                <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">
+                  {{ "{:+.2%}".format(row.edge|float) if row.edge is not none else 'N/A' }}
+                </td>
+                <td class="desk-risk-cell">
+                  <span class="desk-confidence">{{ row.confidence_label }}</span>
+                  <small>{{ row.risk_summary }}</small>
+                </td>
+                <td class="desk-decision-cell">
+                  <span class="desk-pill {% if row.current_decision_group == 'blocked' %}desk-pill-final{% elif row.current_decision_group == 'unsupported' %}desk-pill-lost{% else %}desk-pill-nobet{% endif %}">{{ row.desk_label }}</span>
+                  {% if row.desk_note %}
+                    <small>{{ row.desk_note }}</small>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="desk-pill {% if row.status_tone == 'live' %}desk-pill-live{% elif row.status_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">
+                    {{ row.status_label }}
+                  </span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <article class="empty-state desk-empty-state">
+        <strong>{{ payload.other_decision_summary.empty_message }}</strong>
+      </article>
+    {% endif %}
+  </section>
+
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head">
+      <div>
         <span class="desk-panel-title">Next Fixtures</span>
-        <span class="desk-panel-note">below-the-fold board context</span>
+        <span class="desk-panel-note">Upcoming board context</span>
       </div>
       <a class="filter-button" href="/matches?status_bucket=next">Open full board</a>
     </div>
@@ -257,6 +314,5 @@
         </article>
       {% endfor %}
     </div>
-    <p class="desk-funnel-note">Deeper settlement history, hit rate, P/L, ROI, and calibration stay deferred to the later analytics phase.</p>
   </section>
 </section>
