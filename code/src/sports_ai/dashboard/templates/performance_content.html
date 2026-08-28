@@ -16,6 +16,14 @@
   {% endfor %}
 </section>
 
+{% if payload.live_paper_sample %}
+  <section class="desk-sample-banner" aria-label="Live paper sample warning">
+    <span class="desk-pill desk-pill-pending">{{ payload.live_paper_sample.headline }}</span>
+    <strong>{{ payload.live_paper_sample.sample_label }}</strong>
+    <small>{{ payload.live_paper_sample.detail }}</small>
+  </section>
+{% endif %}
+
 {% if payload.current_paper_summary.settled_positions == 0 or payload.open_paper_positions|length == 0 %}
   <section class="section-block desk-panel">
     <div class="desk-context-list">

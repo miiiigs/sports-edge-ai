@@ -1308,7 +1308,7 @@ class DashboardServices:
             self._paper_metric_row(label="Analysed", value=analysed_count, note="unique today fixtures"),
             self._paper_metric_row(label="Predictions", value=predictions_count, note="persisted Route B rows"),
             self._paper_metric_row(label="Approved", value=approved_count, note="passed decision gates"),
-            self._paper_metric_row(label="Suggested Bets", value=suggested_bet_count, note="genuine paper picks"),
+            self._paper_metric_row(label="Suggested Bets", value=suggested_bet_count, note="genuine today paper picks"),
             self._paper_metric_row(label="Settled", value=performance.get("settled_positions"), note="terminal paper picks"),
             self._paper_metric_row(label="Won", value=performance.get("wins"), note="full wins"),
             self._paper_metric_row(label="Lost", value=performance.get("losses"), note="full losses"),
@@ -1317,6 +1317,22 @@ class DashboardServices:
             self._paper_metric_row(label="P/L", value=performance.get("net_units"), note="net paper units", formatter="units"),
             self._paper_metric_row(label="ROI", value=performance.get("roi"), note="settled stake only", formatter="rate"),
         ]
+
+    @staticmethod
+    def _settled_bet_sample_label(settled_count: int) -> str:
+        noun = "BET" if settled_count == 1 else "BETS"
+        return f"{settled_count} SETTLED {noun}"
+
+    def _live_paper_sample_callout(self, paper_rows: list[dict[str, Any]]) -> dict[str, str] | None:
+        performance = self._paper_performance_for_rows(paper_rows)
+        settled_count = int(performance.get("settled_positions") or 0)
+        if settled_count >= 5:
+            return None
+        return {
+            "headline": "LOW SAMPLE",
+            "sample_label": self._settled_bet_sample_label(settled_count),
+            "detail": "ROI and strike rate are directional only until at least 5 settled live paper bets exist.",
+        }
 
     @staticmethod
     def _value_candidate_row(row: dict[str, Any]) -> bool:
@@ -1373,32 +1389,62 @@ class DashboardServices:
             counts[self._blocking_reason_key(row)] = counts.get(self._blocking_reason_key(row), 0) + 1
         return counts
 
+    @staticmethod
+    def _client_blocking_reasons(counts: dict[str, int]) -> dict[str, int]:
+        client_counts = {
+            "Stale market": int(counts.get("NO_BET_STALE_MARKET") or 0),
+            "Missing reference": int(counts.get("MISSING_REFERENCE_MARKET") or 0)
+            + int(counts.get("MARKET_UNAVAILABLE") or 0),
+            "No value": int(counts.get("NO_BET_VALUE") or 0),
+            "Safeguard": int(counts.get("NO_BET_SAFEGUARD") or 0),
+        }
+        optional_labels = (
+            ("Unsupported", "LINE_UNSUPPORTED"),
+            ("Provider blocked", "PROVIDER_QUOTA_BLOCKED"),
+            ("Agent blocked", "AGENT_BLOCKED"),
+            ("Other", "Other"),
+        )
+        for label, key in optional_labels:
+            value = int(counts.get(key) or 0)
+            if value > 0:
+                client_counts[label] = value
+        return client_counts
+
+    @staticmethod
+    def _today_no_bet_reason_summary(counts: dict[str, int]) -> str:
+        return (
+            f"stale {int(counts.get('NO_BET_STALE_MARKET') or 0)} · "
+            f"missing reference {int(counts.get('MISSING_REFERENCE_MARKET') or 0) + int(counts.get('MARKET_UNAVAILABLE') or 0)} · "
+            f"no value {int(counts.get('NO_BET_VALUE') or 0)} · "
+            f"safeguard {int(counts.get('NO_BET_SAFEGUARD') or 0)}"
+        )
+
     def _today_funnel(
         self,
         *,
         working_rows: list[dict[str, Any]],
         analysed_count: int,
-        suggested_bet_count: int,
+        blocking_reasons: dict[str, int],
     ) -> list[dict[str, str]]:
+        bet_count = sum(1 for row in working_rows if row.get("current_decision_group") == "bet")
+        no_bet_count = max(0, len(working_rows) - bet_count)
         return [
             {"label": "Fixtures Analysed", "value": str(analysed_count), "note": "unique in-scope fixtures"},
-            {"label": "Predictions", "value": str(len(working_rows)), "note": "persisted Route B market rows"},
             {
-                "label": "Value Candidates",
-                "value": str(sum(1 for row in working_rows if self._value_candidate_row(row))),
-                "note": "model liked the price shape",
+                "label": "Decision Rows",
+                "value": str(len(working_rows)),
+                "note": "persisted Route B market rows",
             },
             {
-                "label": "Market Eligible",
-                "value": str(sum(1 for row in working_rows if self._market_eligible_row(row))),
-                "note": "fresh market available",
+                "label": "BET",
+                "value": str(bet_count),
+                "note": "passed decision gates",
             },
             {
-                "label": "Safeguard Approved",
-                "value": str(sum(1 for row in working_rows if self._safeguard_approved_row(row))),
-                "note": "passed applicable safeguards",
+                "label": "NO BET",
+                "value": str(no_bet_count),
+                "note": self._today_no_bet_reason_summary(blocking_reasons),
             },
-            {"label": "Suggested Bets", "value": str(suggested_bet_count), "note": "paper entries captured"},
         ]
 
     def _last_20_payload(self, paper_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1483,6 +1529,63 @@ class DashboardServices:
             return None
         return max(0, int(age.total_seconds() // 60))
 
+    def _market_runtime_decision_rows(self) -> list[dict[str, Any]]:
+        evaluations = dict(self._market_runtime_state.get("evaluations") or {})
+        if not evaluations:
+            evaluations = dict(self._market_evaluation_map())
+        decision_rows: list[dict[str, Any]] = []
+        for evaluation in evaluations.values():
+            decision_rows.extend(list(evaluation.get("decision_rows") or []))
+        return decision_rows
+
+    def _odds_freshness_summary(self) -> dict[str, str]:
+        decision_rows = self._market_runtime_decision_rows()
+        if not decision_rows:
+            return {"value": "NO DECISIONS", "note": "no persisted decision-row freshness yet"}
+
+        freshness_counts = Counter(
+            str(row.get("market_freshness") or row.get("freshness_state") or "UNKNOWN")
+            for row in decision_rows
+        )
+        timestamp_values = [
+            str(row["best_available_source_timestamp"])
+            for row in decision_rows
+            if row.get("best_available_source_timestamp")
+        ]
+        latest_timestamp = None if not timestamp_values else max(timestamp_values, key=parse_iso_datetime)
+        latest_age = self._age_minutes(latest_timestamp)
+        latest_note = ""
+        if latest_age is not None:
+            latest_note = f" · latest source {latest_age}m ago"
+
+        fresh_count = int(freshness_counts.get("FRESH") or 0)
+        stale_count = int(freshness_counts.get("STALE") or 0)
+        unknown_count = sum(
+            count
+            for freshness, count in freshness_counts.items()
+            if freshness not in {"FRESH", "STALE"}
+        )
+        if stale_count == 0 and unknown_count == 0:
+            return {
+                "value": "ALL FRESH",
+                "note": f"{fresh_count} decision rows fresh{latest_note}",
+            }
+        if fresh_count == 0 and unknown_count == 0:
+            return {
+                "value": "ALL STALE",
+                "note": f"{stale_count} decision rows stale{latest_note}",
+            }
+
+        note_parts: list[str] = []
+        if fresh_count > 0:
+            note_parts.append(f"{fresh_count} fresh")
+        if stale_count > 0:
+            note_parts.append(f"{stale_count} stale")
+        if unknown_count > 0:
+            note_parts.append(f"{unknown_count} unknown")
+        note = ", ".join(note_parts) if note_parts else "freshness mix unavailable"
+        return {"value": "MIXED FRESHNESS", "note": f"{note}{latest_note}"}
+
     def _system_health_strip(
         self,
         *,
@@ -1494,8 +1597,13 @@ class DashboardServices:
         fixture_state = str(system_status["fixture_feed"]["state"])
         odds_provider = str(system_status["odds_feed"]["provider"] or "N/A")
         market_sync = dict(system_status.get("market_sync") or {})
-        last_odds_refresh = market_sync.get("captured_at") or system_status["market_provider"].get("captured_at")
-        latest_market_timestamp = market_sync.get("latest_source_timestamp")
+        last_odds_refresh = (
+            market_sync.get("last_sync_at")
+            or market_sync.get("last_successful_snapshot_at")
+            or market_sync.get("captured_at")
+            or system_status["market_provider"].get("captured_at")
+        )
+        freshness_summary = self._odds_freshness_summary()
         oldest_unsettled = None
         open_rows = [
             row
@@ -1516,13 +1624,13 @@ class DashboardServices:
             {"label": "Odds Provider", "value": odds_provider, "note": str(system_status["market_provider"]["current_market_decisions"])},
             {
                 "label": "Odds Data Age",
-                "value": "UNAVAILABLE" if latest_market_timestamp is None else f"{self._age_minutes(latest_market_timestamp)}m",
-                "note": "latest source timestamp",
+                "value": freshness_summary["value"],
+                "note": freshness_summary["note"],
             },
             {
                 "label": "Last Odds Refresh",
                 "value": "UNAVAILABLE" if last_odds_refresh is None else str(last_odds_refresh),
-                "note": "dashboard market sync",
+                "note": "latest market sync checkpoint",
             },
             {
                 "label": "Oldest Unsettled Pick",
@@ -4118,16 +4226,10 @@ class DashboardServices:
         ][:6]
         paper_rows, paper_status = self._paper_positions()
         published_paper_rows = self._published_pick_rows(paper_rows)
-        today_published_rows = [
-            row
-            for row in published_paper_rows
-            if (
-                self._local_date_for_timestamp(row.get("kickoff_utc") or row.get("kickoff")) == self._current_local_date()
-                or str(row.get("trade_state") or "") in PAPER_ACTIVE_STATES
-            )
-        ]
+        today_published_rows = self._paper_rows_for_local_date(published_paper_rows)
+        today_paper_rows = self._paper_rows_for_local_date(paper_rows)
         best_picks = sorted(
-            today_published_rows or published_paper_rows,
+            today_published_rows,
             key=lambda row: (
                 0 if str(row.get("trade_state") or "") in PAPER_ACTIVE_STATES else 1,
                 -float(row.get("edge") or 0.0),
@@ -4145,6 +4247,7 @@ class DashboardServices:
         analysed_count = len({str(row["fixture_id"]) for row in today_working_rows})
         approved_count = sum(1 for row in today_working_rows if str(row.get("current_decision_state") or "") == "BET")
         blocking_reasons = self._blocking_reason_counts(today_working_rows)
+        client_blocking_reasons = self._client_blocking_reasons(blocking_reasons)
         return {
             "live": live_rows,
             "today": today_rows,
@@ -4167,7 +4270,7 @@ class DashboardServices:
                 "analysed": analysed_count,
                 "predictions": len(today_working_rows),
                 "approved": approved_count,
-                "suggested_bets": len(paper_rows),
+                "suggested_bets": len(today_published_rows),
                 "today_suggested_bets": len(today_published_rows),
                 "empty_message": "No current Route B desk rows are available for today's in-scope fixtures.",
             },
@@ -4182,17 +4285,18 @@ class DashboardServices:
                 analysed_count=analysed_count,
                 predictions_count=len(today_working_rows),
                 approved_count=approved_count,
-                suggested_bet_count=paper_status["paper_bets"],
-                paper_rows=paper_rows,
+                suggested_bet_count=len(today_published_rows),
+                paper_rows=today_paper_rows,
             ),
             "desk_funnel": self._today_funnel(
                 working_rows=today_working_rows,
                 analysed_count=analysed_count,
-                suggested_bet_count=len(paper_rows),
+                blocking_reasons=blocking_reasons,
             ),
-            "blocking_reasons": blocking_reasons,
+            "blocking_reasons": client_blocking_reasons,
             "last_20": self._last_20_payload(published_paper_rows),
             "cumulative_profit": self._cumulative_profit_payload(paper_rows),
+            "live_paper_sample": self._live_paper_sample_callout(paper_rows),
             "signals": self._signal_payload(system_status=system_status, paper_rows=paper_rows),
             "system_health": self._system_health_strip(
                 system_status=system_status,
@@ -4480,6 +4584,7 @@ class DashboardServices:
             "status_flags": {} if summary_payload is None else summary_payload.get("status_flags", {}),
             "kpis": kpis,
             "live_paper_kpis": self._live_paper_kpis(current_paper),
+            "live_paper_sample": self._live_paper_sample_callout(paper_positions),
             "market_rows": market_rows,
             "competition_rows": competition_rows,
             "season_rows": season_rows,

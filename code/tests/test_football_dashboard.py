@@ -2218,8 +2218,8 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    kickoff_one = (datetime.now(timezone.utc) + timedelta(hours=18)).replace(minute=0, second=0, microsecond=0).isoformat()
-    kickoff_two = (datetime.now(timezone.utc) + timedelta(hours=42)).replace(minute=0, second=0, microsecond=0).isoformat()
+    kickoff_one = "2026-08-29T10:00:00+00:00"
+    kickoff_two = "2026-08-30T10:00:00+00:00"
     first_fixture = replace(_fixture(fixture_id="fake:slate_one"), kickoff_utc=kickoff_one)
     second_fixture = replace(
         _fixture(
@@ -2306,6 +2306,8 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
             "fixture_id": first_fixture.fixture_id,
             "market": "1x2",
             "selection": "HOME",
+            "kickoff": kickoff_one,
+            "decision_timestamp": "2026-08-29T08:45:00+00:00",
             "trade_state": "PENDING",
             "entry_odds": 2.05,
         },
@@ -2315,12 +2317,21 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
             "market": "goals_total",
             "selection": "OVER",
             "line": 2.5,
+            "kickoff": kickoff_two,
+            "decision_timestamp": "2026-08-30T08:45:00+00:00",
             "trade_state": "OPEN",
             "entry_odds": 1.95,
         },
-        {"paper_trade_id": "paper_old", "market": "1x2", "trade_state": "OPEN", "entry_odds": 2.20},
+        {
+            "paper_trade_id": "paper_old",
+            "market": "1x2",
+            "decision_timestamp": "2026-08-27T08:45:00+00:00",
+            "trade_state": "OPEN",
+            "entry_odds": 2.20,
+        },
         ]
 
+    monkeypatch.setattr(services, "_current_local_date", lambda: date(2026, 8, 29))
     monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: fixture_rows)
     monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: fixture_rows)
     monkeypatch.setattr(
@@ -2356,32 +2367,39 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
     metrics = {item["label"]: item for item in payload["glance_metrics"]}
     funnel = {item["label"]: item for item in payload["desk_funnel"]}
 
-    assert payload["best_picks_summary"]["count"] == 2
+    assert payload["best_picks_summary"]["count"] == 1
+    assert len(payload["today_published_rows"]) == 1
     assert payload["current_slate_summary"]["fixture_count"] == 2
     assert payload["current_slate_summary"]["count"] == 3
     assert payload["current_slate_summary"]["bet_count"] == 2
     assert payload["current_slate_summary"]["no_bet_count"] == 1
     assert payload["current_slate_summary"]["paper_entry_count"] == 2
     assert payload["current_slate_summary"]["pending_count"] == 2
+    assert payload["today_summary"]["suggested_bets"] == 1
     assert payload["system_status"]["current_fixture_state"]["today_count"] == 0
     assert metrics["Analysed"] == {"label": "Analysed", "value": "0", "note": "unique today fixtures"}
     assert metrics["Predictions"] == {"label": "Predictions", "value": "0", "note": "persisted Route B rows"}
     assert metrics["Approved"] == {"label": "Approved", "value": "0", "note": "passed decision gates"}
-    assert metrics["Suggested Bets"] == {"label": "Suggested Bets", "value": "3", "note": "genuine paper picks"}
+    assert metrics["Suggested Bets"] == {"label": "Suggested Bets", "value": "1", "note": "genuine today paper picks"}
     assert metrics["Settled"] == {"label": "Settled", "value": "0", "note": "terminal paper picks"}
     assert metrics["Won"] == {"label": "Won", "value": "0", "note": "full wins"}
     assert metrics["Lost"] == {"label": "Lost", "value": "0", "note": "full losses"}
     assert "Push" not in metrics
-    assert metrics["Pending"] == {"label": "Pending", "value": "3", "note": "unsettled paper picks"}
+    assert metrics["Pending"] == {"label": "Pending", "value": "1", "note": "unsettled paper picks"}
     assert metrics["Strike Rate"] == {"label": "Strike Rate", "value": "NOT AVAILABLE", "note": "pushes excluded"}
     assert metrics["P/L"] == {"label": "P/L", "value": "+0.00", "note": "net paper units"}
     assert metrics["ROI"] == {"label": "ROI", "value": "NOT AVAILABLE", "note": "settled stake only"}
     assert funnel["Fixtures Analysed"]["value"] == "0"
-    assert funnel["Predictions"]["value"] == "0"
-    assert funnel["Value Candidates"]["value"] == "0"
-    assert funnel["Market Eligible"]["value"] == "0"
-    assert funnel["Safeguard Approved"]["value"] == "0"
-    assert funnel["Suggested Bets"]["value"] == "3"
+    assert funnel["Decision Rows"]["value"] == "0"
+    assert funnel["BET"]["value"] == "0"
+    assert funnel["NO BET"]["value"] == "0"
+    assert funnel["NO BET"]["note"] == "stale 0 · missing reference 0 · no value 0 · safeguard 0"
+    assert payload["blocking_reasons"] == {
+        "Stale market": 0,
+        "Missing reference": 0,
+        "No value": 0,
+        "Safeguard": 0,
+    }
 
 
 def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no_paper_status(
@@ -2459,6 +2477,7 @@ def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no
         }
     ]
 
+    monkeypatch.setattr(services, "_current_local_date", lambda: date(2026, 8, 28))
     monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: fixture_rows)
     monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: fixture_rows)
     monkeypatch.setattr(
@@ -2522,6 +2541,143 @@ def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no
     assert "NO BET" in response.text
 
 
+def test_dashboard_payload_surfaces_mixed_freshness_and_low_sample_warning(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    kickoff = "2026-08-29T10:00:00+00:00"
+    fixture = replace(_fixture(home_team_name="Aston Villa", away_team_name="Arsenal"), kickoff_utc=kickoff)
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=True),
+    )
+    fixture_row = fixture.to_dict(timezone_name="UTC")
+    bet_row = {
+        "fixture_id": fixture.fixture_id,
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "decision": "PRELIMINARY_CANDIDATE",
+        "current_decision_state": "BET",
+        "market_family": "1x2",
+        "selection": "HOME",
+        "line": None,
+        "model_probability": 0.63,
+        "model_fair_decimal_price": 1.59,
+        "best_available_price": 2.05,
+        "best_available_bookmaker": "bet365",
+        "best_available_source_timestamp": "2026-08-29T08:28:07Z",
+        "settlement_aware_edge": 0.2915,
+        "paper_entry_eligible": True,
+        "paper_trade_id": "paper_settled_1",
+        "market_freshness": "FRESH",
+        "day12_state": "PASSED",
+        "reason_codes": [],
+    }
+    stale_row = {
+        "fixture_id": fixture.fixture_id,
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "decision": "STALE_MARKET",
+        "current_decision_state": "NO_BET_STALE_MARKET",
+        "market_family": "btts",
+        "selection": "YES",
+        "line": None,
+        "model_probability": 0.54,
+        "model_fair_decimal_price": 1.85,
+        "best_available_price": 1.72,
+        "best_available_bookmaker": "bet365",
+        "best_available_source_timestamp": "2026-08-29T05:10:00Z",
+        "settlement_aware_edge": -0.0712,
+        "paper_entry_eligible": False,
+        "market_freshness": "STALE",
+        "day12_state": "PASSED",
+        "reason_codes": [],
+    }
+    paper_rows = [
+        {
+            "paper_trade_id": "paper_settled_1",
+            "fixture_id": fixture.fixture_id,
+            "market": "1x2",
+            "selection": "HOME",
+            "line": None,
+            "model_probability": 0.315679,
+            "model_fair_price": 3.1678,
+            "entry_odds": 2.05,
+            "edge": 0.2915,
+            "bookmaker": "bet365",
+            "kickoff": kickoff,
+            "entry_captured_at": "2026-08-29T08:00:00Z",
+            "decision_timestamp": "2026-08-29T08:00:00Z",
+            "trade_state": "LOST",
+            "net_pnl": -1.0,
+            "latest_update_payload": None,
+        }
+    ]
+
+    monkeypatch.setattr(services, "_current_local_date", lambda: date(2026, 8, 29))
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: [fixture_row])
+    monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: [fixture_row])
+    monkeypatch.setattr(
+        services,
+        "_filter_fixture_rows",
+        lambda *, bucket, fixture_rows: [fixture_row] if bucket == "today" else [],
+    )
+    monkeypatch.setattr(
+        services,
+        "_market_evaluation_map",
+        lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [bet_row, stale_row],
+                "display_rows": [bet_row, stale_row],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        services,
+        "_paper_positions",
+        lambda: (paper_rows, football_paper_trading.paper_trading_status(paper_rows)),
+    )
+    services._market_runtime_state.update(
+        {
+            "state": "READY",
+            "last_sync_at": "2026-08-29T10:15:00Z",
+            "evaluations": {
+                fixture.fixture_id: {
+                    "decision_rows": [bet_row, stale_row],
+                }
+            },
+        }
+    )
+
+    payload = services.get_dashboard_payload()
+    health = {item["label"]: item for item in payload["system_health"]}
+
+    assert payload["live_paper_sample"] == {
+        "headline": "LOW SAMPLE",
+        "sample_label": "1 SETTLED BET",
+        "detail": "ROI and strike rate are directional only until at least 5 settled live paper bets exist.",
+    }
+    assert health["Odds Data Age"]["value"] == "MIXED FRESHNESS"
+    assert "1 fresh, 1 stale" in health["Odds Data Age"]["note"]
+    assert health["Last Odds Refresh"]["value"] == "2026-08-29T10:15:00Z"
+
+    app = create_app(services=services)
+    with TestClient(app) as client:
+        dashboard_response = client.get("/")
+        performance_response = client.get("/performance")
+
+    assert dashboard_response.status_code == 200
+    assert "LOW SAMPLE" in dashboard_response.text
+    assert "1 SETTLED BET" in dashboard_response.text
+    assert "MIXED FRESHNESS" in dashboard_response.text
+    assert performance_response.status_code == 200
+    assert "LOW SAMPLE" in performance_response.text
+    assert "1 SETTLED BET" in performance_response.text
+
+
 def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -> None:
     fixture = _fixture()
     app = create_app(
@@ -2548,7 +2704,7 @@ def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -
     assert "Agent 2" not in response.text
 
 
-def test_dashboard_home_uses_market_unavailable_when_provider_is_connected(tmp_path: Path) -> None:
+def test_dashboard_home_avoids_disconnected_market_copy_when_provider_is_connected(tmp_path: Path) -> None:
     fixture = _fixture()
     app = create_app(
         config=replace(
@@ -2564,7 +2720,7 @@ def test_dashboard_home_uses_market_unavailable_when_provider_is_connected(tmp_p
         response = client.get("/")
 
     assert response.status_code == 200
-    assert "MARKET_UNAVAILABLE" in response.text
+    assert "No current Route B desk rows are available for today&#39;s in-scope fixtures." in response.text
     assert "MARKET_DATA_NOT_CONNECTED" not in response.text
 
 

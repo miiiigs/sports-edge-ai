@@ -26,12 +26,20 @@
     {% endfor %}
   </div>
 
+  {% if payload.live_paper_sample %}
+    <section class="desk-sample-banner" aria-label="Live paper sample warning">
+      <span class="desk-pill desk-pill-pending">{{ payload.live_paper_sample.headline }}</span>
+      <strong>{{ payload.live_paper_sample.sample_label }}</strong>
+      <small>{{ payload.live_paper_sample.detail }}</small>
+    </section>
+  {% endif %}
+
   <div class="desk-main-grid">
     <section class="desk-panel desk-panel-primary">
       <div class="desk-panel-head">
         <div>
           <span class="desk-panel-title">Best Picks</span>
-          <span class="desk-panel-note">Immutable published paper picks only</span>
+          <span class="desk-panel-note">Immutable published paper picks on today's board only</span>
         </div>
         <span class="desk-panel-meta">{{ payload.best_picks_summary.count }} PICKS</span>
       </div>
@@ -135,7 +143,10 @@
         </div>
         <div class="desk-context-list">
           {% for item in payload.desk_funnel %}
-            <div><span>{{ item.label }}</span><b>{{ item.value }}</b></div>
+            <div>
+              <span>{{ item.label }}{% if item.note %}<small>{{ item.note }}</small>{% endif %}</span>
+              <b>{{ item.value }}</b>
+            </div>
           {% endfor %}
         </div>
       </section>
@@ -303,7 +314,10 @@
     </div>
     <div class="desk-context-list">
       {% for item in payload.system_health %}
-        <div><span>{{ item.label }}</span><b>{{ item.value }}</b></div>
+        <div>
+          <span>{{ item.label }}{% if item.note %}<small>{{ item.note }}</small>{% endif %}</span>
+          <b>{{ item.value }}</b>
+        </div>
       {% endfor %}
     </div>
     <a class="rail-link" href="/status">Open internal status <span>-></span></a>
