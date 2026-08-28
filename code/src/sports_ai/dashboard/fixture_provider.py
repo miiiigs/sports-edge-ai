@@ -635,7 +635,10 @@ class ApiFootballFixtureProvider(FixtureProvider):
         if not raw_value:
             return None
         path = Path(raw_value)
-        return path if path.exists() else None
+        if path.exists():
+            return path
+        repo_relative = Path(__file__).resolve().parents[4] / raw_value
+        return repo_relative if repo_relative.exists() else None
 
     def _token(self) -> str:
         token = os.environ.get(self._config.token_env_var, "").strip()
@@ -884,6 +887,10 @@ class ApiFootballFixtureProvider(FixtureProvider):
                 return division_code
         return None
 
+    def _local_date_for_fixture(self, fixture: NormalizedFixture) -> date:
+        timezone_name = ZoneInfo(self._config.display_timezone)
+        return datetime.fromisoformat(fixture.kickoff_utc).astimezone(timezone_name).date()
+
     def _normalize_fixture(self, payload: dict[str, Any]) -> NormalizedFixture | None:
         fixture_payload = payload.get("fixture") or {}
         league_payload = payload.get("league") or {}
@@ -974,30 +981,39 @@ class ApiFootballFixtureProvider(FixtureProvider):
     def get_fixtures_for_date(self, target_date: date) -> list[NormalizedFixture]:
         if not self.configured():
             raise FixtureProviderNotConfiguredError("API-Football is not configured")
-        target_date_text = target_date.isoformat()
+        timezone_name = ZoneInfo(self._config.display_timezone)
+        local_start = datetime.combine(target_date, daytime.min, tzinfo=timezone_name)
+        local_end = datetime.combine(target_date + timedelta(days=1), daytime.min, tzinfo=timezone_name)
+        utc_dates: list[date] = []
+        current_utc_date = local_start.astimezone(timezone.utc).date()
+        final_utc_date = (local_end - timedelta(seconds=1)).astimezone(timezone.utc).date()
+        while current_utc_date <= final_utc_date:
+            utc_dates.append(current_utc_date)
+            current_utc_date += timedelta(days=1)
         fixtures: list[NormalizedFixture] = []
         league_items = sorted(self._league_map().items())
 
-        def fetch_league_rows(item: tuple[str, int]) -> tuple[str, list[dict[str, Any]]]:
-            division_code, league_id = item
+        def fetch_league_rows(item: tuple[str, int, date]) -> tuple[str, date, list[dict[str, Any]]]:
+            division_code, league_id, query_date = item
             rows = self._request_fixtures(
                 params={
-                    "date": target_date_text,
+                    "date": query_date.isoformat(),
                     "league": league_id,
                     "season": target_date.year,
                 }
             )
-            return division_code, rows
+            return division_code, query_date, rows
 
-        with ThreadPoolExecutor(max_workers=min(5, max(1, len(league_items)))) as executor:
-            for division_code, rows in executor.map(fetch_league_rows, league_items):
+        fetch_items = [(division_code, league_id, query_date) for division_code, league_id in league_items for query_date in utc_dates]
+        with ThreadPoolExecutor(max_workers=min(5, max(1, len(fetch_items)))) as executor:
+            for division_code, _, rows in executor.map(fetch_league_rows, fetch_items):
                 for row in rows:
                     normalized = self._normalize_fixture(row)
                     if normalized is None:
                         continue
                     if normalized.division_code != division_code:
                         continue
-                    if normalized.kickoff_utc[:10] != target_date_text:
+                    if self._local_date_for_fixture(normalized) != target_date:
                         continue
                     fixtures.append(normalized)
         return self._dedupe(fixtures)

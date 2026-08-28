@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Lock
 from time import monotonic
 from typing import Any
@@ -146,7 +147,11 @@ class ApiFootballOddsProvider:
         if not path_text:
             self._league_map_cache = {}
             return {}
-        with open(path_text, "r", encoding="utf-8") as handle:
+        path = Path(path_text)
+        if not path.exists():
+            repo_relative = Path(__file__).resolve().parents[4] / path_text
+            path = repo_relative
+        with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         self._league_map_cache = {str(key): int(value) for key, value in payload.items()}
         return dict(self._league_map_cache)

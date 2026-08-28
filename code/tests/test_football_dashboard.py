@@ -6,6 +6,7 @@ import math
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,7 +64,12 @@ class FakeFixtureProvider:
         return [fixture for fixture in self.fixtures if fixture.status == FIXTURE_STATUS_LIVE]
 
     def get_fixtures_for_date(self, target_date: date) -> list[NormalizedFixture]:
-        return [fixture for fixture in self.fixtures if fixture.kickoff_utc[:10] == target_date.isoformat()]
+        timezone_name = ZoneInfo("Asia/Manila")
+        return [
+            fixture
+            for fixture in self.fixtures
+            if datetime.fromisoformat(fixture.kickoff_utc).astimezone(timezone_name).date() == target_date
+        ]
 
     def get_upcoming_fixtures(
         self,
@@ -181,6 +187,11 @@ class FlakyFixtureProvider(FakeFixtureProvider):
             self.fail_next = False
             raise FixtureProviderError("transient provider failure")
         return super().get_live_fixtures()
+
+
+class PostEvaluationFailureDashboardServices(DashboardServices):
+    def _process_paper_trading_updates(self, rows_with_predictions: list[dict[str, object]]) -> None:
+        raise RuntimeError("synthetic settlement crash")
 
 
 def _repo_root() -> Path:
@@ -1281,6 +1292,7 @@ def test_dashboard_services_settles_finished_paper_trade_idempotently_and_report
     config = replace(
         _dashboard_config(tmp_path),
         current_odds_connected=True,
+        current_xg_connected=True,
         enable_odds_sync=True,
     )
     provider = FakeFixtureProvider([pending_fixture])
@@ -1380,16 +1392,126 @@ def test_dashboard_services_settles_finished_paper_trade_idempotently_and_report
         api_response = client.get("/api/performance")
 
     assert response.status_code == 200
-    assert "Recent Settled Bets" in response.text
-    assert "Current Open Paper Bets" in response.text
-    assert "Arsenal vs Chelsea" in response.text
-    assert "2-1" in response.text
-    assert "WON" in response.text
+    assert "Model Performance" in response.text
     assert api_response.status_code == 200
     assert api_response.json()["summary"]["MODEL_VALIDATION"] == "PROMISING"
     assert api_response.json()["current_paper_summary"]["roi"] == pytest.approx(1.2)
+    assert api_response.json()["recent_paper_bets"][0]["fixture_label"] == "Arsenal vs Chelsea"
+    assert api_response.json()["recent_paper_bets"][0]["final_score"] == "2-1"
+    assert api_response.json()["recent_paper_bets"][0]["trade_state"] == "WON"
 
     asyncio.run(services.shutdown())
+
+
+def test_market_runtime_state_checkpoints_decisions_before_late_sync_failure(tmp_path: Path) -> None:
+    fixture = _fixture()
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        current_xg_connected=True,
+        enable_odds_sync=True,
+    )
+    def xg_factory(row, prediction, snapshots):
+        expected_home = float(prediction["expected_home_goals"])
+        expected_away = float(prediction["expected_away_goals"])
+
+        def _row(role, recent):
+            return {
+                "fixture_id": fixture.fixture_id,
+                "team_role": role,
+                "recent_xg_for_per_match": recent,
+                "matches_in_window": 5,
+                "as_of": "2026-08-28T20:00:00+00:00",
+                "window_start_at": "2026-08-01T20:00:00+00:00",
+                "window_end_at": "2026-08-28T20:00:00+00:00",
+                "source": SOURCE_IDENTIFIER,
+                "competition_id": "ENG1",
+            }
+
+        rows = {
+            (fixture.fixture_id, "HOME"): _row("HOME", expected_home),
+            (fixture.fixture_id, "AWAY"): _row("AWAY", expected_away),
+        }
+        inspection = build_xg_inspection(rows)
+        return lambda: (rows, inspection)
+
+    services = PostEvaluationFailureDashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(
+            snapshots_by_fixture={
+                fixture.fixture_id: [
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="Pinnacle",
+                        market="1x2",
+                        selection="HOME",
+                        decimal_odds=2.05,
+                        reference_designation="reference",
+                        provider_market_id="pin-home",
+                    ),
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="Pinnacle",
+                        market="1x2",
+                        selection="DRAW",
+                        decimal_odds=3.35,
+                        reference_designation="reference",
+                        provider_market_id="pin-draw",
+                    ),
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="Pinnacle",
+                        market="1x2",
+                        selection="AWAY",
+                        decimal_odds=3.95,
+                        reference_designation="reference",
+                        provider_market_id="pin-away",
+                    ),
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="bet365",
+                        market="1x2",
+                        selection="HOME",
+                        decimal_odds=10.0,
+                        reference_designation="available",
+                        provider_market_id="b365-home",
+                    ),
+                ]
+            },
+            configured=True,
+        ),
+        xg_profile_factory=xg_factory,
+    )
+    services._build_snapshot()
+
+    with dashboard_storage.connect(config.dashboard_db_path) as dashboard_conn:
+        dashboard_storage.ensure_schema(dashboard_conn)
+        football_edge_desk.ensure_schema(dashboard_conn)
+        dashboard_storage.upsert_fixtures(
+            dashboard_conn,
+            [fixture],
+            updated_at="2026-08-29T00:00:00+00:00",
+        )
+        with football_paper_trading.connect(config.paper_trading_db_path) as paper_conn:
+            football_paper_trading.ensure_schema(paper_conn)
+        prediction = services.ensure_prediction(dashboard_conn, fixture)
+        assert services._prediction_eligibility_status(prediction) == "PREDICTION_READY"
+
+        fixture_row = fixture.to_dict(timezone_name="UTC")
+        fixture_row["prediction"] = prediction
+
+        with pytest.raises(RuntimeError, match="synthetic settlement crash"):
+            services._sync_current_market_state([fixture_row], dashboard_conn=dashboard_conn)
+
+        runtime_state = dashboard_storage.get_runtime_state(dashboard_conn, "market_runtime_state")
+
+    assert runtime_state is not None
+    assert runtime_state["state"] == "READY"
+    assert runtime_state["fixtures_matched"] == 1
+    assert runtime_state["market_snapshots"] == 4
+    assert runtime_state["decision_count"] >= 1
+    assert fixture.fixture_id in runtime_state["evaluations"]
 
 
 def test_dashboard_services_settles_finished_asian_handicap_trade_idempotently_and_reports_live_results(
@@ -2179,10 +2301,25 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
         "reason_codes": ["PRICE_NO_VALUE"],
     }
     paper_rows = [
-        {"paper_trade_id": "paper_current_1", "market": "1x2", "trade_state": "PENDING", "entry_odds": 2.05},
-        {"paper_trade_id": "paper_current_2", "market": "goals_total", "trade_state": "OPEN", "entry_odds": 1.95},
+        {
+            "paper_trade_id": "paper_current_1",
+            "fixture_id": first_fixture.fixture_id,
+            "market": "1x2",
+            "selection": "HOME",
+            "trade_state": "PENDING",
+            "entry_odds": 2.05,
+        },
+        {
+            "paper_trade_id": "paper_current_2",
+            "fixture_id": second_fixture.fixture_id,
+            "market": "goals_total",
+            "selection": "OVER",
+            "line": 2.5,
+            "trade_state": "OPEN",
+            "entry_odds": 1.95,
+        },
         {"paper_trade_id": "paper_old", "market": "1x2", "trade_state": "OPEN", "entry_odds": 2.20},
-    ]
+        ]
 
     monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: fixture_rows)
     monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: fixture_rows)
@@ -2227,21 +2364,24 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
     assert payload["current_slate_summary"]["paper_entry_count"] == 2
     assert payload["current_slate_summary"]["pending_count"] == 2
     assert payload["system_status"]["current_fixture_state"]["today_count"] == 0
-    assert metrics["Analysed"] == {"label": "Analysed", "value": "2", "note": "current slate fixtures"}
-    assert metrics["Approved"] == {"label": "Approved", "value": "2", "note": "qualified"}
-    assert metrics["Suggested Bets"] == {"label": "Suggested Bets", "value": "3", "note": "all paper bets"}
-    assert metrics["Settled"] == {"label": "Settled", "value": "0", "note": "final results"}
+    assert metrics["Analysed"] == {"label": "Analysed", "value": "0", "note": "unique today fixtures"}
+    assert metrics["Predictions"] == {"label": "Predictions", "value": "0", "note": "persisted Route B rows"}
+    assert metrics["Approved"] == {"label": "Approved", "value": "0", "note": "passed decision gates"}
+    assert metrics["Suggested Bets"] == {"label": "Suggested Bets", "value": "3", "note": "genuine paper picks"}
+    assert metrics["Settled"] == {"label": "Settled", "value": "0", "note": "terminal paper picks"}
     assert metrics["Won"] == {"label": "Won", "value": "0", "note": "full wins"}
     assert metrics["Lost"] == {"label": "Lost", "value": "0", "note": "full losses"}
-    assert metrics["Push"] == {"label": "Push", "value": "0", "note": "stake returned"}
-    assert metrics["Pending"] == {"label": "Pending", "value": "3", "note": "open paper"}
+    assert "Push" not in metrics
+    assert metrics["Pending"] == {"label": "Pending", "value": "3", "note": "unsettled paper picks"}
     assert metrics["Strike Rate"] == {"label": "Strike Rate", "value": "NOT AVAILABLE", "note": "pushes excluded"}
-    assert metrics["P/L"] == {"label": "P/L", "value": "+0.00", "note": "net units"}
+    assert metrics["P/L"] == {"label": "P/L", "value": "+0.00", "note": "net paper units"}
     assert metrics["ROI"] == {"label": "ROI", "value": "NOT AVAILABLE", "note": "settled stake only"}
-    assert funnel["Desk rows"]["value"] == "3"
-    assert funnel["Suggested bets"]["value"] == "2"
-    assert funnel["BET rows"]["value"] == "2"
-    assert funnel["NO BET rows"]["value"] == "1"
+    assert funnel["Fixtures Analysed"]["value"] == "0"
+    assert funnel["Predictions"]["value"] == "0"
+    assert funnel["Value Candidates"]["value"] == "0"
+    assert funnel["Market Eligible"]["value"] == "0"
+    assert funnel["Safeguard Approved"]["value"] == "0"
+    assert funnel["Suggested Bets"]["value"] == "3"
 
 
 def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no_paper_status(
@@ -2365,6 +2505,8 @@ def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no
     assert published_pick["fair_odds"] == pytest.approx(3.1678)
     assert published_pick["paper_trade_state"] == "PENDING"
     assert payload["other_decision_rows"][0]["desk_label"] == "NO BET"
+    no_bet_today_row = next(row for row in payload["today_desk_rows"] if row["desk_label"] == "NO BET")
+    assert no_bet_today_row["status_label"] != "PENDING"
 
     app = create_app(services=services)
     with TestClient(app) as client:
@@ -2377,9 +2519,7 @@ def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no
     assert "7.00" in response.text
     assert "+120.98%" in response.text
     assert "PENDING" in response.text
-    other_section = response.text.split("Other Desk Decisions", 1)[1]
-    assert "NO BET" in other_section
-    assert "PENDING" not in other_section
+    assert "NO BET" in response.text
 
 
 def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -> None:
@@ -2394,12 +2534,11 @@ def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -
         response = client.get("/")
 
     assert response.status_code == 200
-    assert "Current Slate Best Picks" in response.text
-    assert "Current qualified Football selections." in response.text
-    assert "Other Desk Decisions" in response.text
-    assert "Desk Funnel" in response.text
-    assert "No qualified picks currently meet the model, value and risk requirements." in response.text
-    assert "No current market decision rows are available" in response.text
+    assert "Today" in response.text
+    assert "Best Picks" in response.text
+    assert "Production Funnel" in response.text
+    assert "No genuine published paper picks are currently attached to today&#39;s board." in response.text
+    assert "No current Route B desk rows are available for today&#39;s in-scope fixtures." in response.text
     assert "Route B Composite" in response.text
     assert "Route A Direct Classifier" in response.text
     assert "REJECTED" in response.text

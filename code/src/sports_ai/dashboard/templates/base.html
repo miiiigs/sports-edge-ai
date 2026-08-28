@@ -1,18 +1,32 @@
 {% from "_ui.html" import status_badge %}
 {% set fixture_feed_ready = payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] %}
 {% set market_feed_ready = payload.system_status.odds_feed.state in ['CONNECTED', 'READY', 'IDLE', 'NO_CURRENT_EVENTS'] %}
-{% if page == 'dashboard' %}
-  {% set page_label = 'Overview' %}
-{% elif page == 'matches' or page == 'match_detail' %}
-  {% set page_label = 'Live Monitor' %}
+{% if page == 'today' or page == 'dashboard' %}
+  {% set page_label = 'Today' %}
+{% elif page == 'betting_desk' or page == 'candidates' %}
+  {% set page_label = 'Betting Desk' %}
+{% elif page == 'member_card' %}
+  {% set page_label = 'Member Card' %}
+{% elif page == 'performance' %}
+  {% set page_label = 'Model Performance' %}
+{% elif page == 'segment_explorer' %}
+  {% set page_label = 'Segment Explorer' %}
+{% elif page == 'error_centre' %}
+  {% set page_label = 'Error Centre' %}
+{% elif page == 'no_bet_archive' %}
+  {% set page_label = 'No-Bet Archive' %}
+{% elif page == 'pick_detail' or page == 'match_detail' %}
+  {% set page_label = 'Pick Detail' %}
+{% elif page == 'reports' %}
+  {% set page_label = 'Reports' %}
+{% elif page == 'status' %}
+  {% set page_label = 'Internal / System Status' %}
+{% elif page == 'matches' %}
+  {% set page_label = 'Fixture Board' %}
 {% elif page == 'predictions' %}
   {% set page_label = 'Predictions' %}
-{% elif page == 'performance' %}
-  {% set page_label = 'Performance' %}
-{% elif page == 'status' %}
-  {% set page_label = 'Status' %}
 {% else %}
-  {% set page_label = 'Watchlist' %}
+  {% set page_label = 'Football Desk' %}
 {% endif %}
 <!doctype html>
 <html lang="en">
@@ -52,50 +66,68 @@
 
       <nav aria-label="Primary navigation">
         <p class="eyebrow">Board</p>
-        <a href="/" class="nav-item {% if page == 'dashboard' %}nav-active{% endif %}">
+        <a href="/" class="nav-item {% if page == 'today' or page == 'dashboard' %}nav-active{% endif %}">
           <span class="nav-copy">
-            <span class="nav-label">Overview</span>
-            <small class="nav-caption">Best picks and desk card</small>
+            <span class="nav-label">Today</span>
+            <small class="nav-caption">KPI strip, best picks, and health</small>
           </span>
-          {% if page == 'dashboard' %}<i class="status-dot"></i>{% endif %}
+          {% if page == 'today' or page == 'dashboard' %}<i class="status-dot"></i>{% endif %}
         </a>
-        <a href="/matches" class="nav-item {% if page == 'matches' or page == 'match_detail' %}nav-active{% endif %}">
+        <a href="/betting-desk" class="nav-item {% if page == 'betting_desk' or page == 'candidates' %}nav-active{% endif %}">
           <span class="nav-copy">
-            <span class="nav-label">Live Monitor</span>
-            <small class="nav-caption">Fixtures, state, and drill-down</small>
+            <span class="nav-label">Betting Desk</span>
+            <small class="nav-caption">Model view and desk decision</small>
           </span>
           {% if payload.system_status.fixture_feed.counts.live > 0 %}<i class="status-dot status-dot-live"></i>{% endif %}
         </a>
-        <a href="/predictions" class="nav-item {% if page == 'predictions' %}nav-active{% endif %}">
+        <a href="/member-card" class="nav-item {% if page == 'member_card' %}nav-active{% endif %}">
           <span class="nav-copy">
-            <span class="nav-label">Predictions</span>
-            <small class="nav-caption">Persisted model output</small>
+            <span class="nav-label">Member Card</span>
+            <small class="nav-caption">Simplified published picks view</small>
           </span>
         </a>
-        <a href="/candidates" class="nav-item {% if page == 'candidates' %}nav-active{% endif %}">
+        <a href="/model-performance" class="nav-item {% if page == 'performance' %}nav-active{% endif %}">
           <span class="nav-copy">
-            <span class="nav-label">Watchlist</span>
-            <small class="nav-caption">Current-market desk review</small>
+            <span class="nav-label">Model Performance</span>
+            <small class="nav-caption">Route B live paper evidence</small>
           </span>
         </a>
-        <a href="/performance" class="nav-item {% if page == 'performance' %}nav-active{% endif %}">
+        <a href="/segment-explorer" class="nav-item {% if page == 'segment_explorer' %}nav-active{% endif %}">
           <span class="nav-copy">
-            <span class="nav-label">Performance</span>
-            <small class="nav-caption">Current persisted reporting</small>
+            <span class="nav-label">Segment Explorer</span>
+            <small class="nav-caption">League, market, and model cuts</small>
+          </span>
+        </a>
+        <a href="/error-centre" class="nav-item {% if page == 'error_centre' %}nav-active{% endif %}">
+          <span class="nav-copy">
+            <span class="nav-label">Error Centre</span>
+            <small class="nav-caption">Provider issues vs model outcomes</small>
+          </span>
+        </a>
+        <a href="/no-bet-archive" class="nav-item {% if page == 'no_bet_archive' %}nav-active{% endif %}">
+          <span class="nav-copy">
+            <span class="nav-label">No-Bet Archive</span>
+            <small class="nav-caption">Retained rejected predictions</small>
+          </span>
+        </a>
+        <a href="/reports" class="nav-item {% if page == 'reports' %}nav-active{% endif %}">
+          <span class="nav-copy">
+            <span class="nav-label">Reports</span>
+            <small class="nav-caption">Windowed paper performance</small>
           </span>
         </a>
 
         <p class="eyebrow nav-gap">Operations</p>
         <a href="/status" class="nav-item {% if page == 'status' %}nav-active{% endif %}">
           <span class="nav-copy">
-            <span class="nav-label">Status</span>
-            <small class="nav-caption">Runtime health and blockers</small>
+            <span class="nav-label">Internal / System Status</span>
+            <small class="nav-caption">Runtime health and raw diagnostics</small>
           </span>
         </a>
-        <a href="/status#read-api" class="nav-item">
+        <a href="/matches" class="nav-item {% if page == 'matches' %}nav-active{% endif %}">
           <span class="nav-copy">
-            <span class="nav-label">Read API</span>
-            <small class="nav-caption">Technical routes and raw endpoints</small>
+            <span class="nav-label">Fixture Board</span>
+            <small class="nav-caption">Legacy fixture monitor and drill-down</small>
           </span>
         </a>
       </nav>

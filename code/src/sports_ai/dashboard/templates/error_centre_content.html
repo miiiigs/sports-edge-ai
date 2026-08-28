@@ -1,0 +1,73 @@
+<section class="page-heading edge-desk-heading">
+  <div>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Error Centre</p>
+    <h1>Error Centre</h1>
+    <p class="subhead desk-page-subhead">Separate provider and system blockers from actual model-betting performance.</p>
+  </div>
+</section>
+
+<section class="desk-secondary-grid">
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head"><div><span class="desk-panel-title">Provider / System Issues</span><span class="desk-panel-note">Not model losses</span></div></div>
+    {% if payload.provider_signals %}
+      <div class="desk-rail-list">
+        {% for signal in payload.provider_signals %}
+          <div class="desk-rail-row">
+            <div><strong>{{ signal.title }}</strong><small>{{ signal.detail }}</small></div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="empty-state desk-empty-state"><strong>No active provider warning signals.</strong></article>
+    {% endif %}
+    <div class="desk-context-list">
+      {% for label, value in payload.blocking_reasons.items() %}
+        <div><span>{{ label }}</span><b>{{ value }}</b></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head"><div><span class="desk-panel-title">Model / Betting Performance</span><span class="desk-panel-note">Signals only when honest</span></div></div>
+    {% if payload.performance_signals %}
+      <div class="desk-rail-list">
+        {% for signal in payload.performance_signals %}
+          <div class="desk-rail-row">
+            <div><strong>{{ signal.category }} · {{ signal.title }}</strong><small>{{ signal.detail }}</small></div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="empty-state desk-empty-state"><strong>No performance warning signals are active.</strong></article>
+    {% endif %}
+  </section>
+</section>
+
+<section class="section-block desk-panel">
+  <div class="desk-panel-head">
+    <div>
+      <span class="desk-panel-title">Current Provider-Blocked Rows</span>
+      <span class="desk-panel-note">Stale odds, missing reference, market unavailable, or rule issues</span>
+    </div>
+  </div>
+  {% if payload.provider_issue_rows %}
+    <div class="desk-table-wrap">
+      <table class="desk-table">
+        <thead><tr><th>Fixture</th><th>Market</th><th class="num">Model %</th><th>Desk Decision</th><th>Reason</th></tr></thead>
+        <tbody>
+          {% for row in payload.provider_issue_rows %}
+            <tr class="desk-row-dim">
+              <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
+              <td>{{ row.bet_label }}</td>
+              <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
+              <td><span class="desk-pill desk-pill-final">{{ row.desk_decision }}</span></td>
+              <td>{{ row.reason }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <article class="empty-state desk-empty-state"><strong>No provider-blocked rows are currently staged.</strong></article>
+  {% endif %}
+</section>

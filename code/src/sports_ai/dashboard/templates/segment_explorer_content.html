@@ -1,0 +1,70 @@
+<section class="page-heading edge-desk-heading">
+  <div>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Segment Explorer</p>
+    <h1>Segment Explorer</h1>
+    <p class="subhead desk-page-subhead">League, market, and model-version cuts derived from genuine paper rows only.</p>
+  </div>
+</section>
+
+<section class="desk-secondary-grid">
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head"><div><span class="desk-panel-title">By Market</span><span class="desk-panel-note">Live paper performance</span></div></div>
+    <div class="desk-table-wrap">
+      <table class="desk-table">
+        <thead><tr><th>Market</th><th>Bets</th><th>Settled</th><th>W-L</th><th>Strike Rate</th><th>Net Units</th><th>ROI</th></tr></thead>
+        <tbody>
+          {% for row in payload.by_market %}
+            <tr>
+              <td><strong>{{ row.label }}</strong>{% if row.low_sample %}<div class="row-sub">LOW SAMPLE</div>{% endif %}</td>
+              <td>{{ row.bets }}</td><td>{{ row.settled }}</td><td>{{ row.wins }}-{{ row.losses }}</td>
+              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head"><div><span class="desk-panel-title">By League</span><span class="desk-panel-note">Client-requested league cuts</span></div></div>
+    <div class="desk-table-wrap">
+      <table class="desk-table">
+        <thead><tr><th>League</th><th>Bets</th><th>Settled</th><th>W-L</th><th>Strike Rate</th><th>Net Units</th><th>ROI</th></tr></thead>
+        <tbody>
+          {% for row in payload.by_league %}
+            <tr>
+              <td><strong>{{ row.label }}</strong>{% if row.low_sample %}<div class="row-sub">LOW SAMPLE</div>{% endif %}</td>
+              <td>{{ row.bets }}</td><td>{{ row.settled }}</td><td>{{ row.wins }}-{{ row.losses }}</td>
+              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head"><div><span class="desk-panel-title">By Model Version</span><span class="desk-panel-note">Route B publication history</span></div></div>
+    <div class="desk-table-wrap">
+      <table class="desk-table">
+        <thead><tr><th>Model Version</th><th>Bets</th><th>Settled</th><th>Strike Rate</th><th>Net Units</th><th>ROI</th></tr></thead>
+        <tbody>
+          {% for row in payload.by_model_version %}
+            <tr>
+              <td><strong>{{ row.label }}</strong>{% if row.low_sample %}<div class="row-sub">LOW SAMPLE</div>{% endif %}</td>
+              <td>{{ row.bets }}</td><td>{{ row.settled }}</td>
+              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="section-intro">Not yet safely derived: {{ payload.unsupported_dimensions|join(', ') }}.</p>
+  </section>
+</section>
