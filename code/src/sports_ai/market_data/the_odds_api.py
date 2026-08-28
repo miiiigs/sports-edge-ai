@@ -6,6 +6,8 @@ Free-tier-safe foundation:
 - CURRENT h2h (soccer 1X2) and totals (goals Over/Under) decimal odds are
   supported. Totals normalize to the ``goals_total`` market family with exact
   provider point lines (no rounding or approximation).
+- Event-level add-on markets are fetched quota-consciously for matched fixtures
+  only. BTTS and corner totals preserve exact provider market identity.
 - One bookmaker region via ``SPORTS_AI_ODDS_REGION``.
 - Events are fetched once per sport key and reused through a short in-process
   cache so repeated fixture matching does not repeat provider requests.
@@ -39,12 +41,15 @@ THE_ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 THE_ODDS_MARKET_H2H = "h2h"
 THE_ODDS_MARKET_TOTALS = "totals"
 THE_ODDS_MARKET_BTTS = "btts"
+THE_ODDS_MARKET_CORNERS = "alternate_totals_corners"
 THE_ODDS_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_H2H},{THE_ODDS_MARKET_TOTALS}"
+THE_ODDS_EVENT_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_BTTS},{THE_ODDS_MARKET_CORNERS}"
 _SUPPORTED_MARKET_KEYS = frozenset({THE_ODDS_MARKET_H2H, THE_ODDS_MARKET_TOTALS})
 
 MARKET_1X2 = "1x2"
 MARKET_GOALS_TOTAL = "goals_total"
 MARKET_BTTS = "btts"
+MARKET_CORNER_TOTAL = "corner_total"
 TOTALS_SELECTION_OVER = "OVER"
 TOTALS_SELECTION_UNDER = "UNDER"
 BTTS_SELECTION_YES = "YES"
@@ -60,10 +65,11 @@ STATE_QUOTA_GUARD = "QUOTA_GUARD"
 STATE_QUOTA_EXHAUSTED = "QUOTA_EXHAUSTED"
 STATE_NO_CURRENT_EVENTS = "NO_CURRENT_EVENTS"
 
-# Provider states that stop further BTTS event fan-out for a sync. BTTS event
-# requests are additive to the league-wide h2h,totals request, so once a global
-# failure/guard condition is observed the fan-out must halt to protect quota.
-_BTTS_BLOCKING_STATES = frozenset(
+# Provider states that stop further event-level add-on market fan-out for a
+# sync. These requests are additive to the league-wide h2h,totals request, so
+# once a global failure/guard condition is observed the fan-out must halt to
+# protect quota.
+_ADDITIONAL_MARKET_BLOCKING_STATES = frozenset(
     {
         STATE_AUTH_ERROR,
         STATE_RATE_LIMITED,
@@ -200,6 +206,8 @@ class TheOddsApiProviderConfig:
     min_quota_reserve: int = 10
     max_retries: int = 2
     retry_backoff_seconds: float = 1.0
+    # Legacy field name retained for compatibility with existing config/tests.
+    # This caps event-level add-on market requests per league-wide sync window.
     max_btts_event_requests: int = 10
 
 
@@ -234,6 +242,8 @@ class TheOddsApiProvider:
             "bookmakers": {},
             "btts_event_requests": 0,
             "btts_truncated": 0,
+            "additional_event_requests": 0,
+            "additional_markets_truncated": 0,
         }
         self._stats_lock = Lock()
         self._state = STATE_NOT_CONFIGURED
@@ -241,7 +251,7 @@ class TheOddsApiProvider:
         self._last_attempt_at: str | None = None
         self._last_success_at: str | None = None
         self._request_count = 0
-        self._btts_event_requests_this_window = 0
+        self._additional_event_requests_this_window = 0
 
     def provider_name(self) -> str:
         return THE_ODDS_API_PROVIDER
@@ -381,9 +391,10 @@ class TheOddsApiProvider:
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
                 return cached[1]
 
-        # A fresh league-wide fetch starts a new sync window; reset the BTTS
-        # event-request budget so the fan-out cap is per-window, not cumulative.
-        self._btts_event_requests_this_window = 0
+        # A fresh league-wide fetch starts a new sync window; reset the
+        # event-level add-on market budget so the fan-out cap is per-window,
+        # not cumulative.
+        self._additional_event_requests_this_window = 0
 
         payload = self._request_json(
             endpoint=f"sports/{sport_key}/odds",
@@ -589,43 +600,45 @@ class TheOddsApiProvider:
         return snapshots
 
     def _event_odds_payload(self, sport_key: str, event_id: str) -> dict[str, Any] | None:
-        """Fetch a single event's additional-market odds (e.g. btts).
+        """Fetch a single event's add-on market odds (for example BTTS/corners).
 
         Returns the event payload on success, or None when the fan-out cap has
         been reached (fail closed without a request). Raises MarketProviderError
         on transport/provider failures, which the caller isolates so the
         league-wide h2h/totals data is preserved.
         """
-        cache_key = f"btts:{sport_key}:{self._region()}:{event_id}"
+        cache_key = f"event-markets:{sport_key}:{self._region()}:{event_id}"
         now = monotonic()
         with self._cache_lock:
             cached = self._cache.get(cache_key)
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
                 return cached[1]
 
-        if self._btts_event_requests_this_window >= self._config.max_btts_event_requests:
+        if self._additional_event_requests_this_window >= self._config.max_btts_event_requests:
             with self._stats_lock:
                 self._stats["btts_truncated"] = int(self._stats["btts_truncated"]) + 1
+                self._stats["additional_markets_truncated"] = int(self._stats["additional_markets_truncated"]) + 1
             return None
 
         payload = self._request_json(
             endpoint=f"sports/{sport_key}/events/{event_id}/odds",
             params={
                 "regions": self._region(),
-                "markets": THE_ODDS_MARKET_BTTS,
+                "markets": THE_ODDS_EVENT_MARKETS_REQUESTED,
                 "oddsFormat": "decimal",
             },
         )
-        self._btts_event_requests_this_window += 1
+        self._additional_event_requests_this_window += 1
         with self._stats_lock:
             self._stats["btts_event_requests"] = int(self._stats["btts_event_requests"]) + 1
+            self._stats["additional_event_requests"] = int(self._stats["additional_event_requests"]) + 1
         if not isinstance(payload, dict):
             payload = {}
         with self._cache_lock:
             self._cache[cache_key] = (now, payload)
         return payload
 
-    def _btts_snapshots_from_event(
+    def _additional_market_snapshots_from_event(
         self,
         *,
         fixture_id: str,
@@ -641,14 +654,18 @@ class TheOddsApiProvider:
 
         for bookmaker in event.get("bookmakers") or []:
             bookmaker_key = str(bookmaker.get("key") or "").strip()
+            bookmaker_title = str(bookmaker.get("title") or "").strip()
             if not bookmaker_key:
                 continue
             key_lower = bookmaker_key.lower()
+            if bookmaker_title:
+                with self._stats_lock:
+                    self._stats["bookmakers"][key_lower] = bookmaker_title
             reference_rank = ref_priority.get(key_lower)
             reference_designation = "reference" if reference_rank is not None else "available"
             for market in bookmaker.get("markets") or []:
                 market_key = str(market.get("key") or "").strip()
-                if market_key != THE_ODDS_MARKET_BTTS:
+                if market_key not in {THE_ODDS_MARKET_BTTS, THE_ODDS_MARKET_CORNERS}:
                     continue
                 source_timestamp = (
                     str(market.get("last_update") or "").strip()
@@ -666,9 +683,23 @@ class TheOddsApiProvider:
                         continue
                     if price <= 1.0:
                         continue
-                    selection = self._classify_btts_selection(outcome_name)
-                    if selection is None:
-                        continue
+                    if market_key == THE_ODDS_MARKET_BTTS:
+                        selection = self._classify_btts_selection(outcome_name)
+                        if selection is None:
+                            continue
+                        snapshot_market = MARKET_BTTS
+                        snapshot_line = None
+                    else:
+                        selection = self._classify_totals_selection(outcome_name)
+                        if selection is None:
+                            continue
+                        snapshot_line = self._normalize_totals_line(outcome.get("point"))
+                        if snapshot_line is None:
+                            continue
+                        snapshot_market = MARKET_CORNER_TOTAL
+                    provider_market_id = f"{event_id}:{key_lower}:{market_key}:{selection}"
+                    if snapshot_line is not None:
+                        provider_market_id = f"{provider_market_id}:{snapshot_line}"
                     snapshots.append(
                         NormalizedMarketSnapshot(
                             provider=self.provider_name(),
@@ -676,13 +707,13 @@ class TheOddsApiProvider:
                             provider_fixture_id=event_id,
                             captured_at=captured_at,
                             source_timestamp=source_timestamp,
-                            market=MARKET_BTTS,
+                            market=snapshot_market,
                             selection=selection,
-                            line=None,
+                            line=snapshot_line,
                             decimal_odds=price,
                             bookmaker=key_lower,
                             ingestion_version=THE_ODDS_API_INGESTION_VERSION,
-                            provider_market_id=f"{event_id}:{key_lower}:{market_key}:{selection}",
+                            provider_market_id=provider_market_id,
                             is_pre_match=True,
                             home_team_name=str(fixture_context.get("home_team_name") or ""),
                             away_team_name=str(fixture_context.get("away_team_name") or ""),
@@ -700,7 +731,7 @@ class TheOddsApiProvider:
                     )
         return snapshots
 
-    def _fetch_btts_snapshots(
+    def _fetch_additional_market_snapshots(
         self,
         *,
         fixture_id: str,
@@ -708,7 +739,7 @@ class TheOddsApiProvider:
         sport_key: str,
         event: dict[str, Any],
     ) -> list[NormalizedMarketSnapshot]:
-        """Fetch and normalize BTTS snapshots for one matched fixture event.
+        """Fetch and normalize add-on market snapshots for one matched fixture event.
 
         Fails closed: returns [] on a missing event id, a global blocking
         provider state, a fan-out cap hit, or a request error, so the existing
@@ -717,18 +748,18 @@ class TheOddsApiProvider:
         event_id = str(event.get("id") or "")
         if not event_id:
             return []
-        if self._state in _BTTS_BLOCKING_STATES:
+        if self._state in _ADDITIONAL_MARKET_BLOCKING_STATES:
             return []
         try:
-            btts_event = self._event_odds_payload(sport_key, event_id)
+            event_payload = self._event_odds_payload(sport_key, event_id)
         except MarketProviderError:
             return []
-        if not btts_event:
+        if not event_payload:
             return []
-        return self._btts_snapshots_from_event(
+        return self._additional_market_snapshots_from_event(
             fixture_id=fixture_id,
             fixture_context=fixture_context,
-            event=btts_event,
+            event=event_payload,
         )
 
     def get_fixture_markets(
@@ -765,7 +796,7 @@ class TheOddsApiProvider:
             event=event,
         )
         snapshots.extend(
-            self._fetch_btts_snapshots(
+            self._fetch_additional_market_snapshots(
                 fixture_id=fixture_id,
                 fixture_context=fixture_context,
                 sport_key=sport_key,
@@ -826,6 +857,8 @@ class TheOddsApiProvider:
             "fixtures_ambiguous": stats["ambiguous"],
             "btts_event_requests": int(stats.get("btts_event_requests", 0)),
             "btts_truncated": int(stats.get("btts_truncated", 0)),
+            "additional_event_requests": int(stats.get("additional_event_requests", 0)),
+            "additional_markets_truncated": int(stats.get("additional_markets_truncated", 0)),
             "bookmakers": dict(stats["bookmakers"]),
             "competition_mappings": {
                 key: {

@@ -785,7 +785,7 @@ class DashboardServices:
                 "SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS",
                 "SPORTS_AI_MARKET_MAX_AGE_MINUTES",
             ],
-            "supported_markets": ["1x2", "goals_total", "btts"],
+            "supported_markets": ["1x2", "goals_total", "btts", "corner_total"],
             "reference_price_method": f"Shin de-vig on reference bookmakers ({reference_bookmakers})",
             "freshness_rule": f"Market source timestamp must be within SPORTS_AI_MARKET_MAX_AGE_MINUTES (current: {freshness})",
         }

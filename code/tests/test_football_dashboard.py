@@ -21,7 +21,7 @@ from sports_ai.dashboard.models import (
     NormalizedFixture,
     normalize_text_key,
 )
-from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _humanize_market_selection
+from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _default_market_provider, _humanize_market_selection
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
 from sports_ai.storage import football_edge_desk, football_paper_trading
 
@@ -1352,6 +1352,19 @@ def test_best_pick_market_labels_are_human_readable() -> None:
         home_team_name="Arsenal",
         away_team_name="Chelsea",
     )["bet_label"] == "Arsenal -0.5"
+
+
+def test_odds_runtime_requirements_include_corner_total(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    config = replace(_dashboard_config(tmp_path), current_odds_connected=True)
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=_default_market_provider(config),
+    )
+
+    requirements = services._odds_feed_runtime_requirements()
+    assert "corner_total" in requirements["supported_markets"]
 
 
 def test_dashboard_services_best_picks_use_qualified_current_truth(tmp_path: Path, monkeypatch) -> None:

@@ -16,6 +16,7 @@ from sports_ai.market_data.the_odds_api import (
     STATE_QUOTA_EXHAUSTED,
     STATE_QUOTA_GUARD,
     STATE_RATE_LIMITED,
+    THE_ODDS_EVENT_MARKETS_REQUESTED,
     TheOddsApiProvider,
     TheOddsApiProviderConfig,
     sanitize_url,
@@ -169,7 +170,7 @@ def test_provider_selection_not_configured_without_approval(monkeypatch, tmp_pat
     config = DashboardConfig.default()
     assert config.current_odds_connected is False
     provider = _default_market_provider(config)
-    assert isinstance(provider, NotConfiguredMarketProvider)
+    assert isinstance(provider, TheOddsApiProvider)
 
 
 def test_odds_sync_defaults_off(monkeypatch, tmp_path):
@@ -712,6 +713,17 @@ BTTS_MARKET = {
     ],
 }
 
+CORNERS_MARKET = {
+    "key": "alternate_totals_corners",
+    "last_update": "2026-08-22T12:00:00+00:00",
+    "outcomes": [
+        {"name": "Over", "price": 1.97, "point": 9.5},
+        {"name": "Under", "price": 1.87, "point": 9.5},
+        {"name": "Over", "price": 2.24, "point": 10.0},
+        {"name": "Under", "price": 1.68, "point": 10.0},
+    ],
+}
+
 BTTS_EVENT = {
     "id": "epl_event_123",
     "sport_key": "soccer_epl",
@@ -758,7 +770,7 @@ def test_btts_uses_event_specific_endpoint_and_normalizes(monkeypatch):
     snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
     btts = [s for s in snapshots if s.market == "btts"]
     assert captured["event_path"] == "/v4/sports/soccer_epl/events/epl_event_123/odds"
-    assert captured["markets"] == "btts"
+    assert captured["markets"] == THE_ODDS_EVENT_MARKETS_REQUESTED
     assert {s.selection for s in btts} == {"YES", "NO"}
     assert all(s.line is None for s in btts)
     assert all(s.provider_fixture_id == "epl_event_123" for s in btts)
@@ -767,6 +779,53 @@ def test_btts_uses_event_specific_endpoint_and_normalizes(monkeypatch):
     assert by_selection["YES"].decimal_odds == pytest.approx(1.90)
     assert by_selection["NO"].decimal_odds == pytest.approx(1.85)
     assert by_selection["YES"].provider_market_id == "epl_event_123:pinnacle:btts:YES"
+
+
+def test_corner_totals_use_event_specific_endpoint_and_preserve_exact_lines(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    captured = {}
+
+    event = {
+        **BTTS_EVENT,
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "markets": [CORNERS_MARKET],
+            }
+        ],
+    }
+
+    def handler(request):
+        if "/events/" in request.url.path:
+            captured["event_path"] = request.url.path
+            captured["markets"] = request.url.params.get("markets")
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            return httpx.Response(200, json=[EVENT], headers=QUOTA_HEADERS, request=request)
+        if "/events/" in request.url.path:
+            return httpx.Response(200, json=event, headers=QUOTA_HEADERS, request=request)
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler)
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+    corners = [s for s in snapshots if s.market == "corner_total"]
+    assert captured["event_path"] == "/v4/sports/soccer_epl/events/epl_event_123/odds"
+    assert captured["markets"] == THE_ODDS_EVENT_MARKETS_REQUESTED
+    assert {(s.selection, s.line) for s in corners} == {
+        ("OVER", 9.5),
+        ("UNDER", 9.5),
+        ("OVER", 10.0),
+        ("UNDER", 10.0),
+    }
+    assert all(s.provider_fixture_id == "epl_event_123" for s in corners)
+    assert all(s.bookmaker == "pinnacle" for s in corners)
+    assert all(s.source_timestamp == "2026-08-22T12:00:00+00:00" for s in corners)
+    by_key = {(s.selection, s.line): s for s in corners}
+    assert by_key[("OVER", 9.5)].provider_market_id == (
+        "epl_event_123:pinnacle:alternate_totals_corners:OVER:9.5"
+    )
+    assert by_key[("UNDER", 10.0)].decimal_odds == pytest.approx(1.68)
 
 
 def test_btts_case_insensitive_normalization(monkeypatch):
