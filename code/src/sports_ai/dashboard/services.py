@@ -59,6 +59,7 @@ DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_XG_CONNECTED"
 DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_ODDS_CONNECTED"
 DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_ODDS_SYNC"
 DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR = "SPORTS_AI_ODDS_SYNC_ONCE_TOKEN"
+DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR = "SPORTS_AI_STARTUP_SYNC_TIMEOUT_SECONDS"
 
 logger = logging.getLogger(__name__)
 PAPER_ACTIVE_STATES = {"PENDING", "OPEN", "UNSETTLED"}
@@ -388,6 +389,7 @@ class DashboardConfig:
     enable_odds_sync: bool = False
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
+    startup_sync_timeout_seconds: int = 15
 
     @classmethod
     def default(cls) -> "DashboardConfig":
@@ -412,6 +414,7 @@ class DashboardConfig:
             enable_odds_sync=_env_bool(DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR, False),
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
+            startup_sync_timeout_seconds=_env_int(DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR, 15),
         )
 
 
@@ -435,6 +438,7 @@ class DashboardServices:
         self.snapshot: CurrentFootballModelSnapshot | None = None
         self.snapshot_error: str | None = None
         self._background_task: asyncio.Task[None] | None = None
+        self._startup_sync_task: asyncio.Task[Any] | None = None
         self._shutdown = False
         self._sync_lock = asyncio.Lock()
         self._provider_state: dict[str, Any] = {
@@ -502,9 +506,16 @@ class DashboardServices:
         self._storage_runtime_state: dict[str, Any] = {}
         self._edge_desk_available = True
         self._edge_desk_last_error: str | None = None
+        self._startup_sync_state: dict[str, Any] = {
+            "state": "IDLE",
+            "started_at": None,
+            "completed_at": None,
+            "last_error": None,
+        }
 
     async def initialize(self) -> None:
         ensure_operational_data_dir(self.config.operational_data_dir)
+        ensure_operational_data_dir(self.config.performance_output_dir)
         initialized_at = utc_now_iso()
         logger.info(
             "dashboard startup: storage_mode=%s data_dir=%s scheduler_enabled=%s fixture_provider=%s market_provider=%s",
@@ -543,12 +554,27 @@ class DashboardServices:
                         updated_at=utc_now_iso(),
                     )
                     logger.exception("edge desk route a registration failed during startup")
-        await self.sync_once(sync_kind="startup", include_schedule=True)
+        self._startup_sync_task = asyncio.create_task(self._run_startup_sync())
+        startup_timeout_seconds = max(0, int(self.config.startup_sync_timeout_seconds))
+        if startup_timeout_seconds > 0:
+            try:
+                await asyncio.wait_for(asyncio.shield(self._startup_sync_task), timeout=startup_timeout_seconds)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "dashboard startup sync still running after %ss; continuing startup with persisted state",
+                    startup_timeout_seconds,
+                )
         if self.config.enable_scheduler and self._background_task is None:
             self._background_task = asyncio.create_task(self._run_scheduler())
 
     async def shutdown(self) -> None:
         self._shutdown = True
+        if self._startup_sync_task is not None and not self._startup_sync_task.done():
+            self._startup_sync_task.cancel()
+            try:
+                await self._startup_sync_task
+            except asyncio.CancelledError:
+                pass
         if self._background_task is not None:
             self._background_task.cancel()
             try:
@@ -556,6 +582,36 @@ class DashboardServices:
             except asyncio.CancelledError:
                 pass
         logger.info("dashboard shutdown complete")
+
+    async def _run_startup_sync(self) -> None:
+        started_at = utc_now_iso()
+        self._startup_sync_state.update(
+            {
+                "state": "RUNNING",
+                "started_at": started_at,
+                "completed_at": None,
+                "last_error": None,
+            }
+        )
+        try:
+            await self.sync_once(sync_kind="startup", include_schedule=True)
+        except Exception as exc:
+            self._startup_sync_state.update(
+                {
+                    "state": "FAILED",
+                    "completed_at": utc_now_iso(),
+                    "last_error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            logger.exception("dashboard startup sync failed: %s", exc)
+            raise
+        self._startup_sync_state.update(
+            {
+                "state": "COMPLETED",
+                "completed_at": utc_now_iso(),
+                "last_error": None,
+            }
+        )
 
     def _load_runtime_state(self, conn: Any) -> None:
         provider_state = storage.get_runtime_state(conn, "provider_state")
@@ -4821,10 +4877,24 @@ class DashboardServices:
     def get_health_payload(self) -> dict[str, Any]:
         storage_state = self._storage_status()
         snapshot_ready = self.snapshot is not None
+        startup_sync_task_running = self._startup_sync_task is not None and not self._startup_sync_task.done()
+        scheduler_running = self._background_task is not None and not self._background_task.done()
         return {
             "status": "ok",
+            "web_process_status": "ok",
             "timestamp_utc": utc_now_iso(),
+            "startup_sync_state": self._startup_sync_state["state"],
+            "startup_sync_started_at": self._startup_sync_state["started_at"],
+            "startup_sync_completed_at": self._startup_sync_state["completed_at"],
+            "startup_sync_last_error": self._startup_sync_state["last_error"],
+            "startup_sync_task_running": startup_sync_task_running,
+            "scheduler_enabled": self.config.enable_scheduler,
+            "scheduler_running": scheduler_running,
             "fixture_provider_state": self._provider_state["state"],
+            "last_fixture_sync_at": self._provider_state["last_sync_at"],
+            "market_sync_state": self._market_runtime_state["state"],
+            "last_market_sync_at": self._market_runtime_state["last_sync_at"],
+            "settlement_queue_count": int(self._market_runtime_state.get("settlement_queue_count") or 0),
             "prediction_snapshot_ready": snapshot_ready,
             "dashboard_db_reachable": storage_state["dashboard_db_reachable"],
             "paper_trading_db_reachable": storage_state["paper_trading_db_reachable"],

@@ -258,6 +258,7 @@ def _dashboard_config(tmp_path: Path) -> DashboardConfig:
         enable_scheduler=False,
         current_odds_connected=False,
         current_xg_connected=False,
+        startup_sync_timeout_seconds=15,
     )
 
 
@@ -965,7 +966,7 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         assert 'href="/static/dashboard.css"' in dashboard_response.text
         assert 'src="/static/dashboard.js"' in dashboard_response.text
         assert "/matches/static/dashboard.css" not in dashboard_response.text
-        assert 'href="/status#read-api"' in dashboard_response.text
+        assert 'href="/status"' in dashboard_response.text
 
         matches_response = client.get("/matches")
         assert matches_response.status_code == 200
@@ -990,13 +991,13 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
 
         candidates_page = client.get("/candidates")
         assert candidates_page.status_code == 200
-        assert "Current-Market Candidates" in candidates_page.text
+        assert "Betting Desk" in candidates_page.text
         assert 'href="/static/dashboard.css"' in candidates_page.text
         assert 'src="/static/dashboard.js"' in candidates_page.text
 
         performance_page = client.get("/performance")
         assert performance_page.status_code == 200
-        assert "Historical validation and live paper betting results." in performance_page.text
+        assert "Model Performance" in performance_page.text
         assert 'href="/static/dashboard.css"' in performance_page.text
         assert 'src="/static/dashboard.js"' in performance_page.text
 
@@ -1039,6 +1040,10 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         health_response = client.get("/health")
         assert health_response.status_code == 200
         assert health_response.json()["status"] == "ok"
+        assert health_response.json()["web_process_status"] == "ok"
+        assert health_response.json()["startup_sync_state"] == "COMPLETED"
+        assert health_response.json()["scheduler_running"] is False
+        assert health_response.json()["market_sync_state"] == "NOT_CONFIGURED"
 
         prediction_response = client.get(f"/api/predictions/{fixture.fixture_id}")
         assert prediction_response.status_code == 200
@@ -1119,6 +1124,46 @@ def test_dashboard_services_restart_preserves_prediction_without_duplicates(tmp_
     assert status["storage"]["dashboard_db_reachable"] is True
     assert status["prediction_engine"]["last_successful_prediction_at"] is not None
     asyncio.run(services.shutdown())
+
+
+def test_dashboard_initialize_can_continue_while_startup_sync_runs_in_background(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=replace(_dashboard_config(tmp_path), startup_sync_timeout_seconds=0),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_sync_once(*, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, str]:
+        started.set()
+        await release.wait()
+        return {"state": "ok", "kind": sync_kind, "include_schedule": str(include_schedule)}
+
+    monkeypatch.setattr(services, "sync_once", fake_sync_once)
+
+    async def scenario() -> None:
+        await services.initialize()
+        await asyncio.wait_for(started.wait(), timeout=1)
+        running_health = services.get_health_payload()
+        assert running_health["startup_sync_state"] == "RUNNING"
+        assert running_health["startup_sync_task_running"] is True
+        assert running_health["scheduler_running"] is False
+
+        release.set()
+        assert services._startup_sync_task is not None
+        await asyncio.wait_for(services._startup_sync_task, timeout=1)
+
+        completed_health = services.get_health_payload()
+        assert completed_health["startup_sync_state"] == "COMPLETED"
+        assert completed_health["startup_sync_task_running"] is False
+        await services.shutdown()
+
+    asyncio.run(scenario())
 
 
 def test_dashboard_services_recovers_after_provider_failure(tmp_path: Path):
