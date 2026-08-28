@@ -57,7 +57,7 @@
             <a class="desk-best-link" href="/matches/{{ pick.fixture_id }}">
               <span class="desk-best-tag">BEST BET {{ loop.index }}</span>
               <strong>{{ pick.bet_label }}</strong>
-              <small>{{ pick.home_team_name }} vs {{ pick.away_team_name }} · {{ "{:+.2%}".format(pick.edge|float) if pick.edge is not none else 'N/A' }}</small>
+              <small>{{ pick.home_team_name }} vs {{ pick.away_team_name }} · Entry {{ "{:+.2%}".format(pick.entry_edge|float) if pick.entry_edge is not none else 'N/A' }}</small>
             </a>
           {% endfor %}
         </div>
@@ -77,9 +77,9 @@
                 <th>Match</th>
                 <th>Bet</th>
                 <th class="num">Model %</th>
-                <th class="num">Market Odds</th>
+                <th class="num">Entry Odds</th>
                 <th class="num">Fair Odds</th>
-                <th class="num">Edge</th>
+                <th class="num">Entry Edge</th>
                 <th>Risk / Safeguard</th>
                 <th>Status</th>
               </tr>
@@ -95,15 +95,35 @@
                   <td class="desk-market-cell">
                     <b>{{ row.bet_label }}</b>
                   </td>
-                  <td class="num">{{ "{:.1%}".format(row.model_probability|float) }}</td>
-                  <td class="num">{{ "{:.2f}".format(row.market_odds|float) if row.market_odds is not none else 'N/A' }}</td>
-                  <td class="num">{{ "{:.2f}".format(row.fair_odds|float) if row.fair_odds is not none else 'N/A' }}</td>
-                  <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">
-                    {{ "{:+.2%}".format(row.edge|float) if row.edge is not none else 'N/A' }}
+                  <td class="num">
+                    {{ "{:.1%}".format(row.entry_model_probability|float) if row.entry_model_probability is not none else 'N/A' }}
+                  </td>
+                  <td class="num">
+                    {{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else 'N/A' }}
+                    {% if row.current_market_odds is not none %}
+                      <div class="row-sub">Current odds {{ "{:.2f}".format(row.current_market_odds|float) }}</div>
+                    {% endif %}
+                  </td>
+                  <td class="num">
+                    {{ "{:.2f}".format(row.entry_fair_odds|float) if row.entry_fair_odds is not none else 'N/A' }}
+                  </td>
+                  <td class="num {% if row.entry_edge is not none and row.entry_edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">
+                    {{ "{:+.2%}".format(row.entry_edge|float) if row.entry_edge is not none else 'N/A' }}
+                    {% if row.current_market_edge is not none %}
+                      <div class="row-sub">Current edge {{ "{:+.2%}".format(row.current_market_edge|float) }}</div>
+                    {% endif %}
                   </td>
                   <td class="desk-risk-cell">
                     <span class="desk-confidence">{{ row.risk_status }}</span>
-                    <small>{{ row.risk_summary }}</small>
+                    <small>
+                      {{ row.risk_summary }}
+                      {% if row.entry_bookmaker %}
+                        · Entry {{ row.entry_bookmaker }}
+                      {% endif %}
+                      {% if row.entry_timestamp %}
+                        · {{ row.entry_timestamp }}
+                      {% endif %}
+                    </small>
                   </td>
                   <td>
                     <span class="desk-pill {% if row.paper_result_tone == 'bet' %}desk-pill-bet{% elif row.paper_result_tone == 'lost' %}desk-pill-lost{% elif row.paper_result_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">{{ row.paper_trade_state }}</span>
@@ -195,7 +215,6 @@
               <th class="num">Edge</th>
               <th>Risk / Safeguard</th>
               <th>Desk</th>
-              <th>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -222,11 +241,6 @@
                   {% if row.desk_note %}
                     <small>{{ row.desk_note }}</small>
                   {% endif %}
-                </td>
-                <td>
-                  <span class="desk-pill {% if row.status_tone == 'live' %}desk-pill-live{% elif row.status_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">
-                    {{ row.status_label }}
-                  </span>
                 </td>
               </tr>
             {% endfor %}

@@ -152,13 +152,74 @@
       <p class="eyebrow">Investigate</p>
       <h3>Decision Gates</h3>
       <div class="data-list">
-        <div><span>Current Market</span><strong>{{ payload.fixture.market_signal.current_decision_state if payload.fixture.market_signal else payload.fixture.market_status_label }}</strong></div>
-        <div><span>Safeguard</span><strong>{{ payload.prediction.safeguard_status }}</strong></div>
-        <div><span>Safeguard Reason</span><strong>{{ payload.prediction.safeguard_reason }}</strong></div>
-        <div><span>Point-In-Time xG</span><strong>{{ payload.system_status.xg.state }}</strong></div>
-        <div><span>Odds Feed</span><strong>{{ payload.system_status.odds_feed.state }}</strong></div>
+        <div><span>Current Market</span><strong>{{ payload.decision_gates.current_market }}</strong></div>
+        <div><span>Safeguard</span><strong>{{ payload.decision_gates.safeguard }}</strong></div>
+        <div><span>Safeguard Reason</span><strong>{{ payload.decision_gates.safeguard_reason }}</strong></div>
+        <div><span>Point-In-Time xG</span><strong>{{ payload.decision_gates.point_in_time_xg }}</strong></div>
+        <div><span>Odds Feed</span><strong>{{ payload.decision_gates.odds_feed }}</strong></div>
       </div>
     </article>
+  </section>
+
+  <section class="section-block">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Published Picks</p>
+        <h2>Paper Entry</h2>
+        <p class="section-intro">Frozen entry truth, separated from the live current market.</p>
+      </div>
+    </div>
+    {% if payload.paper_entries %}
+      <div class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Model %</th>
+              <th>Fair Odds</th>
+              <th>Entry Odds</th>
+              <th>Entry Edge</th>
+              <th>Bookmaker</th>
+              <th>Captured</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payload.paper_entries %}
+              <tr>
+                <td>
+                  <strong>{{ row.market_label }}</strong>
+                  <div class="row-sub">{{ row.selection_label }}{% if row.line is not none %} {{ row.line }}{% endif %}</div>
+                </td>
+                <td>{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else 'N/A' }}</td>
+                <td>{{ "{:.2f}".format(row.model_fair_price|float) if row.model_fair_price is not none else 'N/A' }}</td>
+                <td>
+                  {{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else 'N/A' }}
+                  {% if row.current_market_odds is not none %}
+                    <div class="row-sub">Current odds {{ "{:.2f}".format(row.current_market_odds|float) }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {{ "{:+.2%}".format(row.edge|float) if row.edge is not none else 'N/A' }}
+                  {% if row.current_market_edge is not none %}
+                    <div class="row-sub">Current edge {{ "{:+.2%}".format(row.current_market_edge|float) }}</div>
+                  {% endif %}
+                </td>
+                <td>{{ row.bookmaker or 'N/A' }}</td>
+                <td>{{ row.entry_captured_at or row.decision_timestamp }}</td>
+                <td>
+                  <span class="desk-pill {% if row.result_tone == 'bet' %}desk-pill-bet{% elif row.result_tone == 'lost' %}desk-pill-lost{% elif row.result_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">{{ row.trade_state }}</span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        <p>No published paper entry has been recorded for this match.</p>
+      </div>
+    {% endif %}
   </section>
 
   <section class="section-block">

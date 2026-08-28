@@ -1664,6 +1664,144 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
     assert funnel["NO BET rows"]["value"] == "1"
 
 
+def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no_paper_status(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _fixture(home_team_name="Aston Villa", away_team_name="Arsenal")
+    no_bet_fixture = replace(_fixture(fixture_id="fake:no_bet", home_team_name="Sevilla", away_team_name="Betis"))
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture, no_bet_fixture]),
+        market_provider=FakeMarketProvider(configured=True),
+    )
+    fixture_rows = [
+        fixture.to_dict(timezone_name="UTC"),
+        no_bet_fixture.to_dict(timezone_name="UTC"),
+    ]
+    published_bet_row = {
+        "fixture_id": fixture.fixture_id,
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "decision": "PRELIMINARY_CANDIDATE",
+        "current_decision_state": "BET",
+        "market_family": "1x2",
+        "selection": "HOME",
+        "line": None,
+        "model_probability": 0.4012,
+        "model_fair_decimal_price": 2.49,
+        "best_available_price": 6.8,
+        "best_available_bookmaker": "bet365",
+        "best_available_source_timestamp": "2026-08-28T09:10:00Z",
+        "settlement_aware_edge": 1.1466,
+        "paper_entry_eligible": True,
+        "paper_trade_id": "paper_published_1",
+        "market_freshness": "FRESH",
+        "day12_state": "PASSED",
+        "reason_codes": [],
+    }
+    no_bet_row = {
+        "fixture_id": no_bet_fixture.fixture_id,
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "decision": "NO_BET",
+        "current_decision_state": "NO_BET_VALUE",
+        "market_family": "1x2",
+        "selection": "HOME",
+        "line": None,
+        "model_probability": 0.55,
+        "model_fair_decimal_price": 1.82,
+        "best_available_price": 1.61,
+        "best_available_bookmaker": "Pinnacle",
+        "best_available_source_timestamp": "2026-08-28T09:10:00Z",
+        "settlement_aware_edge": -0.114,
+        "paper_entry_eligible": False,
+        "market_freshness": "FRESH",
+        "day12_state": "PASSED",
+        "reason_codes": ["PRICE_NO_VALUE"],
+    }
+    paper_rows = [
+        {
+            "paper_trade_id": "paper_published_1",
+            "fixture_id": fixture.fixture_id,
+            "market": "1x2",
+            "selection": "HOME",
+            "line": None,
+            "model_probability": 0.315679,
+            "model_fair_price": 3.1678,
+            "entry_odds": 7.0,
+            "edge": 1.2098,
+            "bookmaker": "Pinnacle",
+            "entry_captured_at": "2026-08-28T08:45:00Z",
+            "decision_timestamp": "2026-08-28T08:45:00Z",
+            "trade_state": "PENDING",
+            "latest_update_payload": None,
+        }
+    ]
+
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: fixture_rows)
+    monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: fixture_rows)
+    monkeypatch.setattr(
+        services,
+        "_filter_fixture_rows",
+        lambda *, bucket, fixture_rows: fixture_rows if bucket == "today" else [],
+    )
+    monkeypatch.setattr(
+        services,
+        "_market_evaluation_map",
+        lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [published_bet_row],
+                "display_rows": [published_bet_row],
+            },
+            no_bet_fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [no_bet_row],
+                "display_rows": [no_bet_row],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        services,
+        "_paper_positions",
+        lambda: (paper_rows, football_paper_trading.paper_trading_status(paper_rows)),
+    )
+
+    payload = services.get_dashboard_payload()
+    published_pick = payload["best_picks"][0]
+
+    assert published_pick["entry_odds"] == pytest.approx(7.0)
+    assert published_pick["market_odds"] == pytest.approx(7.0)
+    assert published_pick["current_market_odds"] == pytest.approx(6.8)
+    assert published_pick["entry_edge"] == pytest.approx(1.2098)
+    assert published_pick["edge"] == pytest.approx(1.2098)
+    assert published_pick["current_market_edge"] == pytest.approx(1.1466)
+    assert published_pick["entry_model_probability"] == pytest.approx(0.315679)
+    assert published_pick["model_probability"] == pytest.approx(0.315679)
+    assert published_pick["entry_fair_odds"] == pytest.approx(3.1678)
+    assert published_pick["fair_odds"] == pytest.approx(3.1678)
+    assert published_pick["paper_trade_state"] == "PENDING"
+    assert payload["other_decision_rows"][0]["desk_label"] == "NO BET"
+
+    app = create_app(services=services)
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Entry 7.00" not in response.text
+    assert "Current odds 6.80" in response.text
+    assert "Current edge +114.66%" in response.text
+    assert "7.00" in response.text
+    assert "+120.98%" in response.text
+    assert "PENDING" in response.text
+    other_section = response.text.split("Other Desk Decisions", 1)[1]
+    assert "NO BET" in other_section
+    assert "PENDING" not in other_section
+
+
 def test_dashboard_home_best_picks_empty_state_and_agent_truth(tmp_path: Path) -> None:
     fixture = _fixture()
     app = create_app(
@@ -1726,3 +1864,119 @@ def test_dashboard_performance_empty_state_uses_neutral_paper_copy(tmp_path: Pat
     assert "No settled paper bets yet." in response.text
     assert "No open paper positions right now." in response.text
     assert "current odds provider is still not configured" not in response.text
+
+
+def test_match_detail_separates_current_market_from_published_entry_and_uses_current_gate_truth(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _fixture(home_team_name="Aston Villa", away_team_name="Arsenal")
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        current_xg_connected=True,
+        enable_odds_sync=True,
+    )
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=True),
+    )
+
+    asyncio.run(services.initialize())
+    with dashboard_storage.connect(config.dashboard_db_path) as conn:
+        prediction = dashboard_storage.fetch_latest_prediction_for_fixture(conn, fixture.fixture_id)
+        assert prediction is not None
+        prediction["safeguard_status"] = "BLOCKED"
+        prediction["safeguard_reason"] = "POINT-IN-TIME XG NOT AVAILABLE"
+        dashboard_storage.save_prediction(conn, prediction, updated_at="2026-08-28T09:12:00+00:00")
+
+    bet_row = {
+        "fixture_id": fixture.fixture_id,
+        "competition_id": "ENG1",
+        "competition_name": "Premier League",
+        "decision": "PRELIMINARY_CANDIDATE",
+        "current_decision_state": "BET",
+        "market_family": "1x2",
+        "selection": "HOME",
+        "line": None,
+        "model_probability": 0.4012,
+        "model_fair_decimal_price": 2.49,
+        "best_available_price": 6.8,
+        "best_available_bookmaker": "bet365",
+        "best_available_source_timestamp": "2026-08-28T09:10:00Z",
+        "settlement_aware_edge": 1.1466,
+        "minimum_acceptable_price": 2.41,
+        "paper_entry_eligible": True,
+        "paper_trade_id": "paper_detail_1",
+        "market_freshness": "FRESH",
+        "day12_state": "PASSED",
+        "xg_status": "PASS",
+        "reason_codes": [],
+    }
+    paper_rows = [
+        {
+            "paper_trade_id": "paper_detail_1",
+            "fixture_id": fixture.fixture_id,
+            "market": "1x2",
+            "selection": "HOME",
+            "line": None,
+            "model_probability": 0.315679,
+            "model_fair_price": 3.1678,
+            "entry_odds": 7.0,
+            "edge": 1.2098,
+            "bookmaker": "Pinnacle",
+            "entry_captured_at": "2026-08-28T08:45:00Z",
+            "decision_timestamp": "2026-08-28T08:45:00Z",
+            "trade_state": "PENDING",
+            "latest_update_payload": None,
+        }
+    ]
+    monkeypatch.setattr(
+        services,
+        "_market_evaluation_map",
+        lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [bet_row],
+                "display_rows": [bet_row],
+                "counts": {"preliminary_candidates": 1, "passed_safeguards": 1},
+                "market_snapshot_count": 1,
+                "freshness": "FRESH",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        services,
+        "_paper_positions",
+        lambda: (paper_rows, football_paper_trading.paper_trading_status(paper_rows)),
+    )
+
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["decision_gates"]["current_market"] == "BET"
+    assert payload["decision_gates"]["safeguard"] == "PASS"
+    assert payload["decision_gates"]["safeguard_reason"] == "PASSED"
+    assert payload["decision_gates"]["point_in_time_xg"] == "PASS"
+    assert payload["paper_entries"][0]["entry_odds"] == pytest.approx(7.0)
+    assert payload["paper_entries"][0]["current_market_odds"] == pytest.approx(6.8)
+    assert payload["paper_entries"][0]["edge"] == pytest.approx(1.2098)
+    assert payload["paper_entries"][0]["current_market_edge"] == pytest.approx(1.1466)
+
+    app = create_app(services=services)
+    with TestClient(app) as client:
+        response = client.get(f"/matches/{fixture.fixture_id}")
+
+    assert response.status_code == 200
+    assert "Paper Entry" in response.text
+    assert "Current-Market Evaluation" in response.text
+    assert "Current odds 6.80" in response.text
+    assert "Current edge +114.66%" in response.text
+    assert "7.00" in response.text
+    assert "+120.98%" in response.text
+    assert "<span>Safeguard</span><strong>PASS</strong>" in response.text
+    assert "<span>Point-In-Time xG</span><strong>PASS</strong>" in response.text
+    assert "<span>Safeguard Reason</span><strong>PASSED</strong>" in response.text
+
+    asyncio.run(services.shutdown())

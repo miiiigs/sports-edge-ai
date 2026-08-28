@@ -68,6 +68,20 @@ PAPER_MARKET_DISPLAY_ORDER = {
 }
 
 
+def _market_identity(row: dict[str, Any]) -> tuple[str, str, float | None]:
+    market = str(row.get("market_family") or row.get("market") or "")
+    selection = str(row.get("selection") or "")
+    line = row.get("line")
+    return (market, selection, None if line is None else float(line))
+
+
+def _xg_status_label(value: Any) -> str:
+    status = str(value or "").strip().upper()
+    if not status:
+        return "N/A"
+    return status.replace("_", " ")
+
+
 def _default_fixture_provider() -> FixtureProvider:
     primary = FootballDataOrgFixtureProvider()
     if primary.configured():
@@ -304,6 +318,25 @@ def _safeguard_label(row: dict[str, Any]) -> str:
     market_freshness = str(row.get("market_freshness") or "")
     if market_freshness and market_freshness != "FRESH":
         return market_freshness
+    return "N/A"
+
+
+def _safeguard_reason_from_row(row: dict[str, Any]) -> str:
+    day12_state = str(row.get("day12_state") or "")
+    if day12_state == "BLOCKED_MISSING_XG_DATA":
+        return "POINT-IN-TIME XG NOT AVAILABLE"
+    if day12_state == "REJECTED_BY_XG_VETO":
+        return "POINT-IN-TIME XG VETO"
+    if day12_state == "DAY12_REVIEW_REQUIRED":
+        return "POINT-IN-TIME XG REVIEW REQUIRED"
+    market_freshness = str(row.get("market_freshness") or "")
+    if market_freshness and market_freshness != "FRESH":
+        return market_freshness.replace("_", " ").title()
+    if row.get("paper_entry_eligible"):
+        return "PASSED"
+    reason_codes = [str(code).replace("_", " ").title() for code in (row.get("reason_codes") or [])[:2]]
+    if reason_codes:
+        return " / ".join(reason_codes)
     return "N/A"
 
 
@@ -875,6 +908,12 @@ class DashboardServices:
             if actual_home_goals is not None and actual_away_goals is not None:
                 final_score = f"{int(actual_home_goals)}-{int(actual_away_goals)}"
             trade_state = str(row.get("trade_state") or "PENDING")
+            kickoff_value = row.get("kickoff") or (fixture or {}).get("kickoff_utc") or row.get("decision_timestamp")
+            kickoff_local = "N/A"
+            if kickoff_value:
+                kickoff_local = parse_iso_datetime(str(kickoff_value)).astimezone(ZoneInfo(self.config.display_timezone)).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
             display_rows.append(
                 {
                     **row,
@@ -883,9 +922,7 @@ class DashboardServices:
                         if fixture is not None
                         else str(row.get("fixture_id") or "Unknown Fixture")
                     ),
-                    "kickoff_local": parse_iso_datetime(str(row["kickoff"]))
-                    .astimezone(ZoneInfo(self.config.display_timezone))
-                    .strftime("%Y-%m-%d %H:%M"),
+                    "kickoff_local": kickoff_local,
                     "market_label": labels["market_label"],
                     "selection_label": labels["selection_label"],
                     "bet_label": labels["bet_label"],
@@ -901,6 +938,80 @@ class DashboardServices:
                 }
             )
         return display_rows
+
+    def _published_paper_entries_for_fixture(
+        self,
+        fixture_id: str,
+        market_evaluation: dict[str, Any] | None,
+        paper_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        fixture_paper_rows = [row for row in paper_rows if str(row["fixture_id"]) == fixture_id]
+        display_rows = self._paper_position_display_rows(fixture_paper_rows)
+        current_rows = {
+            _market_identity(row): row
+            for row in (market_evaluation or {}).get("decision_rows") or []
+        }
+        published_rows: list[dict[str, Any]] = []
+        for row in display_rows:
+            current_row = current_rows.get(_market_identity(row))
+            published_rows.append(
+                {
+                    **row,
+                    "current_market_odds": None
+                    if current_row is None or current_row.get("best_available_price") is None
+                    else float(current_row["best_available_price"]),
+                    "current_market_edge": None
+                    if current_row is None or current_row.get("settlement_aware_edge") is None
+                    else float(current_row["settlement_aware_edge"]),
+                    "current_market_bookmaker": None
+                    if current_row is None or current_row.get("best_available_bookmaker") is None
+                    else str(current_row["best_available_bookmaker"]),
+                    "current_market_timestamp": None
+                    if current_row is None
+                    else current_row.get("best_available_source_timestamp"),
+                    "current_market_state": None
+                    if current_row is None
+                    else str(current_row.get("current_decision_state") or _current_decision_state(current_row)),
+                    "current_market_safeguard": None
+                    if current_row is None
+                    else _safeguard_label(current_row),
+                }
+            )
+        return sorted(
+            published_rows,
+            key=lambda row: (
+                str(row.get("decision_timestamp") or ""),
+                str(row["paper_trade_id"]),
+            ),
+        )
+
+    def _decision_gates_payload(
+        self,
+        *,
+        market_evaluation: dict[str, Any] | None,
+        prediction: dict[str, Any] | None,
+        system_status: dict[str, Any],
+    ) -> dict[str, str]:
+        if market_evaluation and market_evaluation.get("display_rows"):
+            top_row = dict(market_evaluation["display_rows"][0])
+            current_state = str(top_row.get("current_decision_state") or _current_decision_state(top_row))
+            return {
+                "source": "CURRENT_MARKET_EVALUATION",
+                "current_market": current_state,
+                "safeguard": _safeguard_label(top_row),
+                "safeguard_reason": _safeguard_reason_from_row(top_row),
+                "point_in_time_xg": _xg_status_label(top_row.get("xg_status")),
+                "odds_feed": str(system_status["odds_feed"]["state"]),
+            }
+        decorated_prediction = self._decorate_prediction_runtime(prediction)
+        return {
+            "source": "PREDICTION_RECORD",
+            "current_market": "NOT_SYNCED",
+            "safeguard": str((decorated_prediction or {}).get("safeguard_status") or "N/A"),
+            "safeguard_reason": str((decorated_prediction or {}).get("safeguard_reason") or "N/A"),
+            "point_in_time_xg": str(system_status["xg"]["state"]),
+            "odds_feed": str(system_status["odds_feed"]["state"]),
+        }
 
     def _live_paper_market_rows(self, performance: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -2543,9 +2654,51 @@ class DashboardServices:
             final_score = None
             if settlement_context.get("actual_home_goals") is not None and settlement_context.get("actual_away_goals") is not None:
                 final_score = f"{int(settlement_context['actual_home_goals'])}-{int(settlement_context['actual_away_goals'])}"
+            entry_model_probability = (
+                row["model_probability"]
+                if paper_row is None or paper_row.get("model_probability") is None
+                else float(paper_row["model_probability"])
+            )
+            entry_fair_odds = (
+                row["fair_odds"]
+                if paper_row is None or paper_row.get("model_fair_price") is None
+                else float(paper_row["model_fair_price"])
+            )
+            entry_odds = (
+                row["market_odds"]
+                if paper_row is None or paper_row.get("entry_odds") is None
+                else float(paper_row["entry_odds"])
+            )
+            entry_edge = (
+                row["edge"]
+                if paper_row is None or paper_row.get("edge") is None
+                else float(paper_row["edge"])
+            )
+            entry_bookmaker = (
+                row["bookmaker"]
+                if paper_row is None or paper_row.get("bookmaker") is None
+                else str(paper_row["bookmaker"])
+            )
+            entry_timestamp = None if paper_row is None else (paper_row.get("entry_captured_at") or paper_row.get("decision_timestamp"))
             decorated_rows.append(
                 {
                     **row,
+                    "model_probability": entry_model_probability,
+                    "fair_odds": entry_fair_odds,
+                    "market_odds": entry_odds,
+                    "edge": entry_edge,
+                    "bookmaker": entry_bookmaker,
+                    "market_timestamp": entry_timestamp or row.get("market_timestamp"),
+                    "entry_model_probability": entry_model_probability,
+                    "entry_fair_odds": entry_fair_odds,
+                    "entry_odds": entry_odds,
+                    "entry_edge": entry_edge,
+                    "entry_bookmaker": entry_bookmaker,
+                    "entry_timestamp": entry_timestamp or row.get("market_timestamp"),
+                    "current_market_odds": row.get("market_odds"),
+                    "current_market_edge": row.get("edge"),
+                    "current_market_bookmaker": row.get("bookmaker"),
+                    "current_market_timestamp": row.get("market_timestamp"),
                     "paper_trade_state": str((paper_row or {}).get("trade_state") or "PENDING"),
                     "paper_result_tone": self._paper_result_tone(str((paper_row or {}).get("trade_state") or "PENDING")),
                     "final_score": final_score,
@@ -2862,11 +3015,24 @@ class DashboardServices:
         if fixture is None:
             return None
         serialized_fixture = self.serialize_fixture_row({**fixture, "prediction": prediction})
+        market_evaluation = serialized_fixture.get("market_evaluation")
+        system_status = self.get_system_status()
+        paper_positions, _ = self._paper_positions()
         return {
             "fixture": serialized_fixture,
             "prediction": self._decorate_prediction_runtime(prediction),
-            "market_evaluation": serialized_fixture.get("market_evaluation"),
-            "system_status": self.get_system_status(),
+            "market_evaluation": market_evaluation,
+            "paper_entries": self._published_paper_entries_for_fixture(
+                fixture_id=str(fixture_id),
+                market_evaluation=market_evaluation,
+                paper_rows=paper_positions,
+            ),
+            "decision_gates": self._decision_gates_payload(
+                market_evaluation=market_evaluation,
+                prediction=prediction,
+                system_status=system_status,
+            ),
+            "system_status": system_status,
         }
 
     def get_prediction_payload(self, fixture_id: str) -> dict[str, Any] | None:
