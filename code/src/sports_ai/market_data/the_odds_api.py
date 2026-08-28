@@ -33,6 +33,13 @@ from typing import Any
 import httpx
 
 from ..dashboard.models import normalize_text_key, parse_iso_datetime
+from .freshness import (
+    FRESHNESS_STATE_FRESH,
+    FRESHNESS_STATE_STALE,
+    FRESHNESS_STATE_UNKNOWN,
+    classify_freshness_state,
+    resolve_market_max_age_minutes,
+)
 from .providers import MarketProviderError, NormalizedMarketSnapshot
 
 THE_ODDS_API_PROVIDER = "the-odds-api"
@@ -82,11 +89,6 @@ _ADDITIONAL_MARKET_BLOCKING_STATES = frozenset(
     }
 )
 
-FRESHNESS_STATE_FRESH = "FRESH"
-FRESHNESS_STATE_STALE = "STALE"
-FRESHNESS_STATE_UNKNOWN = "UNKNOWN"
-
-
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -98,54 +100,6 @@ def sanitize_url(url: str) -> str:
 
 def _parse_env_list(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
-
-
-def resolve_market_max_age_minutes(env_var: str = "SPORTS_AI_MARKET_MAX_AGE_MINUTES") -> int | None:
-    """Return the configured market max-age threshold in minutes, or None.
-
-    Unset, non-numeric, zero, or negative values fail closed to None (UNKNOWN).
-    """
-    raw = os.environ.get(env_var, "").strip()
-    if not raw:
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        return None
-    return value if value > 0 else None
-
-
-def classify_freshness_state(
-    *,
-    source_timestamp: str | None,
-    evaluated_at: str,
-    threshold_minutes: int | None,
-    kickoff_utc: str | None = None,
-) -> str:
-    """Deterministically classify market freshness.
-
-    FRESH when 0 <= age <= threshold; STALE when age > threshold (or source is
-    post-kickoff); UNKNOWN when the source timestamp is missing, malformed, or
-    in the future, or when no threshold is configured. Never classifies a
-    missing/future source as FRESH.
-    """
-    if source_timestamp is None or threshold_minutes is None:
-        return FRESHNESS_STATE_UNKNOWN
-    try:
-        source_dt = parse_iso_datetime(source_timestamp)
-        evaluated_dt = parse_iso_datetime(evaluated_at)
-    except ValueError:
-        return FRESHNESS_STATE_UNKNOWN
-    if source_dt > evaluated_dt:
-        return FRESHNESS_STATE_UNKNOWN
-    if kickoff_utc is not None:
-        try:
-            if source_dt > parse_iso_datetime(kickoff_utc):
-                return FRESHNESS_STATE_STALE
-        except ValueError:
-            pass
-    age_minutes = (evaluated_dt - source_dt).total_seconds() / 60.0
-    return FRESHNESS_STATE_FRESH if age_minutes <= threshold_minutes else FRESHNESS_STATE_STALE
 
 
 @dataclass(frozen=True)

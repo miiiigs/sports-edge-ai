@@ -7,6 +7,7 @@ import pytest
 from sports_ai.dashboard.current_market import build_fixture_market_evaluation
 from sports_ai.dashboard.day12_rolling_xg import SOURCE_IDENTIFIER, build_xg_inspection
 from sports_ai.experiments.football_day11_manager_core import DECISION_NO_BET
+from sports_ai.market_data.freshness import resolve_market_max_age_minutes_for_provider
 from sports_ai.experiments.football_day12_safeguards import (
     DAY12_BLOCKED_MISSING_XG_DATA,
     XG_APPLICABLE_COMPETITIONS,
@@ -103,6 +104,20 @@ def test_resolve_market_max_age_minutes(monkeypatch):
     assert resolve_market_max_age_minutes() is None
     monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "abc")
     assert resolve_market_max_age_minutes() is None
+
+
+def test_provider_specific_market_max_age_minutes(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
+    monkeypatch.delenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", raising=False)
+    assert resolve_market_max_age_minutes_for_provider("the-odds-api") == 60
+    assert resolve_market_max_age_minutes_for_provider("api-football") == 240
+
+
+def test_provider_specific_market_max_age_minutes_override(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
+    monkeypatch.setenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", "180")
+    assert resolve_market_max_age_minutes_for_provider("the-odds-api") == 60
+    assert resolve_market_max_age_minutes_for_provider("api-football") == 180
 
 
 def test_provider_freshness_delegates_to_shared_classifier(monkeypatch):
