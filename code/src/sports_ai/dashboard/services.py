@@ -221,7 +221,8 @@ def _humanize_market_selection(
         }
     if normalized_market == "asian_handicap":
         team_label = home_team_name if normalized_selection == "HOME" else away_team_name if normalized_selection == "AWAY" else normalized_selection.title()
-        handicap_text = _format_signed_display_line(line)
+        display_line = None if line is None else (float(line) if normalized_selection == "HOME" else -float(line))
+        handicap_text = _format_signed_display_line(display_line)
         return {
             "market_label": "Asian Handicap",
             "selection_label": team_label,
@@ -912,7 +913,7 @@ class DashboardServices:
                 "SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS",
                 "SPORTS_AI_MARKET_MAX_AGE_MINUTES",
             ],
-            "supported_markets": ["1x2", "goals_total", "btts", "corner_total"],
+            "supported_markets": ["1x2", "goals_total", "btts", "corner_total", "asian_handicap"],
             "reference_price_method": f"Shin de-vig on reference bookmakers ({reference_bookmakers})",
             "freshness_rule": f"Market source timestamp must be within SPORTS_AI_MARKET_MAX_AGE_MINUTES (current: {freshness})",
         }

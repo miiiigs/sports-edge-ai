@@ -143,6 +143,13 @@ def test_paper_trading_store_prevents_duplicate_entry_signatures(tmp_path):
         ("corner_total", "OVER", 9.5, 0, 0, 11, "WON"),
         ("corner_total", "UNDER", 9.5, 0, 0, 8, "WON"),
         ("corner_total", "OVER", 10.0, 0, 0, 10, "PUSH"),
+        ("asian_handicap", "HOME", -0.5, 1, 0, None, "WON"),
+        ("asian_handicap", "HOME", 0.5, 0, 0, None, "WON"),
+        ("asian_handicap", "HOME", -1.0, 1, 0, None, "PUSH"),
+        ("asian_handicap", "AWAY", -1.0, 0, 0, None, "WON"),
+        ("asian_handicap", "HOME", -0.25, 1, 1, None, "HALF_LOSS"),
+        ("asian_handicap", "HOME", 0.25, 1, 1, None, "HALF_WIN"),
+        ("asian_handicap", "AWAY", 0.75, 0, 1, None, "HALF_WIN"),
     ],
 )
 def test_settlement_state_for_supported_live_paper_markets(
@@ -165,6 +172,45 @@ def test_settlement_state_for_supported_live_paper_markets(
         )
         == expected_state
     )
+
+
+def test_paper_trading_performance_tracks_asian_handicap_half_states() -> None:
+    rows = [
+        {
+            "market": "asian_handicap",
+            "trade_state": "WON",
+            "entry_odds": 2.1,
+            "net_pnl": 1.1,
+            "latest_update_payload": {"stake": 1.0},
+            "implied_probability_clv": None,
+        },
+        {
+            "market": "asian_handicap",
+            "trade_state": "HALF_WIN",
+            "entry_odds": 1.9,
+            "net_pnl": 0.45,
+            "latest_update_payload": {"stake": 1.0},
+            "implied_probability_clv": None,
+        },
+        {
+            "market": "asian_handicap",
+            "trade_state": "PUSH",
+            "entry_odds": 1.95,
+            "net_pnl": 0.0,
+            "latest_update_payload": {"stake": 1.0},
+            "implied_probability_clv": None,
+        },
+    ]
+
+    performance = paper_trading_performance(rows)
+
+    assert performance["by_market"]["asian_handicap"]["positions"] == 3
+    assert performance["by_market"]["asian_handicap"]["settled_positions"] == 3
+    assert performance["by_market"]["asian_handicap"]["wins"] == 1
+    assert performance["by_market"]["asian_handicap"]["half_wins"] == 1
+    assert performance["by_market"]["asian_handicap"]["pushes"] == 1
+    assert performance["by_market"]["asian_handicap"]["net_units"] == pytest.approx(1.55)
+    assert performance["by_market"]["asian_handicap"]["strike_rate"] == pytest.approx(0.75)
 
 
 def test_market_snapshot_dedup_identical(tmp_path):

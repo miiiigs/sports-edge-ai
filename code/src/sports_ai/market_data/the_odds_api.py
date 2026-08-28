@@ -1,11 +1,12 @@
-"""The Odds API current market provider (soccer h2h + totals).
+"""The Odds API current market provider (soccer h2h + spreads + totals).
 
 Free-tier-safe foundation:
 
 - Credential is read from ``SPORTS_AI_THE_ODDS_API_KEY`` and never logged.
-- CURRENT h2h (soccer 1X2) and totals (goals Over/Under) decimal odds are
-  supported. Totals normalize to the ``goals_total`` market family with exact
-  provider point lines (no rounding or approximation).
+- CURRENT h2h (soccer 1X2), spreads (Asian handicap line snapshots), and totals
+  (goals Over/Under) decimal odds are supported. Totals and handicap lines
+  preserve exact provider point identity under the repo's existing canonical
+  line conventions (no rounding or approximation).
 - Event-level add-on markets are fetched quota-consciously for matched fixtures
   only. BTTS and corner totals preserve exact provider market identity.
 - One bookmaker region via ``SPORTS_AI_ODDS_REGION``.
@@ -39,14 +40,16 @@ THE_ODDS_API_INGESTION_VERSION = "the_odds_api_current_market_provider_v1"
 THE_ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
 
 THE_ODDS_MARKET_H2H = "h2h"
+THE_ODDS_MARKET_SPREADS = "spreads"
 THE_ODDS_MARKET_TOTALS = "totals"
 THE_ODDS_MARKET_BTTS = "btts"
 THE_ODDS_MARKET_CORNERS = "alternate_totals_corners"
-THE_ODDS_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_H2H},{THE_ODDS_MARKET_TOTALS}"
+THE_ODDS_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_H2H},{THE_ODDS_MARKET_SPREADS},{THE_ODDS_MARKET_TOTALS}"
 THE_ODDS_EVENT_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_BTTS},{THE_ODDS_MARKET_CORNERS}"
-_SUPPORTED_MARKET_KEYS = frozenset({THE_ODDS_MARKET_H2H, THE_ODDS_MARKET_TOTALS})
+_SUPPORTED_MARKET_KEYS = frozenset({THE_ODDS_MARKET_H2H, THE_ODDS_MARKET_SPREADS, THE_ODDS_MARKET_TOTALS})
 
 MARKET_1X2 = "1x2"
+MARKET_ASIAN_HANDICAP = "asian_handicap"
 MARKET_GOALS_TOTAL = "goals_total"
 MARKET_BTTS = "btts"
 MARKET_CORNER_TOTAL = "corner_total"
@@ -468,7 +471,24 @@ class TheOddsApiProvider:
         return None
 
     @staticmethod
-    def _normalize_totals_line(point: Any) -> float | None:
+    def _normalize_quarter_step_line(point: Any, *, allow_negative: bool) -> float | None:
+        """Return a canonical point line, or None to fail closed."""
+        if point is None:
+            return None
+        try:
+            line = float(point)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(line):
+            return None
+        if not allow_negative and line < 0:
+            return None
+        if not (line * 4).is_integer():
+            return None
+        return line
+
+    @classmethod
+    def _normalize_totals_line(cls, point: Any) -> float | None:
         """Return a canonical totals line, or None to fail closed.
 
         A totals line must be numeric, finite, non-negative, and expressed on an
@@ -476,17 +496,27 @@ class TheOddsApiProvider:
         is preserved. Missing, malformed, negative, or non-canonical points are
         dropped instead of being emitted as an unsafe snapshot.
         """
-        if point is None:
+        return cls._normalize_quarter_step_line(point, allow_negative=False)
+
+    @classmethod
+    def _normalize_asian_handicap_line(cls, point: Any, *, selection: str) -> float | None:
+        """Convert a provider handicap point into the repo's home-handicap line.
+
+        The Odds API spread outcomes are expressed from the selected team's point
+        of view, while the Route B / Day 10 market rows use a shared
+        ``home_handicap`` convention for both HOME and AWAY selections. For
+        example, provider outcomes `HOME -0.5` and `AWAY +0.5` must both map to
+        internal line `-0.5` so the opposing pair can share one exact market
+        identity group without losing signed display semantics.
+        """
+        raw_line = cls._normalize_quarter_step_line(point, allow_negative=True)
+        if raw_line is None:
             return None
-        try:
-            line = float(point)
-        except (TypeError, ValueError):
-            return None
-        if not math.isfinite(line) or line < 0:
-            return None
-        if not (line * 4).is_integer():
-            return None
-        return line
+        if selection == "HOME":
+            return raw_line
+        if selection == "AWAY":
+            return -raw_line
+        return None
 
     def _freshness_state(
         self,
@@ -558,6 +588,16 @@ class TheOddsApiProvider:
                             continue
                         snapshot_market = MARKET_GOALS_TOTAL
                         snapshot_selection = selection
+                    elif market_key == THE_ODDS_MARKET_SPREADS:
+                        selection = self._classify_h2h_selection(home_team, away_team, outcome_name)
+                        if selection not in {"HOME", "AWAY"}:
+                            continue
+                        raw_point = outcome.get("point")
+                        snapshot_line = self._normalize_asian_handicap_line(raw_point, selection=selection)
+                        if snapshot_line is None:
+                            continue
+                        snapshot_market = MARKET_ASIAN_HANDICAP
+                        snapshot_selection = selection
                     else:
                         selection = self._classify_h2h_selection(home_team, away_team, outcome_name)
                         if selection is None:
@@ -567,7 +607,7 @@ class TheOddsApiProvider:
                         snapshot_line = None
                     provider_market_id = f"{event_id}:{key_lower}:{market_key}:{snapshot_selection}"
                     if snapshot_line is not None:
-                        provider_market_id = f"{provider_market_id}:{snapshot_line}"
+                        provider_market_id = f"{provider_market_id}:{outcome.get('point')}:{snapshot_line}"
                     snapshots.append(
                         NormalizedMarketSnapshot(
                             provider=self.provider_name(),

@@ -1392,6 +1392,102 @@ def test_dashboard_services_settles_finished_paper_trade_idempotently_and_report
     asyncio.run(services.shutdown())
 
 
+def test_dashboard_services_settles_finished_asian_handicap_trade_idempotently_and_reports_live_results(
+    tmp_path: Path,
+) -> None:
+    kickoff_utc = (datetime.now(timezone.utc) - timedelta(hours=3)).replace(microsecond=0).isoformat()
+    pending_fixture = replace(
+        _fixture(),
+        kickoff_utc=kickoff_utc,
+        status=FIXTURE_STATUS_PRE_MATCH,
+    )
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        enable_odds_sync=True,
+    )
+    provider = FakeFixtureProvider([pending_fixture])
+    services = DashboardServices(
+        config=config,
+        fixture_provider=provider,
+        market_provider=FakeMarketProvider(configured=True),
+    )
+
+    asyncio.run(services.initialize())
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        _record_test_paper_trade(
+            conn,
+            fixture=pending_fixture,
+            prediction_id="pred_settle_ah_1",
+            market="asian_handicap",
+            selection="HOME",
+            line=-0.5,
+            entry_odds=2.2,
+            model_fair_price=1.92,
+        )
+
+    asyncio.run(services.sync_once())
+
+    provider.fixtures = [
+        replace(
+            pending_fixture,
+            status=FIXTURE_STATUS_FINISHED,
+            home_score=2,
+            away_score=1,
+            last_provider_update=(datetime.now(timezone.utc) - timedelta(minutes=2)).replace(microsecond=0).isoformat(),
+        )
+    ]
+
+    asyncio.run(services.sync_once())
+    asyncio.run(services.sync_once())
+
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        updates = conn.execute(
+            "SELECT trade_state, payload_json FROM paper_trade_updates ORDER BY paper_trade_update_id"
+        ).fetchall()
+
+    assert len(paper_rows) == 1
+    assert paper_rows[0]["trade_state"] == "WON"
+    assert paper_rows[0]["market"] == "asian_handicap"
+    assert paper_rows[0]["line"] == pytest.approx(-0.5)
+    assert paper_rows[0]["entry_odds"] == pytest.approx(2.2)
+    assert len(updates) == 1
+    assert updates[0]["trade_state"] == "WON"
+    settlement_context = json.loads(str(updates[0]["payload_json"]))["settlement_context"]
+    assert settlement_context["provider"] == "fake-provider"
+    assert settlement_context["provider_fixture_id"] == "fixture-1"
+    assert settlement_context["final_status"] == "FINISHED"
+    assert settlement_context["actual_home_goals"] == 2
+    assert settlement_context["actual_away_goals"] == 1
+
+    performance_payload = services.get_performance_payload()
+    assert performance_payload["current_paper_summary"]["settled_positions"] == 1
+    assert performance_payload["current_paper_summary"]["wins"] == 1
+    assert performance_payload["current_paper_summary"]["net_units"] == pytest.approx(1.2)
+    assert performance_payload["current_paper_summary"]["roi"] == pytest.approx(1.2)
+    assert performance_payload["current_paper_by_market"]["asian_handicap"]["wins"] == 1
+    assert performance_payload["live_paper_market_rows"][0]["market"] == "asian_handicap"
+    assert performance_payload["recent_paper_bets"][0]["bet_label"] == "Arsenal -0.5"
+    assert performance_payload["recent_paper_bets"][0]["final_score"] == "2-1"
+    assert performance_payload["recent_paper_bets"][0]["result_provider"] == "fake-provider"
+
+    app = create_app(
+        config=config,
+        fixture_provider=provider,
+        market_provider=FakeMarketProvider(configured=True),
+    )
+    with TestClient(app) as client:
+        response = client.get("/performance")
+
+    assert response.status_code == 200
+    assert "Asian Handicap" in response.text
+    assert "Arsenal -0.5" in response.text
+    assert "WON" in response.text
+
+    asyncio.run(services.shutdown())
+
+
 def test_dashboard_services_settles_finished_corner_trade_with_authoritative_stats_idempotently(tmp_path: Path):
     kickoff_utc = (datetime.now(timezone.utc) - timedelta(hours=3)).replace(microsecond=0).isoformat()
     finished_fixture = replace(
@@ -1708,9 +1804,16 @@ def test_best_pick_market_labels_are_human_readable() -> None:
         home_team_name="Arsenal",
         away_team_name="Chelsea",
     )["bet_label"] == "Arsenal -0.5"
+    assert _humanize_market_selection(
+        market_family="asian_handicap",
+        selection="AWAY",
+        line=-0.5,
+        home_team_name="Arsenal",
+        away_team_name="Chelsea",
+    )["bet_label"] == "Chelsea +0.5"
 
 
-def test_odds_runtime_requirements_include_corner_total(tmp_path: Path, monkeypatch) -> None:
+def test_odds_runtime_requirements_include_corner_total_and_asian_handicap(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
     config = replace(_dashboard_config(tmp_path), current_odds_connected=True)
     services = DashboardServices(
@@ -1721,6 +1824,7 @@ def test_odds_runtime_requirements_include_corner_total(tmp_path: Path, monkeypa
 
     requirements = services._odds_feed_runtime_requirements()
     assert "corner_total" in requirements["supported_markets"]
+    assert "asian_handicap" in requirements["supported_markets"]
 
 
 def test_dashboard_services_best_picks_use_qualified_current_truth(tmp_path: Path, monkeypatch) -> None:
@@ -1796,6 +1900,113 @@ def test_dashboard_services_best_picks_use_qualified_current_truth(tmp_path: Pat
     assert best_pick["fair_odds"] == candidate["model_fair_decimal_price"]
     assert best_pick["edge"] == candidate["settlement_aware_edge"]
     assert best_pick["paper_qualification_state"] == "QUALIFIED"
+
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_current_asian_handicap_candidate_creates_idempotent_paper_entry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
+    fixture = _fixture()
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        current_xg_connected=True,
+        enable_odds_sync=True,
+    )
+    market_provider = FakeMarketProvider()
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=market_provider,
+        xg_profile_factory=_xg_factory_for_fixtures(fixture),
+    )
+
+    asyncio.run(services.initialize())
+    market_provider.snapshots_by_fixture[fixture.fixture_id] = [
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="Pinnacle",
+            market="asian_handicap",
+            selection="HOME",
+            line=-0.5,
+            decimal_odds=1.95,
+            reference_designation="reference",
+            provider_market_id="pin-home-ah",
+        ),
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="Pinnacle",
+            market="asian_handicap",
+            selection="AWAY",
+            line=-0.5,
+            decimal_odds=1.91,
+            reference_designation="reference",
+            provider_market_id="pin-away-ah",
+        ),
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="bet365",
+            market="asian_handicap",
+            selection="HOME",
+            line=-0.5,
+            decimal_odds=10.0,
+            reference_designation="available",
+            provider_market_id="b365-home-ah",
+        ),
+        _market_snapshot(
+            fixture=fixture,
+            bookmaker="bet365",
+            market="asian_handicap",
+            selection="AWAY",
+            line=-0.5,
+            decimal_odds=1.80,
+            reference_designation="available",
+            provider_market_id="b365-away-ah",
+        ),
+    ]
+
+    asyncio.run(services.sync_once())
+
+    payload = services.get_fixture_detail_payload(fixture.fixture_id)
+    assert payload is not None
+    assert payload["market_evaluation"]["state"] == "READY"
+    assert payload["market_evaluation"]["covered_markets"] == ["asian_handicap"]
+
+    candidates_payload = services.get_candidates_payload()
+    ah_candidates = [
+        row
+        for row in candidates_payload["preliminary_candidates"]
+        if row["market_family"] == "asian_handicap"
+    ]
+    assert len(ah_candidates) == 1
+    assert ah_candidates[0]["selection"] == "HOME"
+    assert ah_candidates[0]["line"] == pytest.approx(-0.5)
+    assert ah_candidates[0]["paper_entry_eligible"] is True
+
+    performance_payload = services.get_performance_payload()
+    assert performance_payload["current_paper_summary"]["positions"] == 1
+    assert performance_payload["current_paper_summary"]["open_positions"] == 1
+    assert performance_payload["open_paper_positions"][0]["market"] == "asian_handicap"
+    assert performance_payload["open_paper_positions"][0]["bet_label"] == "Arsenal -0.5"
+
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        assert len(paper_rows) == 1
+        assert paper_rows[0]["market"] == "asian_handicap"
+        assert paper_rows[0]["selection"] == "HOME"
+        assert paper_rows[0]["line"] == pytest.approx(-0.5)
+        assert paper_rows[0]["entry_snapshot_id"] is not None
+        first_trade_id = str(paper_rows[0]["paper_trade_id"])
+
+    asyncio.run(services.sync_once())
+
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        assert len(paper_rows) == 1
+        assert str(paper_rows[0]["paper_trade_id"]) == first_trade_id
 
     asyncio.run(services.shutdown())
 
