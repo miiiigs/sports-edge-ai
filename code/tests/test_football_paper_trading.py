@@ -10,6 +10,7 @@ from sports_ai.storage.football_paper_trading import (
     connect,
     fetch_market_snapshots,
     fetch_paper_trade_rows,
+    paper_trading_performance,
     paper_trading_status,
     record_market_snapshot,
     record_paper_trade_entry,
@@ -127,6 +128,40 @@ def test_paper_trading_store_prevents_duplicate_entry_signatures(tmp_path):
             record_paper_trade_entry(conn, entry)
 
 
+@pytest.mark.parametrize(
+    ("market", "selection", "line", "home_goals", "away_goals", "expected_state"),
+    [
+        ("1x2", "HOME", None, 2, 1, "WON"),
+        ("1x2", "HOME", None, 0, 1, "LOST"),
+        ("btts", "YES", None, 1, 1, "WON"),
+        ("btts", "YES", None, 2, 0, "LOST"),
+        ("btts", "NO", None, 2, 0, "WON"),
+        ("btts", "NO", None, 1, 1, "LOST"),
+        ("goals_total", "OVER", 2.5, 2, 1, "WON"),
+        ("goals_total", "UNDER", 2.5, 1, 1, "WON"),
+        ("goals_total", "OVER", 3.0, 2, 1, "PUSH"),
+    ],
+)
+def test_settlement_state_for_supported_live_paper_markets(
+    market,
+    selection,
+    line,
+    home_goals,
+    away_goals,
+    expected_state,
+):
+    assert (
+        settlement_state_for_market(
+            market=market,
+            selection=selection,
+            line=line,
+            actual_home_goals=home_goals,
+            actual_away_goals=away_goals,
+        )
+        == expected_state
+    )
+
+
 def test_market_snapshot_dedup_identical(tmp_path):
     db_path = tmp_path / "football_paper_trading.sqlite"
     snapshot = StoredMarketSnapshot(
@@ -194,3 +229,61 @@ def test_market_snapshot_preserves_update_change(tmp_path):
         snapshots = fetch_market_snapshots(conn, fixture_id="evt_fixture_1")
 
     assert len(snapshots) == 2
+
+
+def test_paper_trading_performance_excludes_pending_from_roi_and_push_from_strike_rate():
+    rows = [
+        {
+            "market": "1x2",
+            "trade_state": "WON",
+            "entry_odds": 2.0,
+            "net_pnl": 1.0,
+            "latest_update_payload": {"stake": 1.0},
+            "implied_probability_clv": None,
+        },
+        {
+            "market": "1x2",
+            "trade_state": "LOST",
+            "entry_odds": 2.2,
+            "net_pnl": -2.0,
+            "latest_update_payload": {"stake": 2.0},
+            "implied_probability_clv": None,
+        },
+        {
+            "market": "btts",
+            "trade_state": "PUSH",
+            "entry_odds": 1.95,
+            "net_pnl": 0.0,
+            "latest_update_payload": {"stake": 1.0},
+            "implied_probability_clv": None,
+        },
+        {
+            "market": "goals_total",
+            "trade_state": "PENDING",
+            "entry_odds": 1.9,
+            "net_pnl": None,
+            "latest_update_payload": None,
+            "implied_probability_clv": None,
+        },
+    ]
+
+    performance = paper_trading_performance(rows)
+
+    assert performance["positions"] == 4
+    assert performance["settled_positions"] == 3
+    assert performance["pending_positions"] == 1
+    assert performance["wins"] == 1
+    assert performance["losses"] == 1
+    assert performance["pushes"] == 1
+    assert performance["net_units"] == pytest.approx(-1.0)
+    assert performance["settled_stake_units"] == pytest.approx(4.0)
+    assert performance["roi"] == pytest.approx(-0.25)
+    assert performance["strike_rate"] == pytest.approx(0.5)
+    assert performance["by_market"]["1x2"]["positions"] == 2
+    assert performance["by_market"]["1x2"]["settled_positions"] == 2
+    assert performance["by_market"]["1x2"]["net_units"] == pytest.approx(-1.0)
+    assert performance["by_market"]["1x2"]["roi"] == pytest.approx(-1.0 / 3.0)
+    assert performance["by_market"]["1x2"]["strike_rate"] == pytest.approx(0.5)
+    assert performance["by_market"]["btts"]["pushes"] == 1
+    assert performance["by_market"]["btts"]["roi"] == pytest.approx(0.0)
+    assert performance["by_market"]["goals_total"]["roi"] is None

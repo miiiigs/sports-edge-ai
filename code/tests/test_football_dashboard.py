@@ -7,13 +7,20 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from sports_ai.dashboard.app import create_app
 from sports_ai.dashboard import storage as dashboard_storage
 from sports_ai.dashboard.day12_rolling_xg import SOURCE_IDENTIFIER, build_xg_inspection
 from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FixtureProviderError, FootballDataOrgFixtureProvider
-from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, FIXTURE_STATUS_PRE_MATCH, NormalizedFixture, normalize_text_key
+from sports_ai.dashboard.models import (
+    FIXTURE_STATUS_FINISHED,
+    FIXTURE_STATUS_LIVE,
+    FIXTURE_STATUS_PRE_MATCH,
+    NormalizedFixture,
+    normalize_text_key,
+)
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _humanize_market_selection
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
 from sports_ai.storage import football_edge_desk, football_paper_trading
@@ -902,7 +909,7 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
 
         performance_page = client.get("/performance")
         assert performance_page.status_code == 200
-        assert "Football model and betting performance." in performance_page.text
+        assert "Historical validation and live paper betting results." in performance_page.text
         assert 'href="/static/dashboard.css"' in performance_page.text
         assert 'src="/static/dashboard.js"' in performance_page.text
 
@@ -1145,6 +1152,9 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
     performance_payload = services.get_performance_payload()
     assert performance_payload["current_paper_summary"]["positions"] == 1
     assert performance_payload["current_paper_summary"]["open_positions"] == 1
+    assert performance_payload["recent_paper_bets"] == []
+    assert len(performance_payload["open_paper_positions"]) == 1
+    assert performance_payload["live_paper_kpis"][0] == ("Bets", "1")
 
     with football_paper_trading.connect(config.paper_trading_db_path) as conn:
         paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
@@ -1181,6 +1191,127 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
         row["market_family"] in {"btts", "goals_total"} and row["decision_status"] == "NO_BET"
         for row in edge_decisions
     )
+
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_settles_finished_paper_trade_idempotently_and_reports_live_results(tmp_path: Path):
+    kickoff_utc = (datetime.now(timezone.utc) - timedelta(hours=3)).replace(microsecond=0).isoformat()
+    pending_fixture = replace(
+        _fixture(),
+        kickoff_utc=kickoff_utc,
+        status=FIXTURE_STATUS_PRE_MATCH,
+    )
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        enable_odds_sync=True,
+    )
+    provider = FakeFixtureProvider([pending_fixture])
+    services = DashboardServices(
+        config=config,
+        fixture_provider=provider,
+        market_provider=FakeMarketProvider(configured=True),
+    )
+
+    asyncio.run(services.initialize())
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        football_paper_trading.record_paper_trade_entry(
+            conn,
+            football_paper_trading.PaperTradeEntry(
+                prediction_id="pred_settle_1",
+                fixture_id=pending_fixture.fixture_id,
+                model_snapshot_id="snapshot_settle_1",
+                model_version="football_day11_manager_core_v1",
+                market="1x2",
+                selection="HOME",
+                model_probability=0.52,
+                model_fair_price=1.92,
+                available_market_price=2.2,
+                edge=0.06,
+                minimum_acceptable_price=2.0,
+                decision="PAPER_CANDIDATE",
+                decision_timestamp=(datetime.now(timezone.utc) - timedelta(hours=4)).replace(microsecond=0).isoformat(),
+                kickoff=kickoff_utc,
+                safeguard_state="READY",
+                entry_eligibility="ELIGIBLE",
+                bookmaker="Pinnacle",
+                provider="fake-market-provider",
+                entry_odds=2.2,
+                entry_captured_at=(datetime.now(timezone.utc) - timedelta(hours=4)).replace(microsecond=0).isoformat(),
+            ),
+        )
+
+    asyncio.run(services.sync_once())
+    initial_performance = services.get_performance_payload()
+    assert initial_performance["current_paper_summary"]["settled_positions"] == 0
+    assert initial_performance["current_paper_summary"]["pending_positions"] == 1
+    assert initial_performance["recent_paper_bets"] == []
+    assert len(initial_performance["open_paper_positions"]) == 1
+
+    provider.fixtures = [
+        replace(
+            pending_fixture,
+            status=FIXTURE_STATUS_FINISHED,
+            home_score=2,
+            away_score=1,
+            last_provider_update=(datetime.now(timezone.utc) - timedelta(minutes=2)).replace(microsecond=0).isoformat(),
+        )
+    ]
+
+    asyncio.run(services.sync_once())
+    asyncio.run(services.sync_once())
+
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        updates = conn.execute(
+            "SELECT trade_state, payload_json FROM paper_trade_updates ORDER BY paper_trade_update_id"
+        ).fetchall()
+
+    assert len(paper_rows) == 1
+    assert paper_rows[0]["trade_state"] == "WON"
+    assert paper_rows[0]["entry_odds"] == pytest.approx(2.2)
+    assert len(updates) == 1
+    assert updates[0]["trade_state"] == "WON"
+    settlement_context = json.loads(str(updates[0]["payload_json"]))["settlement_context"]
+    assert settlement_context["provider"] == "fake-provider"
+    assert settlement_context["provider_fixture_id"] == "fixture-1"
+    assert settlement_context["final_status"] == "FINISHED"
+    assert settlement_context["actual_home_goals"] == 2
+    assert settlement_context["actual_away_goals"] == 1
+
+    performance_payload = services.get_performance_payload()
+    assert performance_payload["current_paper_summary"]["settled_positions"] == 1
+    assert performance_payload["current_paper_summary"]["wins"] == 1
+    assert performance_payload["current_paper_summary"]["pending_positions"] == 0
+    assert performance_payload["current_paper_summary"]["strike_rate"] == pytest.approx(1.0)
+    assert performance_payload["current_paper_summary"]["net_units"] == pytest.approx(1.2)
+    assert performance_payload["current_paper_summary"]["roi"] == pytest.approx(1.2)
+    assert performance_payload["live_paper_market_rows"][0]["market"] == "1x2"
+    assert performance_payload["live_paper_market_rows"][0]["wins"] == 1
+    assert performance_payload["recent_paper_bets"][0]["final_score"] == "2-1"
+    assert performance_payload["recent_paper_bets"][0]["fixture_label"] == "Arsenal vs Chelsea"
+    assert performance_payload["recent_paper_bets"][0]["result_provider"] == "fake-provider"
+    assert performance_payload["open_paper_positions"] == []
+
+    app = create_app(
+        config=config,
+        fixture_provider=provider,
+        market_provider=FakeMarketProvider(configured=True),
+    )
+    with TestClient(app) as client:
+        response = client.get("/performance")
+        api_response = client.get("/api/performance")
+
+    assert response.status_code == 200
+    assert "Recent Settled Bets" in response.text
+    assert "Current Open Paper Bets" in response.text
+    assert "Arsenal vs Chelsea" in response.text
+    assert "2-1" in response.text
+    assert "WON" in response.text
+    assert api_response.status_code == 200
+    assert api_response.json()["summary"]["MODEL_VALIDATION"] == "PROMISING"
+    assert api_response.json()["current_paper_summary"]["roi"] == pytest.approx(1.2)
 
     asyncio.run(services.shutdown())
 
@@ -1517,10 +1648,16 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
     assert payload["current_slate_summary"]["pending_count"] == 2
     assert payload["system_status"]["current_fixture_state"]["today_count"] == 0
     assert metrics["Analysed"] == {"label": "Analysed", "value": "2", "note": "current slate fixtures"}
-    assert metrics["Predictions"] == {"label": "Predictions", "value": "3", "note": "current-slate rows"}
     assert metrics["Approved"] == {"label": "Approved", "value": "2", "note": "qualified"}
-    assert metrics["Suggested Bets"] == {"label": "Suggested Bets", "value": "2", "note": "paper published"}
-    assert metrics["Pending"] == {"label": "Pending", "value": "2", "note": "open paper"}
+    assert metrics["Suggested Bets"] == {"label": "Suggested Bets", "value": "3", "note": "all paper bets"}
+    assert metrics["Settled"] == {"label": "Settled", "value": "0", "note": "final results"}
+    assert metrics["Won"] == {"label": "Won", "value": "0", "note": "full wins"}
+    assert metrics["Lost"] == {"label": "Lost", "value": "0", "note": "full losses"}
+    assert metrics["Push"] == {"label": "Push", "value": "0", "note": "stake returned"}
+    assert metrics["Pending"] == {"label": "Pending", "value": "3", "note": "open paper"}
+    assert metrics["Strike Rate"] == {"label": "Strike Rate", "value": "NOT AVAILABLE", "note": "pushes excluded"}
+    assert metrics["P/L"] == {"label": "P/L", "value": "+0.00", "note": "net units"}
+    assert metrics["ROI"] == {"label": "ROI", "value": "NOT AVAILABLE", "note": "settled stake only"}
     assert funnel["Desk rows"]["value"] == "3"
     assert funnel["Suggested bets"]["value"] == "2"
     assert funnel["BET rows"]["value"] == "2"
@@ -1586,6 +1723,6 @@ def test_dashboard_performance_empty_state_uses_neutral_paper_copy(tmp_path: Pat
         response = client.get("/performance")
 
     assert response.status_code == 200
-    assert "No current paper positions are recorded yet." in response.text
-    assert "qualified current-slate entries are published" in response.text
+    assert "No settled paper bets yet." in response.text
+    assert "No open paper positions right now." in response.text
     assert "current odds provider is still not configured" not in response.text

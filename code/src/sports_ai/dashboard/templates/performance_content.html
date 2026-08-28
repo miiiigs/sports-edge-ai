@@ -3,7 +3,7 @@
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Performance Snapshot</p>
     <h1>Performance</h1>
-    <p class="subhead desk-page-subhead">Football model and betting performance.</p>
+    <p class="subhead desk-page-subhead">Historical validation and live paper betting results.</p>
   </div>
   <div class="page-actions">
     {{ status_badge('Historical Validation ' ~ payload.performance_status.historical_validation.state, 'positive' if payload.performance_status.historical_validation.state == 'READY' else 'inactive') }}
@@ -14,13 +14,13 @@
   <div class="section-heading">
     <div>
       <p class="eyebrow">Glance</p>
-      <h2>Validation State</h2>
-      <span>{{ payload.summary.MODEL_VALIDATION or 'NOT AVAILABLE' }}</span>
+      <h2>Current Paper Performance</h2>
+      <span>{{ payload.current_paper_summary.sample_status or 'NOT AVAILABLE' }}</span>
     </div>
-    <span>Generated {{ payload.summary_generated_at or 'not available' }}</span>
+    <span>{{ payload.recent_form|join(' ') if payload.recent_form else 'No settled sequence yet' }}</span>
   </div>
   <div class="hero-strip">
-    {% for label, value in payload.kpis %}
+    {% for label, value in payload.live_paper_kpis %}
       <div class="metric-tile">
         <span>{{ label }}</span>
         <strong>{{ value }}</strong>
@@ -34,8 +34,8 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Scan</p>
-        <h2>Market Summary</h2>
-        <span>No universal win-rate shortcut</span>
+        <h2>Performance By Market</h2>
+        <span>Live paper results only</span>
       </div>
     </div>
     <div class="table-shell">
@@ -43,31 +43,32 @@
         <thead>
           <tr>
             <th>Market</th>
-            <th>Sample</th>
-            <th>Hit Rate</th>
-            <th>Brier</th>
-            <th>Log Loss</th>
-            <th>Status</th>
+            <th>Bets</th>
+            <th>Settled</th>
+            <th>Won</th>
+            <th>Lost</th>
+            <th>Push</th>
+            <th>Strike Rate</th>
+            <th>Net Units</th>
+            <th>ROI</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in payload.market_rows %}
+          {% for row in payload.live_paper_market_rows %}
             <tr>
-              <td>
-                <strong>{{ row.market }}</strong>
-                <div class="row-sub">
-                  {% if row.line %}
-                    Line {{ row.line }} · {{ row.selection }}
-                  {% else %}
-                    {{ row.selection }}
-                  {% endif %}
-                </div>
-              </td>
-              <td>{{ row.sample_size or 'NOT AVAILABLE' }}</td>
-              <td>{{ 'NOT AVAILABLE' if not row.hit_rate else '{:.2%}'.format(row.hit_rate|float) }}</td>
-              <td>{{ 'NOT AVAILABLE' if not row.brier else '{:.4f}'.format(row.brier|float) }}</td>
-              <td>{{ 'NOT AVAILABLE' if not row.log_loss else '{:.4f}'.format(row.log_loss|float) }}</td>
-              <td>{{ status_badge(row.status, 'positive' if row.status == 'READY' else 'inactive') }}</td>
+              <td><strong>{{ row.label }}</strong></td>
+              <td>{{ row.positions }}</td>
+              <td>{{ row.settled_positions }}</td>
+              <td>{{ row.wins }}</td>
+              <td>{{ row.losses }}</td>
+              <td>{{ row.pushes }}</td>
+              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else 'NOT AVAILABLE' }}</td>
+              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else 'NOT AVAILABLE' }}</td>
+              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else 'NOT AVAILABLE' }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="9">No live paper market results are available yet.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -79,8 +80,8 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Support</p>
-        <h2>Readiness</h2>
-        <span>Current platform state</span>
+        <h2>Historical Validation</h2>
+        <span>Kept separate from live paper results</span>
       </div>
     </div>
     <div class="data-list">
@@ -92,6 +93,7 @@
       <div><span>Paper Ledger</span><strong>{{ payload.system_status.paper_ledger.state }}</strong></div>
       <div><span>Closing Price Tracking</span><strong>{{ payload.system_status.closing_price_tracking.state }}</strong></div>
       <div><span>CLV Status</span><strong>{{ payload.system_status.clv.state }}</strong></div>
+      <div><span>Generated</span><strong>{{ payload.summary_generated_at or 'not available' }}</strong></div>
     </div>
   </aside>
 </section>
@@ -101,7 +103,7 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Investigate</p>
-        <h3>Calibration</h3>
+        <h3>Historical Calibration</h3>
         <span>Predicted probability vs observed frequency</span>
       </div>
     </div>
@@ -143,14 +145,17 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow">Investigate</p>
-        <h3>Paper Tracking</h3>
-        <span>Immutable append-safe ledger</span>
+        <h3>Live Paper Ledger</h3>
+        <span>Append-only settlement tracking</span>
       </div>
     </div>
     <div class="data-list">
       <div><span>Paper Bets</span><strong>{{ payload.performance_status.paper_ledger.paper_bets }}</strong></div>
       <div><span>Open Positions</span><strong>{{ payload.performance_status.paper_ledger.open_positions }}</strong></div>
       <div><span>Settled Positions</span><strong>{{ payload.performance_status.paper_ledger.settled_positions }}</strong></div>
+      <div><span>Won</span><strong>{{ payload.performance_status.paper_ledger.wins }}</strong></div>
+      <div><span>Lost</span><strong>{{ payload.performance_status.paper_ledger.losses }}</strong></div>
+      <div><span>Push</span><strong>{{ payload.performance_status.paper_ledger.pushes }}</strong></div>
       <div><span>Net Units</span><strong>{{ "{:+.2f}".format(payload.current_paper_summary.net_units|float) if payload.current_paper_summary.net_units is not none else 'NOT AVAILABLE' }}</strong></div>
       <div><span>ROI</span><strong>{{ "{:+.2%}".format(payload.current_paper_summary.roi|float) if payload.current_paper_summary.roi is not none else 'NOT AVAILABLE' }}</strong></div>
       <div><span>Current Odds Provider</span><strong>{{ payload.system_status.market_provider.state }}</strong></div>
@@ -163,67 +168,53 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Current Paper</p>
-      <h2>Current Paper Summary</h2>
-      <span>{{ payload.current_paper_summary.sample_status or 'NOT AVAILABLE' }}</span>
+      <p class="eyebrow">Recent Bets</p>
+      <h2>Recent Settled Bets</h2>
+      <span>Most recent settled outcomes</span>
     </div>
   </div>
-  <div class="hero-strip">
-    <div class="metric-tile">
-      <span>Positions</span>
-      <strong>{{ payload.current_paper_summary.positions or 0 }}</strong>
-    </div>
-    <div class="metric-tile">
-      <span>Hit Rate</span>
-      <strong>{{ "{:.2%}".format(payload.current_paper_summary.hit_rate|float) if payload.current_paper_summary.hit_rate is not none else 'NOT AVAILABLE' }}</strong>
-    </div>
-    <div class="metric-tile">
-      <span>Break Even</span>
-      <strong>{{ "{:.2%}".format(payload.current_paper_summary.break_even_rate|float) if payload.current_paper_summary.break_even_rate is not none else 'NOT AVAILABLE' }}</strong>
-    </div>
-    <div class="metric-tile">
-      <span>Avg CLV</span>
-      <strong>{{ "{:+.4f}".format(payload.current_paper_summary.average_clv|float) if payload.current_paper_summary.average_clv is not none else 'NOT AVAILABLE' }}</strong>
-    </div>
-  </div>
-</section>
-
-<section class="section-block">
-  <div class="section-heading">
-    <div>
-      <p class="eyebrow">Current Paper</p>
-      <h2>Current Paper By Market</h2>
-      <span>Only live-paper ledger rows</span>
-    </div>
-  </div>
-  <div class="table-shell">
-    <table>
-      <thead>
-        <tr>
-          <th>Market</th>
-          <th>Positions</th>
-          <th>Hit Rate</th>
-          <th>ROI</th>
-          <th>Net Units</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for market, row in payload.current_paper_by_market.items() %}
+  {% if payload.recent_paper_bets %}
+    <div class="table-shell">
+      <table>
+        <thead>
           <tr>
-            <td>{{ market }}</td>
-            <td>{{ row.positions }}</td>
-            <td>{{ "{:.2%}".format(row.hit_rate|float) if row.hit_rate is not none else 'NOT AVAILABLE' }}</td>
-            <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else 'NOT AVAILABLE' }}</td>
-            <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else 'NOT AVAILABLE' }}</td>
+            <th>Fixture</th>
+            <th>Kickoff</th>
+            <th>Market</th>
+            <th>Selection</th>
+            <th>Entry Odds</th>
+            <th>Fair Odds</th>
+            <th>Edge</th>
+            <th>Result</th>
+            <th>P&amp;L</th>
+            <th>Final Score</th>
+            <th>Settled At</th>
           </tr>
-        {% else %}
-          <tr>
-            <td colspan="5">No current paper positions have settled into a by-market summary yet.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+        </thead>
+        <tbody>
+          {% for row in payload.recent_paper_bets %}
+            <tr>
+              <td>{{ row.fixture_label }}</td>
+              <td>{{ row.kickoff_local }}</td>
+              <td>{{ row.market_label }}</td>
+              <td>{{ row.selection_label }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+              <td>{{ '{:.2f}'.format(row.entry_odds|float) if row.entry_odds else 'NOT AVAILABLE' }}</td>
+              <td>{{ '{:.2f}'.format(row.model_fair_price|float) }}</td>
+              <td>{{ '{:+.2%}'.format(row.edge|float) if row.edge is not none else 'NOT AVAILABLE' }}</td>
+              <td>{{ row.trade_state }}</td>
+              <td>{{ '{:+.2f}'.format(row.net_pnl|float) if row.net_pnl is not none else 'NOT AVAILABLE' }}</td>
+              <td>{{ row.final_score or 'NOT AVAILABLE' }}</td>
+              <td>{{ row.settled_at or 'NOT AVAILABLE' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <p>No settled paper bets yet. Results will appear here once finished fixtures are settled.</p>
+    </div>
+  {% endif %}
 </section>
 
 <section class="section-block">
@@ -303,12 +294,12 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Ledger</p>
-      <h2>Current Paper Positions</h2>
-      <span>Only genuine recorded current entries appear here</span>
+      <p class="eyebrow">Open Positions</p>
+      <h2>Current Open Paper Bets</h2>
+      <span>Pending and in-play paper positions</span>
     </div>
   </div>
-  {% if payload.paper_positions %}
+  {% if payload.open_paper_positions %}
     <div class="table-shell">
       <table>
         <thead>
@@ -316,24 +307,24 @@
             <th>Fixture</th>
             <th>Market</th>
             <th>Selection</th>
+            <th>Kickoff</th>
             <th>Entry Odds</th>
             <th>Fair Price</th>
-            <th>Decision Time</th>
+            <th>Edge</th>
             <th>Status</th>
-            <th>P&amp;L</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in payload.paper_positions %}
+          {% for row in payload.open_paper_positions %}
             <tr>
-              <td>{{ row.fixture_id }}</td>
-              <td>{{ row.market }}</td>
-              <td>{{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+              <td>{{ row.fixture_label }}</td>
+              <td>{{ row.market_label }}</td>
+              <td>{{ row.selection_label }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
+              <td>{{ row.kickoff_local }}</td>
               <td>{{ '{:.2f}'.format(row.entry_odds|float) if row.entry_odds else 'NOT AVAILABLE' }}</td>
               <td>{{ '{:.2f}'.format(row.model_fair_price|float) }}</td>
-              <td>{{ row.decision_timestamp }}</td>
+              <td>{{ '{:+.2%}'.format(row.edge|float) if row.edge is not none else 'NOT AVAILABLE' }}</td>
               <td>{{ row.trade_state }}</td>
-              <td>{{ '{:+.2f}'.format(row.net_pnl|float) if row.net_pnl is not none else 'NOT AVAILABLE' }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -341,7 +332,7 @@
     </div>
   {% else %}
     <div class="empty-state">
-      <p>No current paper positions are recorded yet. The paper ledger is ready and will populate when qualified current-slate entries are published.</p>
+      <p>No open paper positions right now.</p>
     </div>
   {% endif %}
 </section>

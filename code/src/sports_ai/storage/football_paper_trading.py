@@ -27,6 +27,7 @@ PAPER_TRADE_STATE_VALUES = {
 _TOTAL_MARKETS = {"goals_total", "corner_total"}
 _FINAL_SETTLEMENT_STATES = {"WON", "LOST", "PUSH", "HALF_WIN", "HALF_LOSS", "VOID"}
 _ACTIVE_SETTLEMENT_STATES = {"PENDING", "OPEN", "UNSETTLED"}
+_STRIKE_RATE_STATES = {"WON", "LOST", "HALF_WIN", "HALF_LOSS"}
 
 SCHEMA_STATEMENTS = (
     """
@@ -626,6 +627,26 @@ def build_trade_update_payload(
     )
 
 
+def _stake_units_for_row(row: dict[str, Any]) -> float:
+    payload = row.get("latest_update_payload") or {}
+    stake = payload.get("stake")
+    try:
+        return 1.0 if stake is None else float(stake)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _strike_rate(rows: list[dict[str, Any]]) -> float | None:
+    decision_rows = [row for row in rows if row.get("trade_state") in _STRIKE_RATE_STATES]
+    if not decision_rows:
+        return None
+    weighted_wins = sum(
+        1.0 if row.get("trade_state") == "WON" else 0.5 if row.get("trade_state") == "HALF_WIN" else 0.0
+        for row in decision_rows
+    )
+    return weighted_wins / len(decision_rows)
+
+
 def paper_trading_status(rows: list[dict[str, Any]]) -> dict[str, Any]:
     performance = paper_trading_performance(rows)
     return {
@@ -643,6 +664,7 @@ def paper_trading_status(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
     open_rows = [row for row in rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]
     settled_rows = [row for row in rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
+    settled_stake_units = sum(_stake_units_for_row(row) for row in settled_rows)
     net_units = sum(float(row.get("net_pnl") or 0.0) for row in settled_rows)
     average_odds = (
         sum(float(row["entry_odds"]) for row in rows if row.get("entry_odds")) / len([row for row in rows if row.get("entry_odds")])
@@ -674,6 +696,13 @@ def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "positions": len(market_rows),
             "settled_positions": len([row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]),
             "open_positions": len([row for row in market_rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]),
+            "pending_positions": len([row for row in market_rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]),
+            "wins": sum(1 for row in market_rows if row.get("trade_state") == "WON"),
+            "losses": sum(1 for row in market_rows if row.get("trade_state") == "LOST"),
+            "pushes": sum(1 for row in market_rows if row.get("trade_state") == "PUSH"),
+            "half_wins": sum(1 for row in market_rows if row.get("trade_state") == "HALF_WIN"),
+            "half_losses": sum(1 for row in market_rows if row.get("trade_state") == "HALF_LOSS"),
+            "voids": sum(1 for row in market_rows if row.get("trade_state") == "VOID"),
             "hit_rate": None
             if not [row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
             else sum(
@@ -697,9 +726,23 @@ def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "net_units": sum(float(row.get("net_pnl") or 0.0) for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES),
             "roi": (
                 sum(float(row.get("net_pnl") or 0.0) for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES)
-                / len([row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES])
-                if [row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
+                / sum(
+                    _stake_units_for_row(row)
+                    for row in market_rows
+                    if row.get("trade_state") in _FINAL_SETTLEMENT_STATES
+                )
+                if sum(
+                    _stake_units_for_row(row)
+                    for row in market_rows
+                    if row.get("trade_state") in _FINAL_SETTLEMENT_STATES
+                )
                 else None
+            ),
+            "strike_rate": _strike_rate(market_rows),
+            "settled_stake_units": sum(
+                _stake_units_for_row(row)
+                for row in market_rows
+                if row.get("trade_state") in _FINAL_SETTLEMENT_STATES
             ),
             "average_clv": (
                 sum(float(row["implied_probability_clv"]) for row in market_rows if row.get("implied_probability_clv") is not None)
@@ -719,18 +762,22 @@ def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "positions": len(rows),
         "open_positions": len(open_rows),
+        "pending_positions": len(open_rows),
         "settled_positions": len(settled_rows),
         "wins": sum(1 for row in settled_rows if row.get("trade_state") == "WON"),
         "losses": sum(1 for row in settled_rows if row.get("trade_state") == "LOST"),
         "pushes": sum(1 for row in settled_rows if row.get("trade_state") == "PUSH"),
         "half_wins": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_WIN"),
         "half_losses": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_LOSS"),
+        "voids": sum(1 for row in settled_rows if row.get("trade_state") == "VOID"),
         "hit_rate": None if not settled_rows else (weighted_wins / len(settled_rows)),
+        "strike_rate": _strike_rate(rows),
         "average_odds": average_odds,
         "break_even_rate": break_even_rate,
+        "settled_stake_units": settled_stake_units,
         "net_units": net_units,
-        "roi": None if not settled_rows else (net_units / len(settled_rows)),
-        "yield": None if not settled_rows else (net_units / len(settled_rows)),
+        "roi": None if settled_stake_units <= 0 else (net_units / settled_stake_units),
+        "yield": None if settled_stake_units <= 0 else (net_units / settled_stake_units),
         "max_drawdown": max_drawdown,
         "clv_state": "PENDING" if rows and not clv_rows else ("AVAILABLE" if clv_rows else "UNAVAILABLE"),
         "average_clv": None

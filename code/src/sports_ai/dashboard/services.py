@@ -57,6 +57,15 @@ DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_ODDS_SYNC"
 DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR = "SPORTS_AI_ODDS_SYNC_ONCE_TOKEN"
 
 logger = logging.getLogger(__name__)
+PAPER_ACTIVE_STATES = {"PENDING", "OPEN", "UNSETTLED"}
+PAPER_FINAL_STATES = {"WON", "LOST", "PUSH", "HALF_WIN", "HALF_LOSS", "VOID"}
+PAPER_MARKET_DISPLAY_ORDER = {
+    "1x2": 0,
+    "btts": 1,
+    "goals_total": 2,
+    "corner_total": 3,
+    "asian_handicap": 4,
+}
 
 
 def _default_fixture_provider() -> FixtureProvider:
@@ -796,6 +805,7 @@ class DashboardServices:
         return self._market_evaluation_map().get(str(fixture_id))
 
     def _performance_status(self, summary_payload: dict[str, Any] | None, paper_status: dict[str, Any]) -> dict[str, Any]:
+        performance = paper_status.get("performance", {})
         return {
             "historical_validation": {
                 "state": "READY" if summary_payload is not None else "BLOCKED",
@@ -806,6 +816,9 @@ class DashboardServices:
                 "paper_bets": paper_status["paper_bets"],
                 "open_positions": paper_status["open_positions"],
                 "settled_positions": paper_status["settled_positions"],
+                "wins": int(performance.get("wins") or 0),
+                "losses": int(performance.get("losses") or 0),
+                "pushes": int(performance.get("pushes") or 0),
             },
             "closing_price_tracking": {
                 "state": "READY",
@@ -814,6 +827,130 @@ class DashboardServices:
                 "state": paper_status["clv_state"],
             },
         }
+
+    @staticmethod
+    def _paper_market_sort_key(market: str) -> tuple[int, str]:
+        return (PAPER_MARKET_DISPLAY_ORDER.get(market, 999), market)
+
+    @staticmethod
+    def _paper_result_tone(trade_state: str) -> str:
+        if trade_state in {"WON", "HALF_WIN"}:
+            return "bet"
+        if trade_state in {"LOST", "HALF_LOSS"}:
+            return "lost"
+        if trade_state in {"PUSH", "VOID"}:
+            return "final"
+        return "pending"
+
+    def _paper_fixture_lookup(self, paper_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        fixture_ids = sorted({str(row["fixture_id"]) for row in paper_rows})
+        if not fixture_ids:
+            return {}
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            return {
+                fixture_id: fixture
+                for fixture_id in fixture_ids
+                if (fixture := storage.fetch_fixture(conn, fixture_id)) is not None
+            }
+
+    def _paper_position_display_rows(self, paper_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        fixture_lookup = self._paper_fixture_lookup(paper_rows)
+        display_rows: list[dict[str, Any]] = []
+        for row in paper_rows:
+            fixture = fixture_lookup.get(str(row["fixture_id"]))
+            fixture_home = str((fixture or {}).get("home_team_name") or "Home")
+            fixture_away = str((fixture or {}).get("away_team_name") or "Away")
+            labels = _humanize_market_selection(
+                market_family=str(row["market"]),
+                selection=str(row["selection"]),
+                line=None if row.get("line") is None else float(row["line"]),
+                home_team_name=fixture_home,
+                away_team_name=fixture_away,
+            )
+            latest_payload = row.get("latest_update_payload") or {}
+            settlement_context = latest_payload.get("settlement_context") or {}
+            actual_home_goals = settlement_context.get("actual_home_goals")
+            actual_away_goals = settlement_context.get("actual_away_goals")
+            final_score = None
+            if actual_home_goals is not None and actual_away_goals is not None:
+                final_score = f"{int(actual_home_goals)}-{int(actual_away_goals)}"
+            trade_state = str(row.get("trade_state") or "PENDING")
+            display_rows.append(
+                {
+                    **row,
+                    "fixture_label": (
+                        f"{fixture_home} vs {fixture_away}"
+                        if fixture is not None
+                        else str(row.get("fixture_id") or "Unknown Fixture")
+                    ),
+                    "kickoff_local": parse_iso_datetime(str(row["kickoff"]))
+                    .astimezone(ZoneInfo(self.config.display_timezone))
+                    .strftime("%Y-%m-%d %H:%M"),
+                    "market_label": labels["market_label"],
+                    "selection_label": labels["selection_label"],
+                    "bet_label": labels["bet_label"],
+                    "result_tone": self._paper_result_tone(trade_state),
+                    "is_settled": trade_state in PAPER_FINAL_STATES,
+                    "is_open": trade_state in PAPER_ACTIVE_STATES,
+                    "final_score": final_score,
+                    "settled_at": row.get("updated_at") if trade_state in PAPER_FINAL_STATES else None,
+                    "result_provider": settlement_context.get("provider"),
+                    "result_provider_fixture_id": settlement_context.get("provider_fixture_id"),
+                    "result_captured_at": settlement_context.get("result_captured_at"),
+                    "final_status": settlement_context.get("final_status"),
+                }
+            )
+        return display_rows
+
+    def _live_paper_market_rows(self, performance: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for market, market_row in sorted(
+            (performance.get("by_market") or {}).items(),
+            key=lambda item: self._paper_market_sort_key(str(item[0])),
+        ):
+            rows.append(
+                {
+                    "market": market,
+                    "label": _humanize_market_selection(
+                        market_family=str(market),
+                        selection="HOME",
+                        line=None,
+                        home_team_name="Home",
+                        away_team_name="Away",
+                    )["market_label"],
+                    **market_row,
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _live_paper_kpis(current_paper: dict[str, Any]) -> list[tuple[str, str]]:
+        return [
+            ("Bets", str(current_paper.get("positions") or 0)),
+            ("Settled", str(current_paper.get("settled_positions") or 0)),
+            ("Won", str(current_paper.get("wins") or 0)),
+            ("Lost", str(current_paper.get("losses") or 0)),
+            ("Push", str(current_paper.get("pushes") or 0)),
+            ("Pending", str(current_paper.get("pending_positions") or 0)),
+            (
+                "Strike Rate",
+                "NOT AVAILABLE"
+                if current_paper.get("strike_rate") is None
+                else f"{float(current_paper['strike_rate']):.2%}",
+            ),
+            (
+                "P/L",
+                "NOT AVAILABLE"
+                if current_paper.get("net_units") is None
+                else f"{float(current_paper['net_units']):+.2f}",
+            ),
+            (
+                "ROI",
+                "NOT AVAILABLE"
+                if current_paper.get("roi") is None
+                else f"{float(current_paper['roi']):+.2%}",
+            ),
+        ]
 
     def _next_scheduled_refresh_at(self, *, from_now: datetime | None = None) -> str | None:
         if not self.config.enable_scheduler:
@@ -1185,6 +1322,13 @@ class DashboardServices:
                 fixture = fixture_rows.get(str(row["fixture_id"]))
                 if fixture is None:
                     continue
+                result_context = {
+                    "fixture_id": str(fixture["fixture_id"]),
+                    "provider": str(fixture.get("provider") or ""),
+                    "provider_fixture_id": fixture.get("provider_fixture_id"),
+                    "final_status": str(fixture.get("status") or ""),
+                    "result_captured_at": fixture.get("last_provider_update"),
+                }
                 kickoff_utc = str(row["kickoff"])
                 kickoff = parse_iso_datetime(kickoff_utc)
                 if row.get("closing_odds") is None and now_utc >= kickoff:
@@ -1209,7 +1353,10 @@ class DashboardServices:
                         football_paper_trading.build_trade_update_payload(
                             paper_trade_id=str(row["paper_trade_id"]),
                             trade_state="OPEN",
-                            settlement_context={"status": str(fixture["status"])},
+                            settlement_context={
+                                **result_context,
+                                "status": str(fixture["status"]),
+                            },
                             odds=float(row.get("entry_odds") or row["available_market_price"]),
                             notes="Fixture started; position is now open.",
                         ),
@@ -1236,7 +1383,10 @@ class DashboardServices:
                         football_paper_trading.build_trade_update_payload(
                             paper_trade_id=str(row["paper_trade_id"]),
                             trade_state="UNSETTLED",
-                            settlement_context={"status": str(fixture["status"])},
+                            settlement_context={
+                                **result_context,
+                                "status": str(fixture["status"]),
+                            },
                             odds=float(row.get("entry_odds") or row["available_market_price"]),
                             notes="Settlement pending because the required final market result is unavailable.",
                         ),
@@ -1244,15 +1394,16 @@ class DashboardServices:
                     continue
                 football_paper_trading.append_trade_update(
                     conn,
-                    football_paper_trading.build_trade_update_payload(
-                        paper_trade_id=str(row["paper_trade_id"]),
-                        trade_state=state,
-                        settlement_context={
-                            "actual_home_goals": int(fixture.get("home_score") or 0),
-                            "actual_away_goals": int(fixture.get("away_score") or 0),
-                            "actual_total_corners": actual_total_corners,
-                        },
-                        odds=float(row.get("entry_odds") or row["available_market_price"]),
+                        football_paper_trading.build_trade_update_payload(
+                            paper_trade_id=str(row["paper_trade_id"]),
+                            trade_state=state,
+                            settlement_context={
+                                **result_context,
+                                "actual_home_goals": int(fixture.get("home_score") or 0),
+                                "actual_away_goals": int(fixture.get("away_score") or 0),
+                                "actual_total_corners": actual_total_corners,
+                            },
+                            odds=float(row.get("entry_odds") or row["available_market_price"]),
                     ),
                 )
 
@@ -2354,6 +2505,7 @@ class DashboardServices:
                         "risk_status": _safeguard_label(row),
                         "risk_summary": risk_summary,
                         "market_freshness": None if row.get("market_freshness") is None else str(row["market_freshness"]),
+                        "paper_trade_id": row.get("paper_trade_id"),
                         "paper_qualification_state": "QUALIFIED",
                         "current_decision_state": current_state,
                         "day12_state": str(row.get("day12_state") or "NOT_APPLICABLE"),
@@ -2371,6 +2523,35 @@ class DashboardServices:
                 str(row["bet_label"]),
             ),
         )
+
+    def _decorate_best_pick_rows(
+        self,
+        best_picks: list[dict[str, Any]],
+        paper_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        paper_row_map = {
+            str(row["paper_trade_id"]): row
+            for row in paper_rows
+            if row.get("paper_trade_id")
+        }
+        decorated_rows: list[dict[str, Any]] = []
+        for row in best_picks:
+            paper_row = paper_row_map.get(str(row.get("paper_trade_id") or ""))
+            settlement_context = {}
+            if paper_row is not None:
+                settlement_context = (paper_row.get("latest_update_payload") or {}).get("settlement_context") or {}
+            final_score = None
+            if settlement_context.get("actual_home_goals") is not None and settlement_context.get("actual_away_goals") is not None:
+                final_score = f"{int(settlement_context['actual_home_goals'])}-{int(settlement_context['actual_away_goals'])}"
+            decorated_rows.append(
+                {
+                    **row,
+                    "paper_trade_state": str((paper_row or {}).get("trade_state") or "PENDING"),
+                    "paper_result_tone": self._paper_result_tone(str((paper_row or {}).get("trade_state") or "PENDING")),
+                    "final_score": final_score,
+                }
+            )
+        return decorated_rows
 
     def _working_row_status(self, fixture: dict[str, Any]) -> tuple[str, str]:
         status = str(fixture.get("status") or "")
@@ -2497,7 +2678,6 @@ class DashboardServices:
         working_rows: list[dict[str, Any]],
         paper_rows: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        active_trade_states = {"PENDING", "OPEN", "UNSETTLED"}
         paper_trade_ids = {
             str(row["paper_trade_id"])
             for row in working_rows
@@ -2517,7 +2697,7 @@ class DashboardServices:
             "pending_count": sum(
                 1
                 for row in current_slate_paper_rows
-                if str(row.get("trade_state") or "") in active_trade_states
+                if str(row.get("trade_state") or "") in PAPER_ACTIVE_STATES
             ),
             "empty_message": "No current market decision rows are available for the current Football slate.",
         }
@@ -2526,19 +2706,40 @@ class DashboardServices:
     def _glance_metrics(
         *,
         analysed_count: int,
-        working_rows: list[dict[str, Any]],
         approved_count: int,
-        paper_entry_count: int,
-        live_count: int,
-        pending_count: int,
+        paper_bet_count: int,
+        paper_performance: dict[str, Any],
     ) -> list[dict[str, str]]:
         return [
             {"label": "Analysed", "value": str(analysed_count), "note": "current slate fixtures"},
-            {"label": "Predictions", "value": str(len(working_rows)), "note": "current-slate rows"},
             {"label": "Approved", "value": str(approved_count), "note": "qualified"},
-            {"label": "Suggested Bets", "value": str(paper_entry_count), "note": "paper published"},
-            {"label": "Live", "value": str(live_count), "note": "in play"},
-            {"label": "Pending", "value": str(pending_count), "note": "open paper"},
+            {"label": "Suggested Bets", "value": str(paper_bet_count), "note": "all paper bets"},
+            {"label": "Settled", "value": str(paper_performance.get("settled_positions") or 0), "note": "final results"},
+            {"label": "Won", "value": str(paper_performance.get("wins") or 0), "note": "full wins"},
+            {"label": "Lost", "value": str(paper_performance.get("losses") or 0), "note": "full losses"},
+            {"label": "Push", "value": str(paper_performance.get("pushes") or 0), "note": "stake returned"},
+            {"label": "Pending", "value": str(paper_performance.get("pending_positions") or 0), "note": "open paper"},
+            {
+                "label": "Strike Rate",
+                "value": "NOT AVAILABLE"
+                if paper_performance.get("strike_rate") is None
+                else f"{float(paper_performance['strike_rate']):.2%}",
+                "note": "pushes excluded",
+            },
+            {
+                "label": "P/L",
+                "value": "NOT AVAILABLE"
+                if paper_performance.get("net_units") is None
+                else f"{float(paper_performance['net_units']):+.2f}",
+                "note": "net units",
+            },
+            {
+                "label": "ROI",
+                "value": "NOT AVAILABLE"
+                if paper_performance.get("roi") is None
+                else f"{float(paper_performance['roi']):+.2%}",
+                "note": "settled stake only",
+            },
         ]
 
     @staticmethod
@@ -2570,13 +2771,13 @@ class DashboardServices:
             for row in next_rows
             if row.get("prediction") and row["prediction"].get("prediction_status") == PREDICTION_STATUS_READY
         ][:6]
-        best_picks = self._build_best_pick_rows(fixture_rows)
+        paper_rows, paper_status = self._paper_positions()
+        best_picks = self._decorate_best_pick_rows(self._build_best_pick_rows(fixture_rows), paper_rows)
         current_slate_rows = self._build_current_slate_working_rows(fixture_rows)
         other_decision_rows = [row for row in current_slate_rows if not row["is_actionable"]]
-        paper_rows, _ = self._paper_positions()
         current_slate_summary = self._current_slate_summary(working_rows=current_slate_rows, paper_rows=paper_rows)
         system_status = self.get_system_status()
-        live_working_count = sum(1 for row in current_slate_rows if row["status_tone"] == "live")
+        paper_performance = paper_status.get("performance", {})
         return {
             "live": live_rows,
             "today": today_rows,
@@ -2601,11 +2802,9 @@ class DashboardServices:
             },
             "glance_metrics": self._glance_metrics(
                 analysed_count=int(current_slate_summary["fixture_count"]),
-                working_rows=current_slate_rows,
                 approved_count=len(best_picks),
-                paper_entry_count=int(current_slate_summary["paper_entry_count"]),
-                live_count=live_working_count,
-                pending_count=int(current_slate_summary["pending_count"]),
+                paper_bet_count=paper_status["paper_bets"],
+                paper_performance=paper_performance,
             ),
             "desk_funnel": self._desk_funnel(
                 working_rows=current_slate_rows,
@@ -2747,6 +2946,14 @@ class DashboardServices:
         paper_positions, paper_status = self._paper_positions()
         status = self._performance_status(summary_payload, paper_status)
         current_paper = paper_status.get("performance", {})
+        paper_position_rows = self._paper_position_display_rows(paper_positions)
+        open_paper_positions = [row for row in paper_position_rows if row["is_open"]]
+        recent_paper_bets = sorted(
+            [row for row in paper_position_rows if row["is_settled"]],
+            key=lambda row: (str(row.get("settled_at") or ""), str(row["paper_trade_id"])),
+            reverse=True,
+        )
+        recent_form = [str(row["trade_state"]) for row in recent_paper_bets[:5]]
 
         calibration_series: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in calibration_rows:
@@ -2786,25 +2993,24 @@ class DashboardServices:
                 "Log Loss",
                 "NOT AVAILABLE" if summary.get("one_x_two_log_loss") is None else f"{float(summary['one_x_two_log_loss']):.4f}",
             ),
-            ("Paper Bets", str(paper_status["paper_bets"])),
-            (
-                "Paper ROI",
-                "NOT AVAILABLE" if current_paper.get("roi") is None else f"{float(current_paper['roi']):+.2%}",
-            ),
-            ("CLV", str(current_paper.get("clv_state", "UNAVAILABLE")).replace("_", " ")),
         ]
         return {
             "summary": summary,
             "summary_generated_at": None if summary_payload is None else summary_payload.get("generated_at"),
             "status_flags": {} if summary_payload is None else summary_payload.get("status_flags", {}),
             "kpis": kpis,
+            "live_paper_kpis": self._live_paper_kpis(current_paper),
             "market_rows": market_rows,
             "competition_rows": competition_rows,
             "season_rows": season_rows,
             "calibration_series": calibration_series,
-            "paper_positions": paper_positions,
+            "paper_positions": paper_position_rows,
+            "open_paper_positions": open_paper_positions,
+            "recent_paper_bets": recent_paper_bets,
+            "recent_form": recent_form,
             "current_paper_summary": current_paper,
             "current_paper_by_market": current_paper.get("by_market", {}),
+            "live_paper_market_rows": self._live_paper_market_rows(current_paper),
             "performance_status": status,
             "system_status": self.get_system_status(),
         }
