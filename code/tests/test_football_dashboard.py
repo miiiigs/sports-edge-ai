@@ -867,37 +867,52 @@ def test_dashboard_routes_render_and_apis_return_current_prediction(tmp_path: Pa
         dashboard_response = client.get("/")
         assert dashboard_response.status_code == 200
         assert "Sports Edge AI" in dashboard_response.text
+        assert "EDGE DESK" in dashboard_response.text
         assert 'href="/static/dashboard.css"' in dashboard_response.text
         assert 'src="/static/dashboard.js"' in dashboard_response.text
         assert "/matches/static/dashboard.css" not in dashboard_response.text
+        assert 'href="/status#read-api"' in dashboard_response.text
 
         matches_response = client.get("/matches")
         assert matches_response.status_code == 200
+        assert "Matches &amp; Live Monitor" in matches_response.text
         assert 'href="/static/dashboard.css"' in matches_response.text
         assert 'src="/static/dashboard.js"' in matches_response.text
         assert "/matches/static/dashboard.css" not in matches_response.text
         assert 'data-auto-submit-filters="true"' in matches_response.text
         assert "Apply Filters" not in matches_response.text
 
+        match_detail_response = client.get(f"/matches/{fixture.fixture_id}")
+        assert match_detail_response.status_code == 200
+        assert fixture.home_team_name in match_detail_response.text
+        assert fixture.away_team_name in match_detail_response.text
+        assert "Fixture And Prediction State" in match_detail_response.text
+
         predictions_page = client.get("/predictions")
         assert predictions_page.status_code == 200
+        assert "Current Football Predictions" in predictions_page.text
         assert 'href="/static/dashboard.css"' in predictions_page.text
         assert 'src="/static/dashboard.js"' in predictions_page.text
 
         candidates_page = client.get("/candidates")
         assert candidates_page.status_code == 200
+        assert "Current-Market Candidates" in candidates_page.text
         assert 'href="/static/dashboard.css"' in candidates_page.text
         assert 'src="/static/dashboard.js"' in candidates_page.text
 
         performance_page = client.get("/performance")
         assert performance_page.status_code == 200
-        assert "Performance" in performance_page.text
+        assert "Football Performance And Readiness" in performance_page.text
         assert 'href="/static/dashboard.css"' in performance_page.text
         assert 'src="/static/dashboard.js"' in performance_page.text
 
         status_page = client.get("/status")
         assert status_page.status_code == 200
-        assert "System Health" in status_page.text
+        assert "Operations &amp; Runtime Status" in status_page.text
+        assert "Route B Composite" in status_page.text
+        assert "Route A Direct Classifier" in status_page.text
+        assert "NOT IMPLEMENTED" in status_page.text
+        assert "/api/system/status" in status_page.text
         assert 'href="/static/dashboard.css"' in status_page.text
         assert 'src="/static/dashboard.js"' in status_page.text
 

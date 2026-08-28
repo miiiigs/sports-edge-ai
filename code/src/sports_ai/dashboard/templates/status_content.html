@@ -1,3 +1,16 @@
+{% from "_ui.html" import status_badge %}
+<section class="page-heading edge-page-heading">
+  <div>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Operations</p>
+    <h1>Operations &amp; Runtime Status</h1>
+    <p class="subhead desk-page-subhead">Runtime health, feed readiness, storage reachability, model state, and technical read paths for the current Football dashboard environment.</p>
+  </div>
+  <div class="page-actions">
+    {{ status_badge(payload.system_status.fixture_feed.state, 'positive' if payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] else 'warning') }}
+    <a class="filter-button" href="/api/system/status" target="_blank" rel="noreferrer">Open raw status JSON</a>
+  </div>
+</section>
+
 <section class="command-deck status-layout">
   <article class="command-panel command-panel--primary">
     <div class="section-heading section-heading--tight">
@@ -63,6 +76,17 @@
 </section>
 
 <section class="ops-grid">
+  <article class="detail-card">
+    <p class="eyebrow">Model Roster</p>
+    <h3>Football Agent Activation</h3>
+    <div class="data-list">
+      <div><span>Route B Composite</span><strong>{{ status_badge('ACTIVE', 'positive') }}</strong></div>
+      <div><span>Route A Direct Classifier</span><strong>{{ status_badge('REJECTED', 'negative') }}</strong></div>
+      <div><span>Agent 3</span><strong>{{ status_badge('NOT IMPLEMENTED', 'inactive') }}</strong></div>
+      <div><span>Fake Consensus</span><strong>{{ status_badge('NO', 'inactive') }}</strong></div>
+    </div>
+  </article>
+
   <article class="detail-card">
     <p class="eyebrow">Provider</p>
     <h3>football-data.org</h3>
@@ -272,6 +296,65 @@
             <td colspan="6">No provider queries have been recorded in the current runtime yet.</td>
           </tr>
         {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="read-api" class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Read API</p>
+      <h2>Technical Routes</h2>
+      <p class="section-intro">These routes stay machine-readable and unchanged. This panel simply makes the endpoint surface easier to inspect from within the same Edge Desk shell.</p>
+    </div>
+    <a class="filter-button" href="/api/system/status" target="_blank" rel="noreferrer">Raw status</a>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Route</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/system/status</code></td>
+          <td>Machine-readable runtime status payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/fixtures/today</code></td>
+          <td>Current today fixture feed payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/fixtures/upcoming</code></td>
+          <td>Upcoming fixture payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/predictions</code></td>
+          <td>Persisted prediction rows for the current slate.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/performance</code></td>
+          <td>Existing performance and paper-readiness payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/health</code></td>
+          <td>Operational health check for the dashboard service.</td>
+        </tr>
+        <tr>
+          <td>POST</td>
+          <td><code>/api/fixtures/refresh</code></td>
+          <td>Manual fixture refresh trigger with cooldown protection.</td>
+        </tr>
       </tbody>
     </table>
   </div>

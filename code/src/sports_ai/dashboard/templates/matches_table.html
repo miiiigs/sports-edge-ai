@@ -1,8 +1,22 @@
+{% from "_ui.html" import status_badge %}
+<section class="page-heading edge-page-heading">
+  <div>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Match Board</p>
+    <h1>Matches &amp; Live Monitor</h1>
+    <p class="subhead desk-page-subhead">Operational fixture coverage across live, today, next, and finished windows using the current Football feed, prediction state, and market truth already persisted by the backend.</p>
+  </div>
+  <div class="page-actions">
+    {{ status_badge(payload.system_status.fixture_feed.state, 'positive' if payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] else 'warning') }}
+    <span class="page-stat">{{ payload.rows|length }} fixtures</span>
+  </div>
+</section>
+
 <section class="section-block">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Watchlist</p>
-      <h2>Matches</h2>
+      <p class="eyebrow">Working Surface</p>
+      <h2>Fixture Slate</h2>
+      <p class="section-intro">Compact filters and one dense board for kickoff timing, eligibility, market state, and paper-readiness context.</p>
     </div>
     <span>{{ payload.rows|length }} fixtures</span>
   </div>
@@ -60,11 +74,30 @@
       <tbody>
         {% for row in payload.rows %}
           <tr>
-            <td>{{ row.kickoff_local }}</td>
+            <td class="num">{{ row.kickoff_local }}</td>
             <td>{{ row.competition_name }}</td>
-            <td><a href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
-            <td>{{ row.status }}{% if row.elapsed_minute %} {{ row.elapsed_minute }}'{% endif %}</td>
-            <td>{{ row.prediction_eligibility_status }}</td>
+            <td>
+              <a class="desk-match-link" href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+              <div class="row-sub">{{ row.fixture_id }}</div>
+            </td>
+            <td>
+              {% if row.status in ['LIVE', 'HALFTIME'] %}
+                {{ status_badge(row.status ~ ((" " ~ row.elapsed_minute ~ "'") if row.elapsed_minute else ''), 'live') }}
+              {% elif row.status == 'FINISHED' %}
+                {{ status_badge(row.status, 'inactive') }}
+              {% else %}
+                {{ status_badge(row.status, 'neutral') }}
+              {% endif %}
+            </td>
+            <td>
+              {% if row.prediction_eligibility_status in ['PREDICTION_READY', 'READY'] %}
+                {{ status_badge(row.prediction_eligibility_status, 'positive') }}
+              {% elif 'PENDING' in row.prediction_eligibility_status %}
+                {{ status_badge(row.prediction_eligibility_status, 'warning') }}
+              {% else %}
+                {{ status_badge(row.prediction_eligibility_status, 'inactive') }}
+              {% endif %}
+            </td>
             <td>
               {% if row.prediction and row.prediction.prediction_status == 'READY' %}
                 {{ "%.2f"|format(row.prediction.expected_home_goals) }} - {{ "%.2f"|format(row.prediction.expected_away_goals) }}
@@ -88,20 +121,33 @@
                 N/A
               {% endif %}
             </td>
-            <td>{{ row.market_evaluation.state if row.market_evaluation else 'NOT_SYNCED' }}</td>
+            <td>
+              {% set market_state = row.market_evaluation.state if row.market_evaluation else 'NOT_SYNCED' %}
+              {% if market_state in ['READY', 'CONNECTED'] %}
+                {{ status_badge(market_state, 'positive') }}
+              {% elif market_state in ['NOT_SYNCED', 'NO_CURRENT_EVENTS'] %}
+                {{ status_badge(market_state, 'inactive') }}
+              {% else %}
+                {{ status_badge(market_state, 'warning') }}
+              {% endif %}
+            </td>
             <td>
               {% if row.market_signal %}
                 {{ row.market_signal.decision }} | {{ row.market_signal.selection }}{% if row.market_signal.line is not none %} {{ row.market_signal.line }}{% endif %}
-                {% if row.market_signal.edge is not none %}<br><small>{{ "{:+.2%}".format(row.market_signal.edge|float) }}</small>{% endif %}
+                {% if row.market_signal.edge is not none %}<div class="row-sub">{{ "{:+.2%}".format(row.market_signal.edge|float) }}</div>{% endif %}
               {% else %}
                 {{ row.prediction.manager_decision_status if row.prediction else 'N/A' }}
               {% endif %}
             </td>
             <td>
               {% if row.market_signal %}
-                {{ row.market_signal.day12_state }}
+                {{ status_badge(row.market_signal.day12_state, 'positive' if row.market_signal.day12_state == 'PASS' else 'inactive') }}
               {% else %}
-                {{ row.prediction.safeguard_status if row.prediction else 'N/A' }}
+                {% if row.prediction %}
+                  {{ status_badge(row.prediction.safeguard_status, 'positive' if row.prediction.safeguard_status == 'PASS' else 'inactive') }}
+                {% else %}
+                  {{ status_badge('N/A', 'inactive') }}
+                {% endif %}
               {% endif %}
             </td>
           </tr>

@@ -1,21 +1,77 @@
-<section class="section-block detail-header">
+{% from "_ui.html" import status_badge %}
+<section class="page-heading edge-page-heading detail-page-heading">
   <div>
-    <p class="eyebrow">{{ payload.fixture.competition_name }}</p>
-    <h2>{{ payload.fixture.home_team_name }} vs {{ payload.fixture.away_team_name }}</h2>
-    <p>{{ payload.fixture.kickoff_local }} | {{ payload.fixture.status }}{% if payload.fixture.elapsed_minute %} {{ payload.fixture.elapsed_minute }}'{% endif %}</p>
+    <p class="eyebrow desk-page-kicker">{{ payload.fixture.competition_name }}</p>
+    <h1>{{ payload.fixture.home_team_name }} vs {{ payload.fixture.away_team_name }}</h1>
+    <p class="subhead desk-page-subhead">{{ payload.fixture.kickoff_local }} · fixture {{ payload.fixture.fixture_id }} · existing prediction and current-market context only.</p>
   </div>
-  {% if payload.fixture.status in ['LIVE', 'HALFTIME', 'FINISHED'] %}
-    <div class="score-box">
-      <span>Score</span>
-      <strong>{{ payload.fixture.home_score if payload.fixture.home_score is not none else 0 }} - {{ payload.fixture.away_score if payload.fixture.away_score is not none else 0 }}</strong>
-    </div>
-  {% endif %}
+  <div class="page-actions page-actions-stack">
+    {% if payload.fixture.status in ['LIVE', 'HALFTIME'] %}
+      {{ status_badge(payload.fixture.status ~ ((" " ~ payload.fixture.elapsed_minute ~ "'") if payload.fixture.elapsed_minute else ''), 'live') }}
+    {% elif payload.fixture.status == 'FINISHED' %}
+      {{ status_badge(payload.fixture.status, 'inactive') }}
+    {% else %}
+      {{ status_badge(payload.fixture.status, 'neutral') }}
+    {% endif %}
+    {% if payload.fixture.status in ['LIVE', 'HALFTIME', 'FINISHED'] %}
+      <div class="score-box score-box-compact">
+        <span>Score</span>
+        <strong>{{ payload.fixture.home_score if payload.fixture.home_score is not none else 0 }} - {{ payload.fixture.away_score if payload.fixture.away_score is not none else 0 }}</strong>
+      </div>
+    {% endif %}
+  </div>
 </section>
 
 {% if payload.prediction %}
+  <section class="command-deck detail-command-deck">
+    <article class="command-panel command-panel--primary">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Glance</p>
+          <h2>Fixture And Prediction State</h2>
+          <p class="section-intro">The top-line football and model state for this fixture before reviewing fair prices or deeper technical detail.</p>
+        </div>
+      </div>
+      <div class="hero-strip">
+        <div class="metric-tile">
+          <span>Prediction</span>
+          <strong>{{ payload.prediction.prediction_status }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Lock</span>
+          <strong>{{ payload.prediction.lock_state }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Generated</span>
+          <strong>{{ payload.prediction.generated_at }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Model As Of</span>
+          <strong>{{ payload.prediction.model_as_of or 'N/A' }}</strong>
+        </div>
+      </div>
+    </article>
+
+    <aside class="hero-card">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Truth</p>
+          <h2>Desk State</h2>
+          <span>Current Football invariants</span>
+        </div>
+      </div>
+      <div class="data-list">
+        <div><span>Route B</span><strong>ACTIVE</strong></div>
+        <div><span>Route A</span><strong>REJECTED</strong></div>
+        <div><span>Agent 3</span><strong>NOT IMPLEMENTED</strong></div>
+        <div><span>Market State</span><strong>{{ payload.market_evaluation.state if payload.market_evaluation else 'NOT_SYNCED' }}</strong></div>
+      </div>
+    </aside>
+  </section>
+
   <section class="detail-grid">
     <article class="detail-card">
-      <p class="eyebrow">Fixture Info</p>
+      <p class="eyebrow">Scan</p>
       <h3>Pre-match Prediction</h3>
       <div class="data-list">
         <div><span>Season</span><strong>{{ payload.fixture.season }}</strong></div>
@@ -45,7 +101,7 @@
     </article>
 
     <article class="detail-card">
-      <p class="eyebrow">Scoreline View</p>
+      <p class="eyebrow">Scan</p>
       <h3>Top Scorelines</h3>
       {% if payload.prediction.top_scorelines %}
         <ul class="scoreline-list">
@@ -69,7 +125,7 @@
 
   <section class="detail-grid">
     <article class="detail-card">
-      <p class="eyebrow">Model Fair Price</p>
+      <p class="eyebrow">Investigate</p>
       <h3>Fair Prices</h3>
       {% if payload.prediction.prediction_status == 'READY' %}
         <div class="data-list">
@@ -93,7 +149,7 @@
     </article>
 
     <article class="detail-card">
-      <p class="eyebrow">Decision Layer</p>
+      <p class="eyebrow">Investigate</p>
       <h3>Manager / Day 12</h3>
       <div class="data-list">
         <div><span>Manager</span><strong>{{ payload.prediction.manager_decision_status }}</strong></div>
@@ -108,10 +164,11 @@
   <section class="section-block">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Current Market</p>
-        <h2>Live Paper Evaluation</h2>
+        <p class="eyebrow">Investigate</p>
+        <h2>Current-Market Evaluation</h2>
+        <p class="section-intro">A technical market scan for this one fixture using the current backend market snapshot and the existing decision logic.</p>
       </div>
-      <span>{{ payload.market_evaluation.state if payload.market_evaluation else 'NOT_SYNCED' }}</span>
+      {{ status_badge(payload.market_evaluation.state if payload.market_evaluation else 'NOT_SYNCED', 'positive' if payload.market_evaluation and payload.market_evaluation.state == 'READY' else 'inactive') }}
     </div>
     {% if payload.market_evaluation and payload.market_evaluation.decision_rows %}
       <div class="hero-strip">
@@ -151,8 +208,8 @@
                 <td>{{ "{:.2f}".format(row.model_fair_decimal_price|float) }}</td>
                 <td>{{ row.best_available_bookmaker or 'N/A' }}{% if row.best_available_price is not none %} @ {{ "{:.2f}".format(row.best_available_price|float) }}{% endif %}</td>
                 <td>{{ "{:+.2%}".format(row.settlement_aware_edge|float) if row.settlement_aware_edge is not none else 'N/A' }}</td>
-                <td>{{ row.decision }}</td>
-                <td>{{ row.day12_state }}</td>
+                <td>{{ status_badge(row.decision, 'warning' if row.decision != 'PRELIMINARY_CANDIDATE' else 'positive') }}</td>
+                <td>{{ status_badge(row.day12_state, 'positive' if row.day12_state == 'PASS' else 'inactive') }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -166,5 +223,8 @@
     {% endif %}
   </section>
 {% else %}
-  <section class="empty-state">No prediction has been persisted for this fixture yet.</section>
+  <section class="empty-state">
+    <strong>No prediction has been persisted for this fixture yet.</strong>
+    <p>The match detail route is available, but the current runtime has not written a prediction record for this fixture.</p>
+  </section>
 {% endif %}

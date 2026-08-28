@@ -1,16 +1,19 @@
-<section class="page-heading">
+{% from "_ui.html" import status_badge %}
+<section class="page-heading edge-page-heading">
   <div>
-    <h1>Performance</h1>
-    <p class="subhead">Historical validation baseline, current paper-trading readiness, and benchmark visibility for the accepted football stack.</p>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Performance Snapshot</p>
+    <h1>Football Performance And Readiness</h1>
+    <p class="subhead desk-page-subhead">This phase only re-presents the performance data that already exists: historical validation outputs, current paper-trading readiness, and persisted ledger summaries. Phase 3B metrics remain deferred.</p>
   </div>
-  <div class="badge {% if payload.performance_status.historical_validation.state == 'READY' %}badge-good{% else %}badge-muted{% endif %}">
-    Historical Validation {{ payload.performance_status.historical_validation.state }}
+  <div class="page-actions">
+    {{ status_badge('Historical Validation ' ~ payload.performance_status.historical_validation.state, 'positive' if payload.performance_status.historical_validation.state == 'READY' else 'inactive') }}
   </div>
 </section>
 
 <section class="hero-card">
   <div class="section-heading">
     <div>
+      <p class="eyebrow">Glance</p>
       <h2>Validation State</h2>
       <span>{{ payload.summary.MODEL_VALIDATION or 'NOT AVAILABLE' }}</span>
     </div>
@@ -30,6 +33,7 @@
   <article class="command-panel command-panel--primary">
     <div class="section-heading">
       <div>
+        <p class="eyebrow">Scan</p>
         <h2>Market Summary</h2>
         <span>No universal win-rate shortcut</span>
       </div>
@@ -63,7 +67,7 @@
               <td>{{ 'NOT AVAILABLE' if not row.hit_rate else '{:.2%}'.format(row.hit_rate|float) }}</td>
               <td>{{ 'NOT AVAILABLE' if not row.brier else '{:.4f}'.format(row.brier|float) }}</td>
               <td>{{ 'NOT AVAILABLE' if not row.log_loss else '{:.4f}'.format(row.log_loss|float) }}</td>
-              <td><span class="badge {% if row.status == 'READY' %}badge-good{% else %}badge-muted{% endif %}">{{ row.status }}</span></td>
+              <td>{{ status_badge(row.status, 'positive' if row.status == 'READY' else 'inactive') }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -74,6 +78,7 @@
   <aside class="hero-card">
     <div class="section-heading">
       <div>
+        <p class="eyebrow">Support</p>
         <h2>Readiness</h2>
         <span>Current platform state</span>
       </div>
@@ -95,6 +100,7 @@
   <article class="detail-card">
     <div class="section-heading">
       <div>
+        <p class="eyebrow">Investigate</p>
         <h3>Calibration</h3>
         <span>Predicted probability vs observed frequency</span>
       </div>
@@ -136,6 +142,7 @@
   <article class="detail-card">
     <div class="section-heading">
       <div>
+        <p class="eyebrow">Investigate</p>
         <h3>Paper Tracking</h3>
         <span>Immutable append-safe ledger</span>
       </div>
@@ -156,6 +163,7 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
+      <p class="eyebrow">Current Paper</p>
       <h2>Current Paper Summary</h2>
       <span>{{ payload.current_paper_summary.sample_status or 'NOT AVAILABLE' }}</span>
     </div>
@@ -183,6 +191,7 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
+      <p class="eyebrow">Current Paper</p>
       <h2>Current Paper By Market</h2>
       <span>Only live-paper ledger rows</span>
     </div>
@@ -220,6 +229,7 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
+      <p class="eyebrow">Coverage</p>
       <h2>Competition Breakdown</h2>
       <span>Current loaded football scope</span>
     </div>
@@ -257,6 +267,7 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
+      <p class="eyebrow">Coverage</p>
       <h2>Season Breakdown</h2>
       <span>Detecting drift across years</span>
     </div>
@@ -292,6 +303,7 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
+      <p class="eyebrow">Ledger</p>
       <h2>Current Paper Positions</h2>
       <span>Only genuine recorded current entries appear here</span>
     </div>

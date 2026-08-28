@@ -1,3 +1,19 @@
+{% from "_ui.html" import status_badge %}
+{% set fixture_feed_ready = payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] %}
+{% set market_feed_ready = payload.system_status.odds_feed.state in ['CONNECTED', 'READY', 'IDLE', 'NO_CURRENT_EVENTS'] %}
+{% if page == 'dashboard' %}
+  {% set page_label = 'Overview' %}
+{% elif page == 'matches' or page == 'match_detail' %}
+  {% set page_label = 'Live Monitor' %}
+{% elif page == 'predictions' %}
+  {% set page_label = 'Predictions' %}
+{% elif page == 'performance' %}
+  {% set page_label = 'Performance' %}
+{% elif page == 'status' %}
+  {% set page_label = 'Status' %}
+{% else %}
+  {% set page_label = 'Watchlist' %}
+{% endif %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -12,89 +28,124 @@
 <body>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
-        <span class="brand-mark">SE</span>
-        <span>SPORTS EDGE <em>AI</em></span>
+      <div class="brand-block">
+        <div class="brand">
+          <span class="brand-mark">ED</span>
+          <span class="brand-lockup">
+            <strong>EDGE DESK</strong>
+            <small>Sports Edge Football</small>
+          </span>
+        </div>
+        <p class="brand-copy">One operational shell for today&apos;s board, current predictions, status truth, and review workflows.</p>
       </div>
 
       <div class="workspace">
-        <span class="avatar">SE</span>
-        <span>
-          <b>Edge workspace</b>
-          <small>Football analyst terminal</small>
-        </span>
-        <span class="workspace-caret">+</span>
+        <div class="workspace-main">
+          <span class="avatar">FB</span>
+          <span>
+            <span class="workspace-kicker">Workspace</span>
+            <b>Football analyst desk</b>
+            <small>Route B active · Route A rejected · Agent 3 pending</small>
+          </span>
+        </div>
+        <span class="workspace-caret {% if fixture_feed_ready %}workspace-caret-live{% endif %}"></span>
       </div>
 
       <nav aria-label="Primary navigation">
-        <p class="eyebrow">Workspace</p>
+        <p class="eyebrow">Board</p>
         <a href="/" class="nav-item {% if page == 'dashboard' %}nav-active{% endif %}">
-          <span>Overview</span>
+          <span class="nav-copy">
+            <span class="nav-label">Overview</span>
+            <small class="nav-caption">Best picks and desk card</small>
+          </span>
           {% if page == 'dashboard' %}<i class="status-dot"></i>{% endif %}
         </a>
         <a href="/matches" class="nav-item {% if page == 'matches' or page == 'match_detail' %}nav-active{% endif %}">
-          <span>Live Monitor</span>
+          <span class="nav-copy">
+            <span class="nav-label">Live Monitor</span>
+            <small class="nav-caption">Fixtures, state, and drill-down</small>
+          </span>
           {% if payload.system_status.fixture_feed.counts.live > 0 %}<i class="status-dot status-dot-live"></i>{% endif %}
         </a>
         <a href="/predictions" class="nav-item {% if page == 'predictions' %}nav-active{% endif %}">
-          <span>Predictions</span>
+          <span class="nav-copy">
+            <span class="nav-label">Predictions</span>
+            <small class="nav-caption">Persisted model output</small>
+          </span>
         </a>
         <a href="/candidates" class="nav-item {% if page == 'candidates' %}nav-active{% endif %}">
-          <span>Watchlist</span>
+          <span class="nav-copy">
+            <span class="nav-label">Watchlist</span>
+            <small class="nav-caption">Current-market desk review</small>
+          </span>
         </a>
         <a href="/performance" class="nav-item {% if page == 'performance' %}nav-active{% endif %}">
-          <span>Performance</span>
+          <span class="nav-copy">
+            <span class="nav-label">Performance</span>
+            <small class="nav-caption">Current persisted reporting</small>
+          </span>
         </a>
 
-        <p class="eyebrow nav-gap">Tools</p>
+        <p class="eyebrow nav-gap">Operations</p>
         <a href="/status" class="nav-item {% if page == 'status' %}nav-active{% endif %}">
-          <span>Status</span>
+          <span class="nav-copy">
+            <span class="nav-label">Status</span>
+            <small class="nav-caption">Runtime health and blockers</small>
+          </span>
         </a>
-        <a href="/api/system/status" class="nav-item">
-          <span>Read API</span>
+        <a href="/status#read-api" class="nav-item">
+          <span class="nav-copy">
+            <span class="nav-label">Read API</span>
+            <small class="nav-caption">Technical routes and raw endpoints</small>
+          </span>
         </a>
       </nav>
 
       <div class="sidebar-bottom">
         <div class="pro-card">
           <div>
-            <span class="pulse-line"></span>
-            <small>MODEL STATUS</small>
+            <span class="pulse-line {% if fixture_feed_ready %}{% else %}pulse-line-warning{% endif %}"></span>
+            <small>Runtime Snapshot</small>
           </div>
           <strong>{{ payload.system_status.prediction_engine.state }}</strong>
           <span class="pro-version">
             {{ payload.system_status.current_model_snapshot.snapshot_id or 'snapshot unavailable' }}
           </span>
+          <p class="sidebar-note">Fixtures {{ payload.system_status.fixture_feed.state }} · Market {{ payload.system_status.odds_feed.state if market_feed_ready else 'LIMITED' }}</p>
         </div>
       </div>
     </aside>
 
     <section class="content-shell">
       <header class="topbar">
-        <div class="crumb">
-          <span>Workspace</span>
-          <span>/</span>
-          {% if page == 'dashboard' %}
-            <b>Overview</b>
-          {% elif page == 'matches' or page == 'match_detail' %}
-            <b>Live Monitor</b>
-          {% elif page == 'predictions' %}
-            <b>Predictions</b>
-          {% elif page == 'performance' %}
-            <b>Performance</b>
-          {% elif page == 'status' %}
-            <b>Status</b>
-          {% else %}
-            <b>Watchlist</b>
-          {% endif %}
+        <div class="topbar-context">
+          <div class="crumb">
+            <span>Edge Desk</span>
+            <span>/</span>
+            <b>{{ page_label }}</b>
+          </div>
+          <div class="topbar-meta">
+            <span>{{ payload.system_status.current_time_local }}</span>
+            <span>Display TZ {{ payload.system_status.display_timezone }}</span>
+          </div>
         </div>
         <div class="top-actions">
-          <button class="icon-button" type="button" aria-label="Provider state">
-            <span class="status-dot {% if payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] %}{% else %}status-dot-live{% endif %}"></span>
-          </button>
+          <div class="topbar-status">
+            <div class="topbar-status-block">
+              <span class="topbar-label">Fixtures</span>
+              {{ status_badge(payload.system_status.fixture_feed.state, 'positive' if fixture_feed_ready else 'warning') }}
+            </div>
+            <div class="topbar-status-block">
+              <span class="topbar-label">Market</span>
+              {{ status_badge(payload.system_status.odds_feed.state, 'positive' if market_feed_ready else 'inactive') }}
+            </div>
+          </div>
           <div class="profile-button">
             <span class="avatar avatar-small">SE</span>
-            <span>Sports Edge</span>
+            <span>
+              <b>Sports Edge</b>
+              <small>Football board</small>
+            </span>
           </div>
         </div>
       </header>
@@ -103,7 +154,7 @@
         {% block content %}{% endblock %}
         <footer class="page-footer">
           <span><i class="status-dot"></i> Data updated {{ payload.system_status.fixture_feed.last_sync_at or 'not yet synced' }}</span>
-          <span>Sports Edge AI · Frozen pre-match football dashboard</span>
+          <span>Edge Desk shell · existing Football truth only</span>
         </footer>
       </main>
     </section>
