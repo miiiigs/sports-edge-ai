@@ -152,7 +152,7 @@
       <p class="eyebrow">Investigate</p>
       <h3>Decision Gates</h3>
       <div class="data-list">
-        <div><span>Manager</span><strong>{{ payload.prediction.manager_decision_status }}</strong></div>
+        <div><span>Current Market</span><strong>{{ payload.fixture.market_signal.current_decision_state if payload.fixture.market_signal else payload.fixture.market_status_label }}</strong></div>
         <div><span>Safeguard</span><strong>{{ payload.prediction.safeguard_status }}</strong></div>
         <div><span>Safeguard Reason</span><strong>{{ payload.prediction.safeguard_reason }}</strong></div>
         <div><span>Point-In-Time xG</span><strong>{{ payload.system_status.xg.state }}</strong></div>

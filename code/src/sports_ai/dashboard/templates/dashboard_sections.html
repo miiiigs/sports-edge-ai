@@ -8,8 +8,8 @@
 <section class="page-heading edge-desk-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Football Today</p>
-    <h1>Best Picks of the Day</h1>
-    <p class="subhead desk-page-subhead">Today's qualified Football selections.</p>
+    <h1>Current Slate Best Picks</h1>
+    <p class="subhead desk-page-subhead">Current qualified Football selections.</p>
   </div>
   <a class="refresh-button" href="/candidates">Open candidates view</a>
 </section>
@@ -31,7 +31,7 @@
     <span class="desk-chip">Agent: <b>Route B</b></span>
   </div>
 
-  <div class="desk-kpi-strip" role="group" aria-label="Today's card">
+  <div class="desk-kpi-strip" role="group" aria-label="Current slate">
     {% for metric in payload.glance_metrics %}
       <article class="desk-kpi">
         <div class="desk-kpi-label">{{ metric.label }}</div>
@@ -48,7 +48,7 @@
           <span class="desk-panel-title">Best Picks</span>
           <span class="desk-panel-note">Qualified BET rows only</span>
         </div>
-        <span class="desk-panel-meta">{{ payload.today_working_summary.bet_count }} BET</span>
+        <span class="desk-panel-meta">{{ payload.current_slate_summary.bet_count }} BET</span>
       </div>
 
       {% if payload.best_picks %}
@@ -115,7 +115,7 @@
         </div>
       {% else %}
         <article class="empty-state desk-empty-state">
-          <strong>{{ payload.today_working_summary.empty_message }}</strong>
+          <strong>{{ payload.current_slate_summary.empty_message }}</strong>
           <p>Only qualified BET rows appear here.</p>
         </article>
       {% endif %}
@@ -150,10 +150,11 @@
           </div>
         </div>
         <div class="desk-context-list">
+          <div><span>Current slate fixtures</span><b>{{ payload.current_slate_summary.fixture_count }}</b></div>
           <div><span>Today fixtures</span><b>{{ fixture_state.today_count }}</b></div>
-          <div><span>Decision rows</span><b>{{ market_sync.decision_count }}</b></div>
-          <div><span>Paper entries</span><b>{{ market_sync.paper_entry_count }}</b></div>
-          <div><span>Open paper</span><b>{{ payload.system_status.paper_tracking.open_positions }}</b></div>
+          <div><span>Decision rows</span><b>{{ payload.current_slate_summary.count }}</b></div>
+          <div><span>Paper entries</span><b>{{ payload.current_slate_summary.paper_entry_count }}</b></div>
+          <div><span>Open paper</span><b>{{ payload.current_slate_summary.pending_count }}</b></div>
         </div>
         {% if nearest_fixture %}
           <div class="desk-mini-callout">
@@ -266,7 +267,7 @@
               {% if fixture.market_signal %}
                 {{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}
               {% else %}
-                {{ fixture.prediction.manager_decision_status if fixture.prediction else 'MARKET_DATA_NOT_CONNECTED' }}
+                {{ fixture.market_status_label }}
               {% endif %}
             </small>
           </span>

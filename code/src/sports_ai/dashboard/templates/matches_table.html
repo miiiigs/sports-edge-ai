@@ -136,7 +136,7 @@
                 {{ row.market_signal.current_decision_state or row.market_signal.decision }} | {{ row.market_signal.selection }}{% if row.market_signal.line is not none %} {{ row.market_signal.line }}{% endif %}
                 {% if row.market_signal.edge is not none %}<div class="row-sub">{{ "{:+.2%}".format(row.market_signal.edge|float) }}</div>{% endif %}
               {% else %}
-                {{ row.prediction.manager_decision_status if row.prediction else 'N/A' }}
+                {{ row.market_status_label }}
               {% endif %}
             </td>
             <td>

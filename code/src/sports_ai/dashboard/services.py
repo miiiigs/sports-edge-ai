@@ -2228,6 +2228,11 @@ class DashboardServices:
             "prediction": prediction,
             "prediction_eligibility_status": self._prediction_eligibility_status(prediction),
             "market_evaluation": market_evaluation,
+            "market_status_label": self._market_status_label(
+                prediction=prediction,
+                market_evaluation=market_evaluation,
+                top_market_row=top_market_row,
+            ),
             "market_signal": None
             if top_market_row is None
             else {
@@ -2242,6 +2247,27 @@ class DashboardServices:
                 "line": top_market_row.get("line"),
             },
         }
+
+    def _market_status_label(
+        self,
+        *,
+        prediction: dict[str, Any] | None,
+        market_evaluation: dict[str, Any] | None,
+        top_market_row: dict[str, Any] | None,
+    ) -> str:
+        if top_market_row is not None:
+            return str(top_market_row.get("current_decision_state") or _current_decision_state(top_market_row))
+        if market_evaluation is not None:
+            evaluation_state = str(market_evaluation.get("state") or "")
+            if evaluation_state == "MARKET_NOT_AVAILABLE":
+                return "MARKET_UNAVAILABLE"
+            if evaluation_state == "MARKET_FIXTURE_UNRESOLVED":
+                return "MARKET_UNMATCHED"
+            return evaluation_state or "NOT_SYNCED"
+        legacy_status = "" if prediction is None else str(prediction.get("manager_decision_status") or "")
+        if legacy_status == "MARKET_DATA_NOT_CONNECTED" and self._market_provider_state().get("configured"):
+            return "NOT_SYNCED"
+        return legacy_status or "NOT_SYNCED"
 
     def _dashboard_agent_statuses(self) -> list[dict[str, str]]:
         route_a_diagnostics = {} if self.snapshot is None else dict(self.snapshot.diagnostics.get("route_a") or {})
@@ -2362,15 +2388,11 @@ class DashboardServices:
             return ("FINAL", "final")
         return ("PENDING", "pending")
 
-    def _build_today_working_rows(self, fixture_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        today_fixture_map = {
-            str(row["fixture_id"]): self.serialize_fixture_row(row)
-            for row in self._filter_fixture_rows(bucket="today", fixture_rows=fixture_rows)
-        }
+    def _build_working_rows_for_fixture_map(self, fixture_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         working_rows: list[dict[str, Any]] = []
         for evaluation in self._market_evaluation_map().values():
             for row in evaluation.get("decision_rows") or []:
-                fixture = today_fixture_map.get(str(row["fixture_id"]))
+                fixture = fixture_map.get(str(row["fixture_id"]))
                 if fixture is None:
                     continue
                 if str(fixture.get("status")) in FIXTURE_TERMINAL_STATUSES:
@@ -2427,6 +2449,7 @@ class DashboardServices:
                         "risk_summary": risk_summary,
                         "desk_label": desk_label,
                         "desk_note": _humanize_row_reason_codes(row) or _decision_state_detail(current_state),
+                        "paper_trade_id": row.get("paper_trade_id"),
                         "current_decision_state": current_state,
                         "current_decision_group": decision_group,
                         "status_label": status_label,
@@ -2454,6 +2477,51 @@ class DashboardServices:
                 break
         return working_rows
 
+    def _build_today_working_rows(self, fixture_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        today_fixture_map = {
+            str(row["fixture_id"]): self.serialize_fixture_row(row)
+            for row in self._filter_fixture_rows(bucket="today", fixture_rows=fixture_rows)
+        }
+        return self._build_working_rows_for_fixture_map(today_fixture_map)
+
+    def _build_current_slate_working_rows(self, fixture_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        current_slate_fixture_map = {
+            str(row["fixture_id"]): self.serialize_fixture_row(row)
+            for row in self._future_fixture_rows(fixture_rows)
+        }
+        return self._build_working_rows_for_fixture_map(current_slate_fixture_map)
+
+    @staticmethod
+    def _current_slate_summary(
+        *,
+        working_rows: list[dict[str, Any]],
+        paper_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        active_trade_states = {"PENDING", "OPEN", "UNSETTLED"}
+        paper_trade_ids = {
+            str(row["paper_trade_id"])
+            for row in working_rows
+            if row["is_actionable"] and row.get("paper_trade_id")
+        }
+        current_slate_paper_rows = [
+            row
+            for row in paper_rows
+            if str(row.get("paper_trade_id") or "") in paper_trade_ids
+        ]
+        return {
+            "fixture_count": len({str(row["fixture_id"]) for row in working_rows}),
+            "count": len(working_rows),
+            "bet_count": sum(1 for row in working_rows if row["is_actionable"]),
+            "no_bet_count": sum(1 for row in working_rows if not row["is_actionable"]),
+            "paper_entry_count": len(current_slate_paper_rows),
+            "pending_count": sum(
+                1
+                for row in current_slate_paper_rows
+                if str(row.get("trade_state") or "") in active_trade_states
+            ),
+            "empty_message": "No current market decision rows are available for the current Football slate.",
+        }
+
     @staticmethod
     def _glance_metrics(
         *,
@@ -2465,12 +2533,12 @@ class DashboardServices:
         pending_count: int,
     ) -> list[dict[str, str]]:
         return [
-            {"label": "Analysed", "value": str(analysed_count), "note": "today fixtures"},
-            {"label": "Predictions", "value": str(len(working_rows)), "note": "desk rows"},
+            {"label": "Analysed", "value": str(analysed_count), "note": "current slate fixtures"},
+            {"label": "Predictions", "value": str(len(working_rows)), "note": "current-slate rows"},
             {"label": "Approved", "value": str(approved_count), "note": "qualified"},
-            {"label": "Suggested Bets", "value": str(paper_entry_count), "note": "paper tracked"},
+            {"label": "Suggested Bets", "value": str(paper_entry_count), "note": "paper published"},
             {"label": "Live", "value": str(live_count), "note": "in play"},
-            {"label": "Pending", "value": str(pending_count), "note": "awaiting kickoff"},
+            {"label": "Pending", "value": str(pending_count), "note": "open paper"},
         ]
 
     @staticmethod
@@ -2478,7 +2546,7 @@ class DashboardServices:
         bet_count = sum(1 for row in working_rows if row["is_actionable"])
         no_bet_count = sum(1 for row in working_rows if not row["is_actionable"])
         return [
-            {"label": "Desk rows", "value": str(len(working_rows)), "note": "today working surface"},
+            {"label": "Desk rows", "value": str(len(working_rows)), "note": "current-slate working surface"},
             {"label": "Suggested bets", "value": str(paper_entry_count), "note": "paper entries created"},
             {"label": "BET rows", "value": str(bet_count), "note": "actionable now"},
             {"label": "NO BET rows", "value": str(no_bet_count), "note": "tracked, not actionable"},
@@ -2503,12 +2571,12 @@ class DashboardServices:
             if row.get("prediction") and row["prediction"].get("prediction_status") == PREDICTION_STATUS_READY
         ][:6]
         best_picks = self._build_best_pick_rows(fixture_rows)
-        today_working_rows = self._build_today_working_rows(fixture_rows)
-        other_decision_rows = [row for row in today_working_rows if not row["is_actionable"]]
+        current_slate_rows = self._build_current_slate_working_rows(fixture_rows)
+        other_decision_rows = [row for row in current_slate_rows if not row["is_actionable"]]
+        paper_rows, _ = self._paper_positions()
+        current_slate_summary = self._current_slate_summary(working_rows=current_slate_rows, paper_rows=paper_rows)
         system_status = self.get_system_status()
-        paper_entry_count = int(system_status["market_sync"].get("paper_entry_count") or 0)
-        live_working_count = sum(1 for row in today_working_rows if row["status_tone"] == "live")
-        pending_working_count = sum(1 for row in today_working_rows if row["status_tone"] == "pending")
+        live_working_count = sum(1 for row in current_slate_rows if row["status_tone"] == "live")
         return {
             "live": live_rows,
             "today": today_rows,
@@ -2519,16 +2587,11 @@ class DashboardServices:
             "best_picks_summary": {
                 "count": len(best_picks),
                 "empty_message": "No qualified picks currently meet the model, value and risk requirements.",
-                "source": "Current qualified BET rows.",
+                "source": "Current qualified BET rows on the active pre-match slate.",
             },
-            "today_working_rows": today_working_rows,
+            "current_slate_rows": current_slate_rows,
             "other_decision_rows": other_decision_rows,
-            "today_working_summary": {
-                "count": len(today_working_rows),
-                "bet_count": sum(1 for row in today_working_rows if row["is_actionable"]),
-                "no_bet_count": sum(1 for row in today_working_rows if not row["is_actionable"]),
-                "empty_message": "No current market decision rows are available for today's Football board.",
-            },
+            "current_slate_summary": current_slate_summary,
             "other_decision_summary": {
                 "count": len(other_decision_rows),
                 "blocked_count": sum(1 for row in other_decision_rows if row["current_decision_group"] == "blocked"),
@@ -2537,16 +2600,16 @@ class DashboardServices:
                 "empty_message": "No additional Football desk decisions are currently on the board.",
             },
             "glance_metrics": self._glance_metrics(
-                analysed_count=int((system_status["fixture_feed"].get("counts") or {}).get("today") or len(today_rows)),
-                working_rows=today_working_rows,
+                analysed_count=int(current_slate_summary["fixture_count"]),
+                working_rows=current_slate_rows,
                 approved_count=len(best_picks),
-                paper_entry_count=paper_entry_count,
+                paper_entry_count=int(current_slate_summary["paper_entry_count"]),
                 live_count=live_working_count,
-                pending_count=pending_working_count,
+                pending_count=int(current_slate_summary["pending_count"]),
             ),
             "desk_funnel": self._desk_funnel(
-                working_rows=today_working_rows,
-                paper_entry_count=paper_entry_count,
+                working_rows=current_slate_rows,
+                paper_entry_count=int(current_slate_summary["paper_entry_count"]),
             ),
             "agent_statuses": self._dashboard_agent_statuses(),
             "system_status": system_status,

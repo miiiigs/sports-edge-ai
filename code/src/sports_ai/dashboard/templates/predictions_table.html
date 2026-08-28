@@ -89,7 +89,7 @@
                   <div class="row-sub">{{ "{:+.2%}".format(row.fixture.market_signal.edge|float) }}</div>
                 {% endif %}
               {% else %}
-                {{ row.prediction.manager_decision_status }}
+                {{ row.fixture.market_status_label }}
               {% endif %}
             </td>
             <td>{{ status_badge((row.fixture.market_signal.safeguard_label if row.fixture.market_signal else row.prediction.safeguard_status), 'positive' if ((row.fixture.market_signal.safeguard_label if row.fixture.market_signal else row.prediction.safeguard_status) == 'PASS') else 'inactive') }}</td>
