@@ -14,7 +14,7 @@
     <span class="desk-chip">Fixture Feed: <b>{{ payload.system_status.fixture_feed.state }}</b></span>
     <span class="desk-chip">Odds Feed: <b>{{ payload.system_status.odds_feed.state }}</b></span>
     <span class="desk-chip">Model: <b>Route B</b></span>
-    {% if payload.system_status.provider_budget.quota.state == 'EXHAUSTED' %}
+    {% if payload.system_status.provider_budget.quota.state == 'EXHAUSTED' or payload.system_status.provider_budget.circuit.state == 'QUOTA_EXHAUSTED' %}
       <span class="desk-chip desk-chip-warning">Market Status: <b>waiting for quota reset</b></span>
     {% endif %}
   </div>
