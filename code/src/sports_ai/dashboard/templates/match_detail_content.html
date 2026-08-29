@@ -178,7 +178,7 @@
               <th>Model %</th>
               <th>Fair Odds</th>
               <th>Entry Odds</th>
-              <th>Entry Edge</th>
+              <th>Entry EV / 1u</th>
               <th>Bookmaker</th>
               <th>Captured</th>
               <th>Status</th>
@@ -202,7 +202,7 @@
                 <td>
                   {{ "{:+.2%}".format(row.edge|float) if row.edge is not none else 'N/A' }}
                   {% if row.current_market_edge is not none %}
-                    <div class="row-sub">Current edge {{ "{:+.2%}".format(row.current_market_edge|float) }}</div>
+                    <div class="row-sub">Current EV {{ "{:+.2%}".format(row.current_market_edge|float) }}</div>
                   {% endif %}
                 </td>
                 <td>{{ row.bookmaker or 'N/A' }}</td>
@@ -259,7 +259,7 @@
               <th>Model Fair</th>
               <th>Best Offer</th>
               <th>Min Odds</th>
-              <th>Edge</th>
+              <th>EV / 1u</th>
               <th>Decision</th>
               <th>Risk</th>
             </tr>

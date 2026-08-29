@@ -65,6 +65,7 @@ DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR = "SPORTS_AI_STARTUP_SYNC_TIMEOUT_SECONDS"
 DEFAULT_ALLOW_PAID_PROVIDER_CALLS_ENV_VAR = "SPORTS_AI_ALLOW_PAID_PROVIDER_CALLS"
 DEFAULT_API_FOOTBALL_DAILY_BUDGET_ENV_VAR = "SPORTS_AI_API_FOOTBALL_DAILY_BUDGET"
 DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR = "SPORTS_AI_API_FOOTBALL_QUOTA_RESET_HOUR_UTC"
+DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR = "SPORTS_AI_API_FOOTBALL_OPERATIONAL_DAILY_CAP"
 
 PAID_PROVIDER_DISABLED_STATE = "PAID_PROVIDER_CALLS_DISABLED"
 
@@ -400,6 +401,7 @@ class DashboardConfig:
     allow_paid_provider_calls: bool = False
     api_football_daily_budget: int | None = None
     api_football_quota_reset_hour_utc: int = 0
+    api_football_operational_daily_cap: int | None = None
 
     @classmethod
     def default(cls) -> "DashboardConfig":
@@ -428,6 +430,7 @@ class DashboardConfig:
             allow_paid_provider_calls=_env_bool(DEFAULT_ALLOW_PAID_PROVIDER_CALLS_ENV_VAR, False),
             api_football_daily_budget=_env_int(DEFAULT_API_FOOTBALL_DAILY_BUDGET_ENV_VAR, None),
             api_football_quota_reset_hour_utc=_env_int(DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR, 0) or 0,
+            api_football_operational_daily_cap=_env_int(DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR, None),
         )
 
 
@@ -452,6 +455,7 @@ class DashboardServices:
             allow_paid_provider_calls=self.config.allow_paid_provider_calls,
             daily_budget=self.config.api_football_daily_budget,
             quota_reset_hour_utc=self.config.api_football_quota_reset_hour_utc,
+            operational_daily_cap=self.config.api_football_operational_daily_cap,
         )
         for provider in (self.fixture_provider, self.market_provider, self.statistics_provider):
             attach = getattr(provider, "attach_request_budget", None)
@@ -1528,23 +1532,28 @@ class DashboardServices:
         analysed_count: int,
         predictions_count: int,
         approved_count: int,
-        suggested_bet_count: int,
+        no_bet_count: int,
         paper_rows: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
+        """Today KPI strip split into CURRENT DESK and PAPER TRACKING scopes."""
+        desk = [
+            self._paper_metric_row(label="Analysed", value=analysed_count, note="current desk · unique today fixtures"),
+            self._paper_metric_row(label="Predictions", value=predictions_count, note="current desk rows for today"),
+            self._paper_metric_row(label="BET", value=approved_count, note="current desk · passed decision gates"),
+            self._paper_metric_row(label="NO BET", value=no_bet_count, note="current desk · retained rejections"),
+        ]
         performance = self._paper_performance_for_rows(paper_rows)
-        return [
-            self._paper_metric_row(label="Analysed", value=analysed_count, note="unique today fixtures"),
-            self._paper_metric_row(label="Predictions", value=predictions_count, note="persisted Route B rows"),
-            self._paper_metric_row(label="Approved", value=approved_count, note="passed decision gates"),
-            self._paper_metric_row(label="Suggested Bets", value=suggested_bet_count, note="genuine today paper picks"),
-            self._paper_metric_row(label="Settled", value=performance.get("settled_positions"), note="terminal paper picks"),
+        paper = [
+            self._paper_metric_row(label="Tracked", value=performance.get("positions"), note="canonical paper positions"),
+            self._paper_metric_row(label="Open", value=performance.get("open_positions"), note="unsettled paper positions"),
+            self._paper_metric_row(label="Settled", value=performance.get("settled_positions"), note="terminal paper positions"),
             self._paper_metric_row(label="Won", value=performance.get("wins"), note="full wins"),
             self._paper_metric_row(label="Lost", value=performance.get("losses"), note="full losses"),
-            self._paper_metric_row(label="Pending", value=performance.get("pending_positions"), note="unsettled paper picks"),
-            self._paper_metric_row(label="Strike Rate", value=performance.get("strike_rate"), note="pushes excluded", formatter="rate"),
             self._paper_metric_row(label="P/L", value=performance.get("net_units"), note="net paper units", formatter="units"),
             self._paper_metric_row(label="ROI", value=performance.get("roi"), note="settled stake only", formatter="rate"),
+            self._paper_metric_row(label="Strike Rate", value=performance.get("strike_rate"), note="pushes excluded", formatter="rate"),
         ]
+        return desk + paper
 
     @staticmethod
     def _settled_bet_sample_label(settled_count: int) -> str:
@@ -1676,26 +1685,31 @@ class DashboardServices:
         ]
 
     def _last_20_payload(self, paper_rows: list[dict[str, Any]]) -> dict[str, Any]:
-        recent_rows = sorted(
-            paper_rows,
+        """Latest 20 SETTLED canonical counted positions (open/pending excluded)."""
+        settled_rows = sorted(
+            [
+                row
+                for row in paper_rows
+                if str(row.get("trade_state") or "") in PAPER_FINAL_STATES
+            ],
             key=lambda row: (
                 str(row.get("updated_at") or row.get("decision_timestamp") or ""),
                 str(row["paper_trade_id"]),
             ),
             reverse=True,
         )[:20]
-        recent_performance = self._paper_performance_for_rows(recent_rows)
+        recent_performance = self._paper_performance_for_rows(settled_rows)
         return {
-            "rows": recent_rows,
-            "sequence": [str(row.get("trade_state") or "PENDING") for row in recent_rows],
+            "rows": settled_rows,
+            "sequence": [str(row.get("trade_state") or "PENDING") for row in settled_rows],
             "summary": {
-                "count": len(recent_rows),
-                "wins": sum(1 for row in recent_rows if row.get("trade_state") == "WON"),
-                "losses": sum(1 for row in recent_rows if row.get("trade_state") == "LOST"),
-                "pushes": sum(1 for row in recent_rows if row.get("trade_state") == "PUSH"),
-                "half_wins": sum(1 for row in recent_rows if row.get("trade_state") == "HALF_WIN"),
-                "half_losses": sum(1 for row in recent_rows if row.get("trade_state") == "HALF_LOSS"),
-                "voids": sum(1 for row in recent_rows if row.get("trade_state") == "VOID"),
+                "count": len(settled_rows),
+                "wins": sum(1 for row in settled_rows if row.get("trade_state") == "WON"),
+                "losses": sum(1 for row in settled_rows if row.get("trade_state") == "LOST"),
+                "pushes": sum(1 for row in settled_rows if row.get("trade_state") == "PUSH"),
+                "half_wins": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_WIN"),
+                "half_losses": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_LOSS"),
+                "voids": sum(1 for row in settled_rows if row.get("trade_state") == "VOID"),
                 "strike_rate": recent_performance.get("strike_rate"),
                 "roi": recent_performance.get("roi"),
             },
@@ -2167,7 +2181,7 @@ class DashboardServices:
     @staticmethod
     def _live_paper_kpis(current_paper: dict[str, Any]) -> list[tuple[str, str]]:
         return [
-            ("Bets", str(current_paper.get("positions") or 0)),
+            ("Tracked", str(current_paper.get("positions") or 0)),
             ("Settled", str(current_paper.get("settled_positions") or 0)),
             ("Won", str(current_paper.get("wins") or 0)),
             ("Lost", str(current_paper.get("losses") or 0)),
@@ -4638,6 +4652,7 @@ class DashboardServices:
         paper_performance = paper_status.get("performance", {})
         analysed_count = len({str(row["fixture_id"]) for row in today_working_rows})
         approved_count = sum(1 for row in today_working_rows if str(row.get("current_decision_state") or "") == "BET")
+        no_bet_count = sum(1 for row in today_working_rows if str(row.get("current_decision_state") or "") == "NO BET")
         blocking_reasons = self._blocking_reason_counts(today_working_rows)
         client_blocking_reasons = self._client_blocking_reasons(blocking_reasons)
         return {
@@ -4677,9 +4692,19 @@ class DashboardServices:
                 analysed_count=analysed_count,
                 predictions_count=len(today_working_rows),
                 approved_count=approved_count,
-                suggested_bet_count=len(today_published_rows),
+                no_bet_count=no_bet_count,
                 paper_rows=today_paper_rows,
             ),
+            "today_scopes": {
+                "desk": {
+                    "label": "Current Desk",
+                    "note": "Today's live market analysis (fixture, prediction, odds, value).",
+                },
+                "paper": {
+                    "label": "Paper Tracking",
+                    "note": "Persisted tracked positions and performance, not live recommendations.",
+                },
+            },
             "desk_funnel": self._today_funnel(
                 working_rows=today_working_rows,
                 analysed_count=analysed_count,
@@ -4859,15 +4884,38 @@ class DashboardServices:
         preliminary = [row for row in desk_rows if row["desk_decision"] == "BET"]
         no_bets = [row for row in desk_rows if row["decision_group"] == "no_bet"]
         blocked = [row for row in desk_rows if row["decision_group"] in {"blocked", "unsupported"}]
+
+        quota_state = self._provider_budget.quota_state()
+        circuit_state = self._provider_budget.circuit_snapshot()["state"]
+        waiting_for_reset = bool(
+            (quota_state == "EXHAUSTED") or (circuit_state == "QUOTA_EXHAUSTED")
+        )
+        if not self.config.allow_paid_provider_calls:
+            desk_reason = "Live market polling is currently disabled."
+        elif waiting_for_reset:
+            desk_reason = (
+                "Live market data is waiting for the provider quota reset. "
+                "Historical picks and performance remain available."
+            )
+        elif circuit_state in {"RATE_LIMITED", "PROVIDER_ERROR", "AUTH_ERROR"}:
+            desk_reason = f"Live market data is temporarily paused (provider {circuit_state}). Historical picks and performance remain available."
+        elif not market_state["configured"]:
+            desk_reason = "No current odds provider is configured for live market snapshots."
+        else:
+            desk_reason = (
+                self._market_runtime_state.get("last_error")
+                or market_state["reason"]
+                or "Current desk rows are staged as provider market data becomes available."
+            )
         return {
             "connected": bool(
                 market_state["configured"]
                 and self.config.current_odds_connected
                 and (self.config.enable_odds_sync or bool(self.config.odds_sync_once_token.strip()))
             ),
-            "reason": self._market_runtime_state.get("last_error")
-            or market_state["reason"]
-            or "Current market decision service unavailable until a current odds provider is configured.",
+            "reason": desk_reason,
+            "quota_waiting_reset": waiting_for_reset,
+            "quota_state": quota_state,
             "rows": desk_rows,
             "preliminary_candidates": preliminary,
             "blocked_candidates": blocked,

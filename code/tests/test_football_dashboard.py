@@ -1285,7 +1285,7 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
     assert performance_payload["current_paper_summary"]["open_positions"] == 1
     assert performance_payload["recent_paper_bets"] == []
     assert len(performance_payload["open_paper_positions"]) == 1
-    assert performance_payload["live_paper_kpis"][0] == ("Bets", "1")
+    assert performance_payload["live_paper_kpis"][0] == ("Tracked", "1")
 
     with football_paper_trading.connect(config.paper_trading_db_path) as conn:
         paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
@@ -2506,18 +2506,19 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
     assert payload["current_slate_summary"]["pending_count"] == 2
     assert payload["today_summary"]["suggested_bets"] == 1
     assert payload["system_status"]["current_fixture_state"]["today_count"] == 0
-    assert metrics["Analysed"] == {"label": "Analysed", "value": "0", "note": "unique today fixtures"}
-    assert metrics["Predictions"] == {"label": "Predictions", "value": "0", "note": "persisted Route B rows"}
-    assert metrics["Approved"] == {"label": "Approved", "value": "0", "note": "passed decision gates"}
-    assert metrics["Suggested Bets"] == {"label": "Suggested Bets", "value": "1", "note": "genuine today paper picks"}
-    assert metrics["Settled"] == {"label": "Settled", "value": "0", "note": "terminal paper picks"}
+    assert metrics["Analysed"] == {"label": "Analysed", "value": "0", "note": "current desk · unique today fixtures"}
+    assert metrics["Predictions"] == {"label": "Predictions", "value": "0", "note": "current desk rows for today"}
+    assert metrics["BET"] == {"label": "BET", "value": "0", "note": "current desk · passed decision gates"}
+    assert metrics["NO BET"] == {"label": "NO BET", "value": "0", "note": "current desk · retained rejections"}
+    assert metrics["Tracked"] == {"label": "Tracked", "value": "1", "note": "canonical paper positions"}
+    assert metrics["Open"] == {"label": "Open", "value": "1", "note": "unsettled paper positions"}
+    assert metrics["Settled"] == {"label": "Settled", "value": "0", "note": "terminal paper positions"}
     assert metrics["Won"] == {"label": "Won", "value": "0", "note": "full wins"}
     assert metrics["Lost"] == {"label": "Lost", "value": "0", "note": "full losses"}
     assert "Push" not in metrics
-    assert metrics["Pending"] == {"label": "Pending", "value": "1", "note": "unsettled paper picks"}
-    assert metrics["Strike Rate"] == {"label": "Strike Rate", "value": "NOT AVAILABLE", "note": "pushes excluded"}
     assert metrics["P/L"] == {"label": "P/L", "value": "+0.00", "note": "net paper units"}
     assert metrics["ROI"] == {"label": "ROI", "value": "NOT AVAILABLE", "note": "settled stake only"}
+    assert metrics["Strike Rate"] == {"label": "Strike Rate", "value": "NOT AVAILABLE", "note": "pushes excluded"}
     assert funnel["Fixtures Analysed"]["value"] == "0"
     assert funnel["Decision Rows"]["value"] == "0"
     assert funnel["BET"]["value"] == "0"
@@ -2663,7 +2664,7 @@ def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no
     assert response.status_code == 200
     assert "Entry 7.00" not in response.text
     assert "Current odds 6.80" in response.text
-    assert "Current edge +114.66%" in response.text
+    assert "Current EV +114.66%" in response.text
     assert "7.00" in response.text
     assert "+120.98%" in response.text
     assert "PENDING" in response.text
@@ -2976,7 +2977,7 @@ def test_match_detail_separates_current_market_from_published_entry_and_uses_cur
     assert "Paper Entry" in response.text
     assert "Current-Market Evaluation" in response.text
     assert "Current odds 6.80" in response.text
-    assert "Current edge +114.66%" in response.text
+    assert "Current EV +114.66%" in response.text
     assert "7.00" in response.text
     assert "+120.98%" in response.text
     assert "<span>Safeguard</span><strong>PASS</strong>" in response.text

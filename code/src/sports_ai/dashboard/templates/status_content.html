@@ -228,7 +228,13 @@
       <div><span>Blocked By Gate</span><strong>{{ payload.system_status.provider_budget.metrics.requests_blocked_gate }}</strong></div>
       <div><span>Blocked By Governor</span><strong>{{ payload.system_status.provider_budget.metrics.requests_blocked_governor }}</strong></div>
       <div><span>Blocked By Circuit</span><strong>{{ payload.system_status.provider_budget.metrics.requests_blocked_circuit }}</strong></div>
+      <div><span>Blocked By Rate</span><strong>{{ payload.system_status.provider_budget.metrics.requests_blocked_rate }}</strong></div>
       <div><span>Cache Entries</span><strong>{{ payload.system_status.provider_budget.cache.entries }}</strong></div>
+      <div><span>Operational Daily Cap</span><strong>{{ payload.system_status.provider_budget.quota.operational_cap or 'UNSET' }}</strong></div>
+      <div><span>Operational Used</span><strong>{{ payload.system_status.provider_budget.quota.operational_used or 0 }}</strong></div>
+      <div><span>Operational Remaining</span><strong>{{ payload.system_status.provider_budget.quota.operational_remaining or 'N/A' }}</strong></div>
+      <div><span>Effective Remaining</span><strong>{{ payload.system_status.provider_budget.quota.effective_remaining or 'N/A' }}</strong></div>
+      <div><span>Rate (last min / limit)</span><strong>{{ payload.system_status.provider_budget.rate.requests_last_minute }} / {{ payload.system_status.provider_budget.rate.minute_limit }}</strong></div>
     </div>
   </article>
 </section>

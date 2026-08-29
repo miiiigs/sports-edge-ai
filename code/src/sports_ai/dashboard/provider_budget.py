@@ -18,6 +18,8 @@ import json
 import os
 import sqlite3
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +34,7 @@ PROVIDER_API_FOOTBALL = "api-football"
 ENV_ALLOW_PAID_PROVIDER_CALLS = "SPORTS_AI_ALLOW_PAID_PROVIDER_CALLS"
 ENV_API_FOOTBALL_DAILY_BUDGET = "SPORTS_AI_API_FOOTBALL_DAILY_BUDGET"
 ENV_QUOTA_RESET_HOUR_UTC = "SPORTS_AI_API_FOOTBALL_QUOTA_RESET_HOUR_UTC"
+ENV_OPERATIONAL_DAILY_CAP = "SPORTS_AI_API_FOOTBALL_OPERATIONAL_DAILY_CAP"
 
 # Request priorities (used by the quota governor)
 PRIORITY_ESSENTIAL = "ESSENTIAL"
@@ -60,11 +63,19 @@ ACTION_BLOCKED_GATE = "PAID_PROVIDER_CALLS_DISABLED"
 ACTION_BLOCKED_QUOTA = "QUOTA_GOVERNOR_BLOCKED"
 ACTION_BLOCKED_CIRCUIT = "CIRCUIT_BREAKER_BLOCKED"
 ACTION_BLOCKED_COALESCED = "COALESCED_MISS"
+ACTION_BLOCKED_RATE = "RATE_LIMIT_DEFERRED"
 
 # Quota governor thresholds (fraction of the daily allowance remaining)
 QUOTA_CONSERVE_THRESHOLD = 0.40
 QUOTA_LOW_THRESHOLD = 0.20
 QUOTA_CRITICAL_THRESHOLD = 0.10
+
+# In-process burst/rate protection, deliberately below the provider limits
+# (API-Football PRO: 300/min, 5/sec). We target <=240/min and <=4/sec.
+RATE_MINUTE_LIMIT = 240
+RATE_SECOND_LIMIT = 4
+RATE_MINUTE_WINDOW_SECONDS = 60
+RATE_SECOND_WINDOW_SECONDS = 1
 
 # Default cache TTLs (seconds) used when a caller has no lifecycle context.
 DEFAULT_TTL_LIVE = 90
@@ -282,6 +293,7 @@ class ProviderRequestBudget:
         allow_paid_provider_calls: bool | None = None,
         daily_budget: int | None = None,
         quota_reset_hour_utc: int = 0,
+        operational_daily_cap: int | None = None,
     ) -> None:
         self._db_path = Path(db_path)
         if allow_paid_provider_calls is None:
@@ -293,8 +305,13 @@ class ProviderRequestBudget:
         if quota_reset_hour_utc is None:
             quota_reset_hour_utc = _env_int(ENV_QUOTA_RESET_HOUR_UTC, 0) or 0
         self._quota_reset_hour_utc = int(quota_reset_hour_utc)
+        if operational_daily_cap is None:
+            operational_daily_cap = _env_int(ENV_OPERATIONAL_DAILY_CAP, None)
+        self._operational_daily_cap = operational_daily_cap
         self._lock = threading.Lock()
         self._inflight: dict[str, dict[str, Any]] = {}
+        self._rate_lock = threading.Lock()
+        self._rate_times: deque[float] = deque()
         self._ensure_schema()
 
     # ------------------------------------------------------------------ state
@@ -314,6 +331,9 @@ class ProviderRequestBudget:
 
     def daily_budget(self) -> int | None:
         return self._daily_budget
+
+    def operational_daily_cap(self) -> int | None:
+        return self._operational_daily_cap
 
     def quota_reset_hour_utc(self) -> int:
         return self._quota_reset_hour_utc
@@ -372,28 +392,79 @@ class ProviderRequestBudget:
             reset_at += timedelta(days=1)
         return reset_at.isoformat(timespec="seconds")
 
+    # ------------------------------------------------------- operational cap
+    def _operational_reset_if_needed(self, snapshot: dict[str, Any]) -> None:
+        """Reset the persistent operational counter at the configured UTC boundary.
+
+        The operational counter lives in the persisted quota state so it
+        survives restart/redeploy and resets automatically when the clock
+        crosses the quota reset boundary (no manual action, no env change).
+        """
+        if not self._operational_daily_cap:
+            return
+        reset_at = snapshot.get("operational_reset_at") or snapshot.get("quota_reset_at")
+        if reset_at:
+            try:
+                if parse_iso_datetime(str(reset_at)) > datetime.now(timezone.utc):
+                    return
+            except ValueError:
+                pass
+        snapshot["operational_used"] = int(snapshot.get("operational_used") or 0)
+        snapshot["operational_cap"] = self._operational_daily_cap
+        snapshot["operational_reset_at"] = self._compute_quota_reset_at(datetime.now(timezone.utc))
+        if int(snapshot.get("operational_used") or 0) != 0:
+            snapshot["operational_used"] = 0
+        self._persist_quota(snapshot)
+
+    def effective_remaining(self) -> int | None:
+        """Effective usable daily quota = min(provider remaining, operational cap remaining)."""
+        snapshot = self._quota_snapshot()
+        self._operational_reset_if_needed(snapshot)
+        provider_remaining = snapshot.get("daily_remaining")
+        provider_limit = snapshot.get("daily_limit")
+        if provider_remaining is None and provider_limit is None and self._daily_budget:
+            provider_limit = self._daily_budget
+            provider_remaining = max(0, int(provider_limit) - int(snapshot.get("requests_used") or 0))
+        operational_remaining: int | None = None
+        if self._operational_daily_cap:
+            operational_remaining = max(0, int(self._operational_daily_cap) - int(snapshot.get("operational_used") or 0))
+        if provider_remaining is None:
+            return operational_remaining
+        if operational_remaining is None:
+            return int(provider_remaining)
+        return min(int(provider_remaining), operational_remaining)
+
+    def _effective_quota_limit(self) -> int | None:
+        snapshot = self._quota_snapshot()
+        provider_limit = snapshot.get("daily_limit")
+        if provider_limit is None and self._daily_budget:
+            provider_limit = self._daily_budget
+        if self._operational_daily_cap:
+            if provider_limit is None or int(self._operational_daily_cap) < int(provider_limit):
+                return int(self._operational_daily_cap)
+        return int(provider_limit) if provider_limit is not None else None
+
     def quota_snapshot(self) -> dict[str, Any]:
         """Return a read-only snapshot of persisted quota + governor state."""
         snapshot = dict(self._quota_snapshot())
+        self._operational_reset_if_needed(snapshot)
         snapshot["state"] = self.quota_state()
         return snapshot
 
     def quota_state(self) -> str:
         snapshot = self._quota_snapshot()
-        remaining = snapshot.get("daily_remaining")
-        limit = snapshot.get("daily_limit")
-        if remaining is None and limit is None and self._daily_budget:
-            limit = self._daily_budget
-            remaining = max(0, limit - int(snapshot.get("requests_used") or 0))
-        if remaining is None:
+        self._operational_reset_if_needed(snapshot)
+        effective_remaining = self.effective_remaining()
+        effective_limit = self._effective_quota_limit()
+        if effective_remaining is None:
             return QUOTA_UNKNOWN
         try:
-            remaining = int(remaining)
-            limit_value = int(limit) if limit else None
+            remaining = int(effective_remaining)
+            limit_value = int(effective_limit) if effective_limit else None
         except (TypeError, ValueError):
             return QUOTA_UNKNOWN
         if remaining <= 0:
-            reset_at = snapshot.get("quota_reset_at")
+            reset_at = snapshot.get("quota_reset_at") or snapshot.get("operational_reset_at")
             if reset_at:
                 try:
                     if parse_iso_datetime(str(reset_at)) <= datetime.now(timezone.utc):
@@ -701,8 +772,20 @@ class ProviderRequestBudget:
                 provider=provider,
             )
 
+        if not self._rate_allows():
+            self._bump("requests_blocked_rate")
+            return BudgetDecision(
+                allow=False,
+                action=ACTION_BLOCKED_RATE,
+                reason="burst rate protection reached (deferring until next scheduler tick)",
+                quota_state=quota_state,
+                request_key=key,
+                provider=provider,
+            )
+
         if self._inflight_begin(key):
             self._bump("requests_inflight_owner")
+            self._rate_record()
             return BudgetDecision(
                 allow=True,
                 action=ACTION_ALLOW,
@@ -782,13 +865,51 @@ class ProviderRequestBudget:
 
     def _record_request_result(self, *, success: bool) -> None:
         snapshot = self._quota_snapshot()
+        self._operational_reset_if_needed(snapshot)
         snapshot["last_request_at"] = utc_now_iso()
         if success:
             snapshot["last_success_at"] = utc_now_iso()
         snapshot["requests_used"] = int(snapshot.get("requests_used") or 0) + 1
         if success:
             snapshot["requests_success"] = int(snapshot.get("requests_success") or 0) + 1
+        if self._operational_daily_cap:
+            snapshot["operational_used"] = int(snapshot.get("operational_used") or 0) + 1
+            snapshot["operational_cap"] = self._operational_daily_cap
+            snapshot["operational_reset_at"] = snapshot.get("operational_reset_at") or self._compute_quota_reset_at(
+                datetime.now(timezone.utc)
+            )
         self._persist_quota(snapshot)
+
+    # ---------------------------------------------------------------- rate limiter
+    def _rate_allows(self) -> bool:
+        now = time.monotonic()
+        with self._rate_lock:
+            cutoff = now - RATE_MINUTE_WINDOW_SECONDS
+            while self._rate_times and self._rate_times[0] <= cutoff:
+                self._rate_times.popleft()
+            if len(self._rate_times) >= RATE_MINUTE_LIMIT:
+                return False
+            recent_second = sum(1 for t in self._rate_times if t > now - RATE_SECOND_WINDOW_SECONDS)
+            if recent_second >= RATE_SECOND_LIMIT:
+                return False
+            return True
+
+    def _rate_record(self) -> None:
+        with self._rate_lock:
+            self._rate_times.append(time.monotonic())
+
+    def rate_snapshot(self) -> dict[str, int]:
+        now = time.monotonic()
+        with self._rate_lock:
+            cutoff = now - RATE_MINUTE_WINDOW_SECONDS
+            recent_minute = sum(1 for t in self._rate_times if t > cutoff)
+            recent_second = sum(1 for t in self._rate_times if t > now - RATE_SECOND_WINDOW_SECONDS)
+        return {
+            "minute_limit": RATE_MINUTE_LIMIT,
+            "second_limit": RATE_SECOND_LIMIT,
+            "requests_last_minute": recent_minute,
+            "requests_last_second": recent_second,
+        }
 
     # ----------------------------------------------------------- observability
     def snapshot(self) -> dict[str, Any]:
@@ -796,6 +917,9 @@ class ProviderRequestBudget:
         quota = self.quota_snapshot()
         circuit = self.circuit_snapshot()
         cache = self.cache_stats()
+        operational_used = int(quota.get("operational_used") or 0)
+        operational_cap = self._operational_daily_cap
+        operational_remaining = max(0, int(operational_cap) - operational_used) if operational_cap else None
         return {
             "paid_provider_calls_allowed": "YES" if self._allow else "NO",
             "provider": PROVIDER_API_FOOTBALL,
@@ -817,15 +941,23 @@ class ProviderRequestBudget:
                 "requests_used": quota.get("requests_used"),
                 "configured_daily_budget": self._daily_budget,
                 "quota_reset_hour_utc": self._quota_reset_hour_utc,
+                "operational_cap": operational_cap,
+                "operational_used": operational_used,
+                "operational_remaining": operational_remaining,
+                "operational_reset_at": quota.get("operational_reset_at"),
+                "effective_remaining": self.effective_remaining(),
+                "effective_limit": self._effective_quota_limit(),
             },
             "circuit": circuit,
             "cache": cache,
+            "rate": self.rate_snapshot(),
             "metrics": {
                 "provider_http_requests": int(metrics.get("http_requests") or 0),
                 "requests_cached": int(metrics.get("requests_cached") or 0),
                 "requests_blocked_gate": int(metrics.get("requests_blocked_gate") or 0),
                 "requests_blocked_governor": int(metrics.get("requests_blocked_governor") or 0),
                 "requests_blocked_circuit": int(metrics.get("requests_blocked_circuit") or 0),
+                "requests_blocked_rate": int(metrics.get("requests_blocked_rate") or 0),
                 "requests_blocked_coalesced": int(metrics.get("requests_blocked_coalesced") or 0),
                 "requests_inflight_owner": int(metrics.get("requests_inflight_owner") or 0),
                 "requests_inflight_waiter": int(metrics.get("requests_inflight_waiter") or 0),
