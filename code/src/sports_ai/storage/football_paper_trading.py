@@ -106,6 +106,30 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _normalize_business_key_line(line: float | None) -> float | None:
+    if line is None:
+        return None
+    normalized = float(line)
+    return 0.0 if normalized == 0.0 else normalized
+
+
+def paper_trade_business_key_signature(
+    *,
+    fixture_id: str,
+    market: str,
+    selection: str,
+    line: float | None,
+) -> str:
+    return canonical_hash(
+        {
+            "fixture_id": fixture_id,
+            "market": market.lower(),
+            "selection": selection.upper(),
+            "line": _normalize_business_key_line(line),
+        }
+    )
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +155,15 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "freshness_state": "TEXT",
         },
     )
+    _ensure_columns(
+        conn,
+        table_name="paper_trade_entries",
+        columns={
+            "business_key_signature": "TEXT",
+        },
+    )
+    _backfill_paper_trade_business_keys(conn)
+    _ensure_paper_trade_business_key_uniqueness(conn)
 
 
 def _ensure_columns(conn: sqlite3.Connection, *, table_name: str, columns: dict[str, str]) -> None:
@@ -142,6 +175,61 @@ def _ensure_columns(conn: sqlite3.Connection, *, table_name: str, columns: dict[
         for column_name, column_type in columns.items():
             if column_name not in existing_columns:
                 conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _backfill_paper_trade_business_keys(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT rowid, fixture_id, market, selection, line
+        FROM paper_trade_entries
+        WHERE business_key_signature IS NULL
+        """
+    ).fetchall()
+    if not rows:
+        return
+    with conn:
+        for row in rows:
+            conn.execute(
+                """
+                UPDATE paper_trade_entries
+                SET business_key_signature = ?
+                WHERE rowid = ?
+                """,
+                (
+                    paper_trade_business_key_signature(
+                        fixture_id=str(row["fixture_id"]),
+                        market=str(row["market"]),
+                        selection=str(row["selection"]),
+                        line=None if row["line"] is None else float(row["line"]),
+                    ),
+                    int(row["rowid"]),
+                ),
+            )
+
+
+def _ensure_paper_trade_business_key_uniqueness(conn: sqlite3.Connection) -> None:
+    duplicate = conn.execute(
+        """
+        SELECT business_key_signature, COUNT(*) AS duplicate_count
+        FROM paper_trade_entries
+        WHERE business_key_signature IS NOT NULL
+        GROUP BY business_key_signature
+        HAVING COUNT(*) > 1
+        LIMIT 1
+        """
+    ).fetchone()
+    if duplicate is not None:
+        raise sqlite3.IntegrityError(
+            "PAPER_TRADE_BUSINESS_KEY_DUPLICATES_PRESENT: reconcile duplicate paper_trade_entries before enabling the business-key uniqueness migration"
+        )
+    with conn:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_trade_entries_business_key_signature
+            ON paper_trade_entries(business_key_signature)
+            WHERE business_key_signature IS NOT NULL
+            """
+        )
 
 
 @dataclass(frozen=True)
@@ -199,6 +287,7 @@ class PaperTradeEntry:
     closing_captured_at: str | None = None
     closing_snapshot_id: int | None = None
     paper_trade_id: str = field(init=False)
+    business_key_signature: str = field(init=False)
     entry_signature: str = field(init=False)
     created_at: str = field(default_factory=_utc_now)
 
@@ -207,17 +296,25 @@ class PaperTradeEntry:
             raise ValueError("model_fair_price must be > 1")
         if self.available_market_price <= 1.0:
             raise ValueError("available_market_price must be > 1")
+        business_key_signature = paper_trade_business_key_signature(
+            fixture_id=self.fixture_id,
+            market=self.market,
+            selection=self.selection,
+            line=self.line,
+        )
         signature_payload = {
-            "prediction_id": self.prediction_id,
             "fixture_id": self.fixture_id,
-            "market": self.market,
-            "selection": self.selection,
-            "line": self.line,
+            "market": self.market.lower(),
+            "selection": self.selection.upper(),
+            "line": _normalize_business_key_line(self.line),
+            "business_key_signature": business_key_signature,
+            "prediction_id": self.prediction_id,
             "decision_timestamp": self.decision_timestamp,
         }
         signature = canonical_hash(signature_payload)
+        object.__setattr__(self, "business_key_signature", business_key_signature)
         object.__setattr__(self, "entry_signature", signature)
-        object.__setattr__(self, "paper_trade_id", f"paper_{signature}")
+        object.__setattr__(self, "paper_trade_id", f"paper_{business_key_signature}")
 
 
 @dataclass(frozen=True)
@@ -344,8 +441,9 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
                 selection, line, model_probability, model_fair_price, available_market_price, edge,
                 minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
                 safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
-                closing_odds, closing_captured_at, closing_snapshot_id, entry_signature, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                closing_odds, closing_captured_at, closing_snapshot_id, business_key_signature,
+                entry_signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.paper_trade_id,
@@ -374,6 +472,7 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
                 entry.closing_odds,
                 entry.closing_captured_at,
                 entry.closing_snapshot_id,
+                entry.business_key_signature,
                 entry.entry_signature,
                 entry.created_at,
             ),
@@ -384,29 +483,28 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
 def find_existing_paper_trade_entry(
     conn: sqlite3.Connection,
     *,
-    prediction_id: str,
+    prediction_id: str | None,
     fixture_id: str,
     market: str,
     selection: str,
     line: float | None,
 ) -> dict[str, Any] | None:
     ensure_schema(conn)
+    business_key_signature = paper_trade_business_key_signature(
+        fixture_id=fixture_id,
+        market=market,
+        selection=selection,
+        line=line,
+    )
     row = conn.execute(
         """
         SELECT *
         FROM paper_trade_entries
-        WHERE prediction_id = ?
-          AND fixture_id = ?
-          AND market = ?
-          AND selection = ?
-          AND (
-              (line IS NULL AND ? IS NULL)
-              OR line = ?
-          )
-        ORDER BY created_at DESC, paper_trade_id DESC
+        WHERE business_key_signature = ?
+        ORDER BY created_at, paper_trade_id
         LIMIT 1
         """,
-        (prediction_id, fixture_id, market, selection, line, line),
+        (business_key_signature,),
     ).fetchone()
     return None if row is None else dict(row)
 

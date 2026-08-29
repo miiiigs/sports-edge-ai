@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -2394,7 +2395,21 @@ class DashboardServices:
                 entry_captured_at=str(row.get("best_available_source_timestamp") or row["market_as_of"]),
                 entry_snapshot_id=row.get("entry_snapshot_id"),
             )
-            football_paper_trading.record_paper_trade_entry(conn, entry)
+            try:
+                football_paper_trading.record_paper_trade_entry(conn, entry)
+            except sqlite3.IntegrityError:
+                existing = football_paper_trading.find_existing_paper_trade_entry(
+                    conn,
+                    prediction_id=str(prediction["prediction_id"]),
+                    fixture_id=str(prediction["fixture_id"]),
+                    market=str(row["market_family"]),
+                    selection=str(row["selection"]),
+                    line=None if row.get("line") is None else float(row["line"]),
+                )
+                if existing is None:
+                    raise
+                row["paper_trade_id"] = existing["paper_trade_id"]
+                continue
             row["paper_trade_id"] = entry.paper_trade_id
             created += 1
         return created

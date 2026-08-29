@@ -8,7 +8,9 @@ from sports_ai.storage.football_paper_trading import (
     PaperTradeEntry,
     build_trade_update_payload,
     connect,
+    ensure_schema,
     fetch_market_snapshots,
+    find_existing_paper_trade_entry,
     fetch_paper_trade_rows,
     paper_trading_performance,
     paper_trading_status,
@@ -127,6 +129,196 @@ def test_paper_trading_store_prevents_duplicate_entry_signatures(tmp_path):
         with pytest.raises(sqlite3.IntegrityError):
             record_paper_trade_entry(conn, entry)
 
+
+def test_paper_trading_store_blocks_duplicate_business_key_recaptures(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    original_entry = PaperTradeEntry(
+        prediction_id="pred_original",
+        fixture_id="evt_fixture_dup",
+        model_snapshot_id="snapshot_original",
+        model_version="football_day11_manager_core_v1",
+        market="corner_total",
+        selection="OVER",
+        line=10.5,
+        model_probability=0.58,
+        model_fair_price=1.72,
+        available_market_price=2.1,
+        decision="PAPER_CANDIDATE",
+        decision_timestamp="2026-08-20T10:00:00+00:00",
+        kickoff="2026-08-20T12:00:00+00:00",
+        safeguard_state="READY",
+        entry_eligibility="ELIGIBLE",
+        bookmaker="Book A",
+        provider="mock-provider",
+        entry_odds=2.1,
+        entry_captured_at="2026-08-20T10:00:00+00:00",
+    )
+    recapture_entry = PaperTradeEntry(
+        prediction_id="pred_recapture",
+        fixture_id="evt_fixture_dup",
+        model_snapshot_id="snapshot_recapture",
+        model_version="football_day11_manager_core_v2",
+        market="corner_total",
+        selection="OVER",
+        line=10.5,
+        model_probability=0.61,
+        model_fair_price=1.65,
+        available_market_price=2.25,
+        decision="PAPER_CANDIDATE",
+        decision_timestamp="2026-08-20T11:00:00+00:00",
+        kickoff="2026-08-20T12:00:00+00:00",
+        safeguard_state="READY",
+        entry_eligibility="ELIGIBLE",
+        bookmaker="Book B",
+        provider="mock-provider",
+        entry_odds=2.25,
+        entry_captured_at="2026-08-20T11:00:00+00:00",
+    )
+
+    with connect(db_path) as conn:
+        record_paper_trade_entry(conn, original_entry)
+
+        with pytest.raises(sqlite3.IntegrityError):
+            record_paper_trade_entry(conn, recapture_entry)
+
+        found = find_existing_paper_trade_entry(
+            conn,
+            prediction_id="pred_any_future_version",
+            fixture_id="evt_fixture_dup",
+            market="corner_total",
+            selection="OVER",
+            line=10.5,
+        )
+        rows = fetch_paper_trade_rows(conn)
+
+    assert found is not None
+    assert found["paper_trade_id"] == original_entry.paper_trade_id
+    assert found["prediction_id"] == "pred_original"
+    assert found["decision_timestamp"] == "2026-08-20T10:00:00+00:00"
+    assert len(rows) == 1
+    assert rows[0]["paper_trade_id"] == original_entry.paper_trade_id
+    assert rows[0]["entry_odds"] == pytest.approx(2.1)
+    assert rows[0]["bookmaker"] == "Book A"
+
+
+def test_ensure_schema_requires_reconciliation_when_legacy_business_key_duplicates_exist(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE paper_trade_entries (
+                paper_trade_id TEXT PRIMARY KEY,
+                prediction_id TEXT NOT NULL,
+                fixture_id TEXT NOT NULL,
+                model_snapshot_id TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                market TEXT NOT NULL,
+                selection TEXT NOT NULL,
+                line REAL,
+                model_probability REAL,
+                model_fair_price REAL NOT NULL,
+                available_market_price REAL NOT NULL,
+                edge REAL,
+                minimum_acceptable_price REAL,
+                decision TEXT NOT NULL,
+                decision_timestamp TEXT NOT NULL,
+                kickoff TEXT NOT NULL,
+                bookmaker TEXT,
+                provider TEXT,
+                safeguard_state TEXT NOT NULL,
+                entry_eligibility TEXT NOT NULL,
+                entry_odds REAL,
+                entry_captured_at TEXT,
+                entry_snapshot_id INTEGER,
+                closing_odds REAL,
+                closing_captured_at TEXT,
+                closing_snapshot_id INTEGER,
+                entry_signature TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE paper_trade_updates (
+                paper_trade_update_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                paper_trade_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                trade_state TEXT NOT NULL,
+                gross_return REAL,
+                net_pnl REAL,
+                notes TEXT,
+                payload_json TEXT NOT NULL,
+                FOREIGN KEY(paper_trade_id) REFERENCES paper_trade_entries(paper_trade_id)
+            )
+            """
+        )
+        row_values = (
+            "evt_fixture_dup",
+            "snapshot_1",
+            "football_day11_manager_core_v1",
+            "1x2",
+            "HOME",
+            None,
+            0.55,
+            1.82,
+            2.1,
+            None,
+            None,
+            "PAPER_CANDIDATE",
+            "2026-08-20T10:00:00+00:00",
+            "2026-08-20T12:00:00+00:00",
+            "Book A",
+            "mock-provider",
+            "READY",
+            "ELIGIBLE",
+            2.1,
+            "2026-08-20T10:00:00+00:00",
+            None,
+            None,
+            None,
+            None,
+        )
+        conn.execute(
+            """
+            INSERT INTO paper_trade_entries (
+                paper_trade_id, prediction_id, fixture_id, model_snapshot_id, model_version, market,
+                selection, line, model_probability, model_fair_price, available_market_price, edge,
+                minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
+                safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
+                closing_odds, closing_captured_at, closing_snapshot_id, entry_signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "paper_legacy_1",
+                "pred_legacy_1",
+                *row_values,
+                "legacy_sig_1",
+                "2026-08-20T10:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO paper_trade_entries (
+                paper_trade_id, prediction_id, fixture_id, model_snapshot_id, model_version, market,
+                selection, line, model_probability, model_fair_price, available_market_price, edge,
+                minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
+                safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
+                closing_odds, closing_captured_at, closing_snapshot_id, entry_signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "paper_legacy_2",
+                "pred_legacy_2",
+                *row_values,
+                "legacy_sig_2",
+                "2026-08-20T11:00:00+00:00",
+            ),
+        )
+
+    with connect(db_path) as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="PAPER_TRADE_BUSINESS_KEY_DUPLICATES_PRESENT"):
+            ensure_schema(conn)
 
 @pytest.mark.parametrize(
     ("market", "selection", "line", "home_goals", "away_goals", "actual_total_corners", "expected_state"),

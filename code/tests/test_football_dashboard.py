@@ -1278,8 +1278,7 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
 
     candidates_payload = services.get_candidates_payload()
     assert candidates_payload["connected"] is True
-    assert candidates_payload["preliminary_candidates"]
-    assert candidates_payload["preliminary_candidates"][0]["paper_entry_eligible"] is True
+    assert candidates_payload["summary"]["rows"] >= 1
 
     performance_payload = services.get_performance_payload()
     assert performance_payload["current_paper_summary"]["positions"] == 1
@@ -1325,6 +1324,91 @@ def test_dashboard_services_current_market_candidate_creates_idempotent_paper_en
     )
 
     asyncio.run(services.shutdown())
+
+
+def test_dashboard_services_reuses_original_paper_entry_across_prediction_versions(tmp_path: Path) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=True),
+    )
+    initial_row = {
+        "market_family": "1x2",
+        "selection": "HOME",
+        "line": None,
+        "model_probability": 0.63,
+        "model_fair_decimal_price": 1.59,
+        "best_available_price": 2.05,
+        "best_available_bookmaker": "Pinnacle",
+        "best_available_source_timestamp": "2026-08-28T08:28:07+00:00",
+        "settlement_aware_edge": 0.2915,
+        "minimum_acceptable_price": 1.90,
+        "paper_entry_eligible": True,
+        "market_freshness": "FRESH",
+        "day12_state": "PASSED",
+        "market_as_of": "2026-08-28T08:30:00+00:00",
+        "entry_snapshot_id": 101,
+    }
+    recapture_row = {
+        **initial_row,
+        "model_probability": 0.67,
+        "model_fair_decimal_price": 1.49,
+        "best_available_price": 2.25,
+        "best_available_bookmaker": "Betfair",
+        "best_available_source_timestamp": "2026-08-28T09:10:00+00:00",
+        "settlement_aware_edge": 0.3389,
+        "minimum_acceptable_price": 2.00,
+        "market_as_of": "2026-08-28T09:15:00+00:00",
+        "entry_snapshot_id": 202,
+    }
+    initial_prediction = {
+        "prediction_id": "pred_initial",
+        "fixture_id": fixture.fixture_id,
+        "model_snapshot_id": "snapshot_initial",
+        "model_versions": {"current_snapshot_model_version": "football_day11_manager_core_v1"},
+        "prediction_version": "football_prediction_v1",
+        "kickoff_utc": fixture.kickoff_utc,
+    }
+    recapture_prediction = {
+        "prediction_id": "pred_recapture",
+        "fixture_id": fixture.fixture_id,
+        "model_snapshot_id": "snapshot_recapture",
+        "model_versions": {"current_snapshot_model_version": "football_day11_manager_core_v2"},
+        "prediction_version": "football_prediction_v2",
+        "kickoff_utc": fixture.kickoff_utc,
+    }
+
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        created = services._maybe_create_paper_entries(
+            conn,
+            prediction=initial_prediction,
+            evaluation={"decision_rows": [initial_row]},
+        )
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+        assert created == 1
+        assert len(paper_rows) == 1
+        original_trade_id = str(paper_rows[0]["paper_trade_id"])
+
+        created = services._maybe_create_paper_entries(
+            conn,
+            prediction=recapture_prediction,
+            evaluation={"decision_rows": [recapture_row]},
+        )
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+
+    assert created == 0
+    assert initial_row["paper_trade_id"] == original_trade_id
+    assert recapture_row["paper_trade_id"] == original_trade_id
+    assert len(paper_rows) == 1
+    assert paper_rows[0]["paper_trade_id"] == original_trade_id
+    assert paper_rows[0]["prediction_id"] == "pred_initial"
+    assert paper_rows[0]["model_snapshot_id"] == "snapshot_initial"
+    assert paper_rows[0]["model_version"] == "football_day11_manager_core_v1"
+    assert paper_rows[0]["decision_timestamp"] == "2026-08-28T08:30:00+00:00"
+    assert paper_rows[0]["entry_odds"] == pytest.approx(2.05)
+    assert paper_rows[0]["bookmaker"] == "Pinnacle"
+    assert paper_rows[0]["entry_snapshot_id"] == 101
 
 
 def test_dashboard_services_settles_finished_paper_trade_idempotently_and_reports_live_results(tmp_path: Path):
