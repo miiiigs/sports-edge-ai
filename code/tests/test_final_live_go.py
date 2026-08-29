@@ -28,10 +28,10 @@ def _budget(tmp_path: Path, **kwargs) -> pb.ProviderRequestBudget:
 def _seed_provider_quota(budget: pb.ProviderRequestBudget, *, daily_limit: int, daily_remaining: int) -> None:
     budget._record_quota_from_headers(
         {
-            "x-ratelimit-limit": str(daily_limit),
-            "x-ratelimit-remaining": str(daily_remaining),
-            "x-ratelimit-requests-limit": "300",
-            "x-ratelimit-requests-remaining": "300",
+            "x-ratelimit-requests-limit": str(daily_limit),
+            "x-ratelimit-requests-remaining": str(daily_remaining),
+            "x-ratelimit-limit": "300",
+            "x-ratelimit-remaining": "300",
         }
     )
 
@@ -250,8 +250,8 @@ def test_last_20_is_settled_only(tmp_path):
 def test_quota_waiting_state_truthful(tmp_path):
     services = _services(tmp_path, allow=True)
     budget = services._provider_budget
-    # Force EXHAUSTED via provider-reported remaining = 0 (no operational cap needed).
-    budget._record_quota_from_headers({"x-ratelimit-limit": "7500", "x-ratelimit-remaining": "0"})
+    # Force EXHAUSTED via provider-reported DAILY remaining = 0.
+    budget._record_quota_from_headers({"x-ratelimit-requests-limit": "7500", "x-ratelimit-requests-remaining": "0"})
     payload = services.get_betting_desk_payload()
     assert payload["quota_waiting_reset"] is True
     assert "waiting for the provider quota reset" in payload["reason"]

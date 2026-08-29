@@ -98,12 +98,15 @@ QUOTA_EXHAUSTED_FALLBACK_BLOCK_SECONDS = 24 * 60 * 60
 # How long an in-flight coalesced waiter waits before giving up.
 INFLIGHT_WAIT_TIMEOUT_SECONDS = 30.0
 
-# Candidate API-Football quota/rate-limit response headers (case-insensitive).
+# API-Football rate-limit response headers (verified against the live PRO
+# account on 2026-08-29): x-ratelimit-requests-limit/-remaining are the DAILY
+# plan quota (7500 for PRO), while x-ratelimit-limit/-remaining are the
+# per-minute burst quota (300 for PRO).
 _QUOTA_HEADER_ALIASES = {
-    "daily_limit": ("x-ratelimit-limit", "x-ratelimit-day-limit"),
-    "daily_remaining": ("x-ratelimit-remaining", "x-ratelimit-day-remaining"),
-    "minute_limit": ("x-ratelimit-requests-limit", "x-ratelimit-minute-limit"),
-    "minute_remaining": ("x-ratelimit-requests-remaining", "x-ratelimit-minute-remaining"),
+    "daily_limit": ("x-ratelimit-requests-limit", "x-ratelimit-day-limit"),
+    "daily_remaining": ("x-ratelimit-requests-remaining", "x-ratelimit-day-remaining"),
+    "minute_limit": ("x-ratelimit-limit", "x-ratelimit-minute-limit"),
+    "minute_remaining": ("x-ratelimit-remaining", "x-ratelimit-minute-remaining"),
 }
 
 
