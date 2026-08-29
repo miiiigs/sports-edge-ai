@@ -259,12 +259,12 @@ def attach_edge_desk_shadow_bundle(
     fixture: NormalizedFixture,
     snapshot: CurrentFootballModelSnapshot | None,
 ) -> dict[str, Any]:
+    agents = [_route_b_shadow_agent(prediction)]
+    if snapshot is not None and snapshot.route_a_artifact is not None:
+        agents.append(_route_a_shadow_agent(fixture=fixture, prediction=prediction, snapshot=snapshot))
     payload = dict(prediction)
     payload["edge_desk_shadow_bundle"] = {
-        "agents": [
-            _route_b_shadow_agent(payload),
-            _route_a_shadow_agent(fixture=fixture, prediction=payload, snapshot=snapshot),
-        ]
+        "agents": agents
     }
     return payload
 

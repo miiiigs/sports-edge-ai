@@ -4,10 +4,12 @@ import copy
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from sports_ai.agents.football import route_a_classifier
+from sports_ai.dashboard.prediction_service import attach_edge_desk_shadow_bundle
 from sports_ai.storage import football_edge_desk
 
 
@@ -1216,6 +1218,32 @@ def test_route_a_blocked_row_is_persisted_without_false_consensus_pass(tmp_path)
     assert consensus_rows[0]["reason"] == "AGENT_BLOCKED"
     assert decision_rows[0]["decision_status"] == "NO_BET"
     assert decision_rows[0]["reason_code"] == "AGENT_BLOCKED"
+
+
+def test_missing_route_a_artifact_keeps_shadow_writes_route_b_only(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = attach_edge_desk_shadow_bundle(
+        _ready_prediction(
+            market_rows=[_market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72)],
+            prediction_version="route_b_only_missing_route_a_artifact",
+        ),
+        fixture=SimpleNamespace(**fixture),
+        snapshot=SimpleNamespace(route_a_artifact=None, model_as_of="2026-08-26T10:00:00+00:00"),
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        prediction_rows = football_edge_desk.fetch_agent_predictions(conn, fixture_id=str(fixture["fixture_id"]))
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=str(fixture["fixture_id"]))
+        decision_rows = football_edge_desk.fetch_decision_history(conn, fixture_id=str(fixture["fixture_id"]))
+
+    assert [row["agent_id"] for row in prediction_rows] == [football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID]
+    assert len(consensus_rows) == 1
+    assert consensus_rows[0]["status"] == "INSUFFICIENT_AGENTS"
+    assert len(decision_rows) == 1
+    assert decision_rows[0]["reason_code"] == "CONSENSUS_INSUFFICIENT_AGENTS"
 
 
 def test_one_agent_markets_remain_insufficient_after_route_a_activation(tmp_path) -> None:
