@@ -160,6 +160,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         table_name="paper_trade_entries",
         columns={
             "business_key_signature": "TEXT",
+            "canonical_business_key_signature": "TEXT",
         },
     )
     _backfill_paper_trade_business_keys(conn)
@@ -289,6 +290,7 @@ class PaperTradeEntry:
     paper_trade_id: str = field(init=False)
     business_key_signature: str = field(init=False)
     entry_signature: str = field(init=False)
+    canonical_business_key_signature: str | None = None
     created_at: str = field(default_factory=_utc_now)
 
     def __post_init__(self) -> None:
@@ -442,8 +444,8 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
                 minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
                 safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
                 closing_odds, closing_captured_at, closing_snapshot_id, business_key_signature,
-                entry_signature, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                canonical_business_key_signature, entry_signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.paper_trade_id,
@@ -473,6 +475,7 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
                 entry.closing_captured_at,
                 entry.closing_snapshot_id,
                 entry.business_key_signature,
+                entry.canonical_business_key_signature,
                 entry.entry_signature,
                 entry.created_at,
             ),

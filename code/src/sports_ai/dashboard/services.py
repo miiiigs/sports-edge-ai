@@ -20,7 +20,7 @@ from ..market_data.api_football import ApiFootballOddsProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
 from ..market_data.the_odds_api import TheOddsApiProvider
-from ..storage import football_edge_desk, football_paper_trading
+from ..storage import football_canonical_fixture, football_edge_desk, football_paper_trading
 from . import storage
 from .current_market import build_fixture_market_evaluation
 from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
@@ -1078,10 +1078,159 @@ class DashboardServices:
         with path.open("r", encoding="utf-8", newline="") as handle:
             return list(csv.DictReader(handle))
 
-    def _paper_positions(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def _raw_paper_positions(self) -> list[dict[str, Any]]:
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            rows = football_paper_trading.fetch_paper_trade_rows(conn)
-        return rows, football_paper_trading.paper_trading_status(rows)
+            return football_paper_trading.fetch_paper_trade_rows(conn)
+
+    def _paper_positions(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        rows = self._raw_paper_positions()
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            excluded = football_canonical_fixture.fetch_excluded_paper_trade_ids(conn)
+        counted_rows = [
+            row
+            for row in rows
+            if str(row.get("paper_trade_id") or "") not in excluded
+        ]
+        status = football_paper_trading.paper_trading_status(counted_rows)
+        status["raw_paper_rows"] = len(rows)
+        status["reconciled_excluded_positions"] = len(excluded)
+        status["reconciliation_applied"] = len(excluded) > 0
+        return counted_rows, status
+
+    def _paper_fixture_identity_map(self) -> dict[str, dict[str, Any]]:
+        """Map each paper fixture_id to its persisted fixture identity."""
+        rows = self._raw_paper_positions()
+        fixture_ids = sorted({str(row["fixture_id"]) for row in rows if row.get("fixture_id") not in {None, ""}})
+        identity: dict[str, dict[str, Any]] = {}
+        if fixture_ids:
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                for fixture_id in fixture_ids:
+                    fixture = storage.fetch_fixture(conn, fixture_id)
+                    if fixture is not None:
+                        identity[fixture_id] = {
+                            "fixture_id": fixture_id,
+                            "competition_id": fixture.get("competition_id"),
+                            "home_team_name": fixture.get("home_team_name"),
+                            "away_team_name": fixture.get("away_team_name"),
+                            "kickoff_utc": fixture.get("kickoff_utc"),
+                            "season": fixture.get("season"),
+                        }
+        missing = [fixture_id for fixture_id in fixture_ids if fixture_id not in identity]
+        if missing:
+            with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+                for fixture_id in missing:
+                    row = conn.execute(
+                        "SELECT competition_id, home_team_name, away_team_name, kickoff_utc "
+                        "FROM market_snapshots WHERE fixture_id = ? LIMIT 1",
+                        (fixture_id,),
+                    ).fetchone()
+                    if row is not None:
+                        identity[fixture_id] = {
+                            "fixture_id": fixture_id,
+                            "competition_id": row["competition_id"],
+                            "home_team_name": row["home_team_name"],
+                            "away_team_name": row["away_team_name"],
+                            "kickoff_utc": row["kickoff_utc"],
+                            "season": None,
+                        }
+        return identity
+
+    def get_reconciliation_report(self) -> dict[str, Any]:
+        """Deterministic DRY-RUN report over the persisted paper ledger (non-mutating)."""
+        rows = self._raw_paper_positions()
+        identity = self._paper_fixture_identity_map()
+        plan = football_canonical_fixture.build_reconciliation_plan(rows, identity)
+        before = football_canonical_fixture.summarize_performance(rows)
+        after = football_canonical_fixture.summarize_performance(plan.counted_rows(rows))
+
+        by_match: dict[str, dict[str, Any]] = {}
+        for group in plan.duplicate_groups:
+            match = by_match.setdefault(
+                group.canonical_fixture_id,
+                {
+                    "canonical_fixture_id": group.canonical_fixture_id,
+                    "match": group.canonical_row.get("fixture_label")
+                    or "{} vs {}".format(
+                        (identity.get(str(group.canonical_row.get("fixture_id") or "")) or {}).get("home_team_name") or "?",
+                        (identity.get(str(group.canonical_row.get("fixture_id") or "")) or {}).get("away_team_name") or "?",
+                    ),
+                    "kickoff_utc": group.canonical_row.get("kickoff"),
+                    "competition_id": (identity.get(str(group.canonical_row.get("fixture_id") or "")) or {}).get("competition_id"),
+                    "fixture_ids": set(),
+                    "positions_by_fixture": {},
+                    "duplicate_business_positions": 0,
+                    "settlement_consistent": True,
+                    "settlement_conflict": False,
+                },
+            )
+            match["fixture_ids"].add(str(group.canonical_row.get("fixture_id") or ""))
+            match["duplicate_business_positions"] += 1
+            for duplicate in group.duplicate_rows:
+                match["fixture_ids"].add(str(duplicate.get("fixture_id") or ""))
+            if group.canonical_row.get("fixture_id"):
+                match["positions_by_fixture"][str(group.canonical_row["fixture_id"])] = (
+                    match["positions_by_fixture"].get(str(group.canonical_row["fixture_id"]), 0) + 1
+                )
+            for duplicate in group.duplicate_rows:
+                if duplicate.get("fixture_id"):
+                    match["positions_by_fixture"][str(duplicate["fixture_id"])] = (
+                        match["positions_by_fixture"].get(str(duplicate["fixture_id"]), 0) + 1
+                    )
+            conflict = next(
+                (
+                    c
+                    for c in plan.conflicts
+                    if c.get("canonical_fixture_id") == group.canonical_fixture_id
+                    and c.get("market") == group.market
+                    and c.get("selection") == group.selection
+                ),
+                None,
+            )
+            if conflict is not None:
+                match["settlement_consistent"] = False
+                match["settlement_conflict"] = True
+
+        for match in by_match.values():
+            match["fixture_ids"] = sorted(match["fixture_ids"])
+
+        return {
+            "reconciliation_version": football_canonical_fixture.CANONICAL_RECONCILIATION_VERSION,
+            "kickoff_tolerance_seconds": football_canonical_fixture.DEFAULT_KICKOFF_TOLERANCE_SECONDS,
+            "total_rows": plan.total_rows,
+            "duplicate_groups": len(plan.duplicate_groups),
+            "duplicate_representations": plan.duplicate_representation_count,
+            "ambiguous_fixture_ids": list(plan.ambiguous_fixture_ids),
+            "unresolved_fixture_ids": list(plan.unresolved_fixture_ids),
+            "settlement_conflicts": list(plan.conflicts),
+            "settlement_inconsistencies": list(plan.inconsistencies),
+            "canonical_fixture_count": plan.canonical_fixture_count,
+            "cross_provider_fixture_groups": plan.cross_provider_fixture_groups,
+            "before": before,
+            "after_projected": after,
+            "by_match": by_match,
+        }
+
+    def apply_paper_reconciliation(self) -> dict[str, Any]:
+        """Validate invariants and apply the additive reconciliation once.
+
+        NOT called during normal operation; intended for the reviewed apply
+        step after the dry-run projection has been confirmed.
+        """
+        rows = self._raw_paper_positions()
+        identity = self._paper_fixture_identity_map()
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            result = football_canonical_fixture.apply_reconciliation(conn, identity)
+        return {
+            "applied": result.applied,
+            "records_written": result.records_written,
+            "existing_excluded": result.existing_excluded,
+            "violations": list(result.violations),
+            "total_rows": len(rows),
+            "duplicate_representations": result.plan.duplicate_representation_count,
+            "after_projected": football_canonical_fixture.summarize_performance(
+                result.plan.counted_rows(rows)
+            ),
+        }
 
     def _market_evaluation_map(self) -> dict[str, Any]:
         return dict(self._market_runtime_state.get("evaluations") or {})
@@ -2371,6 +2520,70 @@ class DashboardServices:
             return None
         return sorted(candidates, key=lambda row: (row["captured_at"], int(row["snapshot_id"])))[-1]
 
+    def _canonical_fixture_for_prediction(self, conn: Any, prediction: dict[str, Any]) -> str | None:
+        """Resolve (and register) the canonical fixture for a prediction."""
+        fixture_id = str(prediction.get("fixture_id") or "")
+        if not fixture_id:
+            return None
+        provider, provider_fixture_id = football_canonical_fixture.split_provider_fixture_id(fixture_id)
+        if not (provider and provider_fixture_id):
+            return None
+        if not (prediction.get("competition_id") and prediction.get("home_team_name") and prediction.get("away_team_name") and prediction.get("kickoff_utc")):
+            return None
+        try:
+            canonical_fixture_id, _ = football_canonical_fixture.resolve_or_create_canonical_fixture(
+                conn,
+                provider=provider,
+                provider_fixture_id=provider_fixture_id,
+                competition_id=str(prediction.get("competition_id")),
+                home_team_name=str(prediction.get("home_team_name")),
+                away_team_name=str(prediction.get("away_team_name")),
+                kickoff_utc=str(prediction.get("kickoff_utc")),
+                season=prediction.get("season"),
+            )
+            return canonical_fixture_id
+        except football_canonical_fixture.CanonicalFixtureError:
+            return None
+
+    def _canonical_business_key_for_prediction(
+        self,
+        conn: Any,
+        *,
+        prediction: dict[str, Any],
+        market: str,
+        selection: str,
+        line: float | None,
+    ) -> str | None:
+        canonical_fixture_id = self._canonical_fixture_for_prediction(conn, prediction)
+        if canonical_fixture_id is None:
+            return None
+        return football_canonical_fixture.canonical_paper_business_key_signature(
+            canonical_fixture_id=canonical_fixture_id,
+            market=market,
+            selection=selection,
+            line=line,
+        )
+
+    def _find_canonical_existing_paper_entry(
+        self,
+        conn: Any,
+        *,
+        prediction: dict[str, Any],
+        market: str,
+        selection: str,
+        line: float | None,
+    ) -> dict[str, Any] | None:
+        canonical_business_key = self._canonical_business_key_for_prediction(
+            conn,
+            prediction=prediction,
+            market=market,
+            selection=selection,
+            line=line,
+        )
+        if canonical_business_key is None:
+            return None
+        return football_canonical_fixture.find_counted_paper_trade_by_canonical_key(conn, canonical_business_key)
+
     def _maybe_create_paper_entries(
         self,
         conn: Any,
@@ -2395,6 +2608,23 @@ class DashboardServices:
             if existing is not None:
                 row["paper_trade_id"] = existing["paper_trade_id"]
                 continue
+            canonical_existing = self._find_canonical_existing_paper_entry(
+                conn,
+                prediction=prediction,
+                market=str(row["market_family"]),
+                selection=str(row["selection"]),
+                line=None if row.get("line") is None else float(row["line"]),
+            )
+            if canonical_existing is not None:
+                row["paper_trade_id"] = canonical_existing["paper_trade_id"]
+                continue
+            canonical_business_key_signature = self._canonical_business_key_for_prediction(
+                conn,
+                prediction=prediction,
+                market=str(row["market_family"]),
+                selection=str(row["selection"]),
+                line=None if row.get("line") is None else float(row["line"]),
+            )
             entry = football_paper_trading.PaperTradeEntry(
                 prediction_id=str(prediction["prediction_id"]),
                 fixture_id=str(prediction["fixture_id"]),
@@ -2423,10 +2653,21 @@ class DashboardServices:
                 entry_odds=float(row["best_available_price"]),
                 entry_captured_at=str(row.get("best_available_source_timestamp") or row["market_as_of"]),
                 entry_snapshot_id=row.get("entry_snapshot_id"),
+                canonical_business_key_signature=canonical_business_key_signature,
             )
             try:
                 football_paper_trading.record_paper_trade_entry(conn, entry)
             except sqlite3.IntegrityError:
+                canonical_existing = self._find_canonical_existing_paper_entry(
+                    conn,
+                    prediction=prediction,
+                    market=str(row["market_family"]),
+                    selection=str(row["selection"]),
+                    line=None if row.get("line") is None else float(row["line"]),
+                )
+                if canonical_existing is not None:
+                    row["paper_trade_id"] = canonical_existing["paper_trade_id"]
+                    continue
                 existing = football_paper_trading.find_existing_paper_trade_entry(
                     conn,
                     prediction_id=str(prediction["prediction_id"]),

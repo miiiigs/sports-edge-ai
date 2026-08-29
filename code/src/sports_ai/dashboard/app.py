@@ -241,6 +241,11 @@ def create_app(
     async def api_system_status():
         return JSONResponse(resolved_services.get_system_status())
 
+    @app.get("/api/reconciliation/report")
+    async def api_reconciliation_report():
+        """Deterministic DRY-RUN report (read-only, non-mutating)."""
+        return JSONResponse(resolved_services.get_reconciliation_report())
+
     @app.get("/health")
     async def api_health():
         return JSONResponse(resolved_services.get_health_payload())
