@@ -1246,6 +1246,31 @@ def test_missing_route_a_artifact_keeps_shadow_writes_route_b_only(tmp_path) -> 
     assert decision_rows[0]["reason_code"] == "CONSENSUS_INSUFFICIENT_AGENTS"
 
 
+def test_stale_route_a_shadow_rows_are_ignored_when_route_a_foundation_is_absent(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    prediction = _shadow_bundle_prediction(
+        route_b_market_rows=[_market_row(market_family="btts", selection="YES", probability=0.58, fair_price=1.72)],
+        route_a_market_rows=None,
+        route_a_status="BLOCKED",
+        route_a_blockers=["MODEL_ARTIFACT_MISSING"],
+        prediction_version="stale_route_a_shadow_bundle_without_foundation",
+    )
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        prediction_rows = football_edge_desk.fetch_agent_predictions(conn, fixture_id=str(fixture["fixture_id"]))
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=str(fixture["fixture_id"]))
+        decision_rows = football_edge_desk.fetch_decision_history(conn, fixture_id=str(fixture["fixture_id"]))
+
+    assert [row["agent_id"] for row in prediction_rows] == [football_edge_desk.ROUTE_B_COMPOSITE_AGENT_ID]
+    assert len(consensus_rows) == 1
+    assert consensus_rows[0]["status"] == "INSUFFICIENT_AGENTS"
+    assert len(decision_rows) == 1
+    assert decision_rows[0]["reason_code"] == "CONSENSUS_INSUFFICIENT_AGENTS"
+
+
 def test_one_agent_markets_remain_insufficient_after_route_a_activation(tmp_path) -> None:
     db_path = tmp_path / "edge_desk.sqlite"
     fixture = _fixture()

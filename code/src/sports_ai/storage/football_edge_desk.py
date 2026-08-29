@@ -915,7 +915,17 @@ def record_shadow_prediction_bundle(
     prediction: dict[str, Any],
 ) -> dict[str, Any]:
     ensure_schema(conn)
-    prediction_rows = _build_agent_prediction_rows(fixture=fixture, prediction=prediction)
+    prediction_rows = [
+        row
+        for row in _build_agent_prediction_rows(fixture=fixture, prediction=prediction)
+        if _agent_foundation_exists(
+            conn,
+            agent_id=str(row["agent_id"]),
+            agent_version_tag=str(row["agent_version_tag"]),
+        )
+    ]
+    if not prediction_rows:
+        raise RuntimeError("edge desk shadow bundle produced no registered agent rows")
     stored_predictions = [_insert_prediction_row(conn, row) for row in prediction_rows]
     consensus_rows = []
     decision_rows = []
@@ -1203,6 +1213,25 @@ def _prediction_key(payload: dict[str, Any]) -> str:
             "source_payload_hash": payload["source_payload_hash"],
         }
     )
+
+
+def _agent_foundation_exists(
+    conn: sqlite3.Connection,
+    *,
+    agent_id: str,
+    agent_version_tag: str,
+) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM edge_desk_agent_registry
+        WHERE agent_id = ?
+          AND version_tag = ?
+        LIMIT 1
+        """,
+        (agent_id, agent_version_tag),
+    ).fetchone()
+    return row is not None
 
 
 def _group_predictions_by_market(prediction_rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
