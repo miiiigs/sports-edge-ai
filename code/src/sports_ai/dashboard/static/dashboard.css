@@ -1749,6 +1749,13 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+.desk-chip-warning {
+  border-color: #b7791f;
+}
+.desk-chip-warning b {
+  color: #f0b429;
+}
+
 .desk-kpi-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

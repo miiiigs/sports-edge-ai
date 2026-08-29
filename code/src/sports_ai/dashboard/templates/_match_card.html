@@ -74,7 +74,7 @@
       {% if fixture.market_signal %}
         <div class="signal-grid">
           <p class="status-line"><span>Selection</span><strong>{{ fixture.market_signal.selection }}{% if fixture.market_signal.line is not none %} {{ fixture.market_signal.line }}{% endif %}</strong></p>
-          <p class="status-line"><span>Edge</span><strong>{{ "{:+.2%}".format(fixture.market_signal.edge|float) if fixture.market_signal.edge is not none else 'N/A' }}</strong></p>
+          <p class="status-line"><span>EV / 1u</span><strong>{{ "{:+.2%}".format(fixture.market_signal.edge|float) if fixture.market_signal.edge is not none else 'N/A' }}</strong></p>
         </div>
       {% endif %}
     </div>

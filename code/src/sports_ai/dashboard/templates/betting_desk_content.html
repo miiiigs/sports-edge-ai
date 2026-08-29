@@ -36,7 +36,7 @@
             <th class="num">Min Odds</th>
             <th>Best Offer</th>
             <th class="num">Implied %</th>
-            <th class="num">Edge</th>
+            <th class="num">EV / 1u</th>
             <th>Freshness</th>
             <th>Safeguard</th>
             <th>Desk Decision</th>
@@ -74,7 +74,11 @@
     </div>
   {% else %}
     <article class="empty-state desk-empty-state">
-      <strong>No pre-match desk rows are currently staged.</strong>
+      {% if payload.quota_waiting_reset %}
+        <strong>Live market data is waiting for the provider quota reset.</strong>
+      {% else %}
+        <strong>No pre-match desk rows are currently staged.</strong>
+      {% endif %}
       <p>{{ payload.reason }}</p>
     </article>
   {% endif %}
