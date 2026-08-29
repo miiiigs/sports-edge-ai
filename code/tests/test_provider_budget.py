@@ -52,10 +52,10 @@ def _budget(tmp_path: Path, *, allow: bool = True, **kwargs) -> ProviderRequestB
 def _seed_quota(budget: ProviderRequestBudget, *, limit: int, remaining: int) -> None:
     budget._record_quota_from_headers(
         {
-            "x-ratelimit-limit": str(limit),
-            "x-ratelimit-remaining": str(remaining),
-            "x-ratelimit-requests-limit": "10",
-            "x-ratelimit-requests-remaining": "10",
+            "x-ratelimit-requests-limit": str(limit),
+            "x-ratelimit-requests-remaining": str(remaining),
+            "x-ratelimit-limit": "10",
+            "x-ratelimit-remaining": "10",
         }
     )
 
@@ -224,17 +224,18 @@ def test_quota_header_parsed_and_persisted(tmp_path):
         provider_timestamp=None,
         ttl_seconds=90,
         response_headers={
-            "x-ratelimit-limit": "1000",
-            "x-ratelimit-remaining": "850",
-            "x-ratelimit-requests-limit": "10",
-            "x-ratelimit-requests-remaining": "7",
+            # API-Football: requests-* are the DAILY quota, plain * are per-minute.
+            "x-ratelimit-requests-limit": "7500",
+            "x-ratelimit-requests-remaining": "7499",
+            "x-ratelimit-limit": "300",
+            "x-ratelimit-remaining": "299",
         },
     )
     snapshot = budget.quota_snapshot()
-    assert snapshot["daily_limit"] == 1000
-    assert snapshot["daily_remaining"] == 850
-    assert snapshot["minute_limit"] == 10
-    assert snapshot["minute_remaining"] == 7
+    assert snapshot["daily_limit"] == 7500
+    assert snapshot["daily_remaining"] == 7499
+    assert snapshot["minute_limit"] == 300
+    assert snapshot["minute_remaining"] == 299
     assert snapshot["last_request_at"] is not None
     assert snapshot["quota_reset_at"] is not None
     # requests_used tracked for optional configured-budget fallback
@@ -242,9 +243,14 @@ def test_quota_header_parsed_and_persisted(tmp_path):
 
 
 def test_parse_quota_headers_case_insensitive():
-    parsed = parse_quota_headers({"X-RateLimit-Limit": "500", "x-ratelimit-remaining": "300"})
-    assert parsed["daily_limit"] == 500
-    assert parsed["daily_remaining"] == 300
+    parsed = parse_quota_headers(
+        {"X-RateLimit-Requests-Limit": "7500", "x-ratelimit-requests-remaining": "7499",
+         "X-RateLimit-Limit": "300", "x-ratelimit-remaining": "299"}
+    )
+    assert parsed["daily_limit"] == 7500
+    assert parsed["daily_remaining"] == 7499
+    assert parsed["minute_limit"] == 300
+    assert parsed["minute_remaining"] == 299
 
 
 def test_healthy_governor_allows_eligible_request(tmp_path):
@@ -481,7 +487,7 @@ def _response(payload: dict, status_code: int = 200) -> "object":
     import httpx
 
     request = httpx.Request("GET", "https://v3.football.api-sports.io/odds")
-    return httpx.Response(status_code, json=payload, headers={"x-ratelimit-limit": "1000", "x-ratelimit-remaining": "999"}, request=request)
+    return httpx.Response(status_code, json=payload, headers={"x-ratelimit-requests-limit": "7500", "x-ratelimit-requests-remaining": "7499", "x-ratelimit-limit": "300", "x-ratelimit-remaining": "299"}, request=request)
 
 
 def test_odds_provider_single_call_then_persistent_cache_hit(tmp_path, monkeypatch, api_football_env):
@@ -521,7 +527,7 @@ def test_odds_provider_single_call_then_persistent_cache_hit(tmp_path, monkeypat
     snapshots = provider.get_market_snapshot("api-football:1557378", fixture_context=fixture_context)
     assert len(snapshots) == 1
     assert fake.calls == 1
-    assert budget.quota_snapshot()["daily_remaining"] == 999
+    assert budget.quota_snapshot()["daily_remaining"] == 7499
     # Second call must be served from the persistent cache - no HTTP.
     snapshots2 = provider.get_market_snapshot("api-football:1557378", fixture_context=fixture_context)
     assert len(snapshots2) == 1
