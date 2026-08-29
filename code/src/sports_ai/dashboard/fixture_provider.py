@@ -18,6 +18,7 @@ import httpx
 
 from ..data_sources.football_history import DIVISION_TO_COMPETITION
 from ..data_sources.football_upcoming import DIVISION_TO_FOOTBALL_DATA_ORG
+from ..locking import canonical_hash
 from .models import (
     FIXTURE_STATUS_CANCELLED,
     FIXTURE_STATUS_FINISHED,
@@ -28,11 +29,14 @@ from .models import (
     FIXTURE_STATUS_SCHEDULED,
     NormalizedFixture,
     build_fixture_id,
+    normalize_text_key,
+    parse_iso_datetime,
     utc_now_iso,
 )
 
 API_FOOTBALL_SOURCE_VERSION = "api_football_fixture_adapter_v1"
 API_FOOTBALL_PROVIDER = "api-football"
+API_FOOTBALL_FIXTURE_STATS_ENDPOINT = "https://v3.football.api-sports.io/fixtures/statistics"
 
 FOOTBALL_DATA_ORG_SOURCE_VERSION = "football_data_org_fixture_adapter_v1"
 FOOTBALL_DATA_ORG_PROVIDER = "football-data.org"
@@ -85,6 +89,27 @@ class FixtureProviderNotConfiguredError(FixtureProviderError):
     """Raised when a provider cannot be used because required config is absent."""
 
 
+def _coerce_int(value: Any) -> int | None:
+    if value in {None, ""}:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
+class AuthoritativeFixtureStatistics:
+    fixture_id: str
+    provider: str
+    provider_fixture_id: str
+    home_corners: int | None
+    away_corners: int | None
+    total_corners: int | None
+    source_timestamp: str | None
+    captured_at: str
+
+
 @dataclass(frozen=True)
 class FixtureProviderConfig:
     display_timezone: str = "Asia/Manila"
@@ -97,6 +122,8 @@ class FixtureProviderConfig:
     today_cache_ttl_seconds: int = 150
     schedule_cache_ttl_seconds: int = 600
     detail_cache_ttl_seconds: int = 300
+    statistics_cache_ttl_seconds: int = 300
+    kickoff_match_tolerance_seconds: int = 1800
 
 
 class FixtureProvider(ABC):
@@ -594,6 +621,8 @@ class ApiFootballFixtureProvider(FixtureProvider):
         self._cached_league_map: dict[str, int] | None = None
         self._query_log: list[dict[str, Any]] = []
         self._query_log_lock = Lock()
+        self._statistics_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._statistics_cache_lock = Lock()
 
     def provider_name(self) -> str:
         return API_FOOTBALL_PROVIDER
@@ -606,7 +635,10 @@ class ApiFootballFixtureProvider(FixtureProvider):
         if not raw_value:
             return None
         path = Path(raw_value)
-        return path if path.exists() else None
+        if path.exists():
+            return path
+        repo_relative = Path(__file__).resolve().parents[4] / raw_value
+        return repo_relative if repo_relative.exists() else None
 
     def _token(self) -> str:
         token = os.environ.get(self._config.token_env_var, "").strip()
@@ -698,11 +730,166 @@ class ApiFootballFixtureProvider(FixtureProvider):
             self._query_log.append(diagnostic_entry)
         return rows
 
+    def _request_fixture_statistics(self, *, provider_fixture_id: str) -> list[dict[str, Any]]:
+        cache_key = str(provider_fixture_id)
+        with self._statistics_cache_lock:
+            cached = self._statistics_cache.get(cache_key)
+        if cached is not None and monotonic() - cached[0] <= self._config.statistics_cache_ttl_seconds:
+            rows = list(cached[1])
+            diagnostic_entry = {
+                "query_timestamp": utc_now_iso(),
+                "provider": API_FOOTBALL_PROVIDER,
+                "http_status": 200,
+                "response_status": "CACHE_HIT",
+                "provider_fixture_id": provider_fixture_id,
+                "params": {"fixture": provider_fixture_id},
+                "response_results": len(rows),
+                "raw_fixture_count": len(rows),
+                "errors": {},
+            }
+            with self._query_log_lock:
+                self._query_log.append(diagnostic_entry)
+            return rows
+
+        with self._client() as client:
+            response = client.get(API_FOOTBALL_FIXTURE_STATS_ENDPOINT, params={"fixture": provider_fixture_id})
+            response.raise_for_status()
+            payload = response.json()
+        errors_payload = payload.get("errors")
+        errors = errors_payload if isinstance(errors_payload, dict) else {}
+        rows = payload.get("response")
+        if not isinstance(rows, list):
+            raise FixtureProviderError("unexpected API-Football fixture statistics response payload")
+        diagnostic_entry = {
+            "query_timestamp": utc_now_iso(),
+            "provider": API_FOOTBALL_PROVIDER,
+            "http_status": int(response.status_code),
+            "response_status": "OK" if not errors else "ERROR",
+            "provider_fixture_id": provider_fixture_id,
+            "params": {"fixture": provider_fixture_id},
+            "response_results": int(payload.get("results") or 0),
+            "raw_fixture_count": len(rows),
+            "errors": errors,
+        }
+        with self._query_log_lock:
+            self._query_log.append(diagnostic_entry)
+        with self._statistics_cache_lock:
+            self._statistics_cache[cache_key] = (monotonic(), list(rows))
+        return list(rows)
+
+    def _mapping_cache_key(self, fixture_context: dict[str, Any]) -> str:
+        return canonical_hash(
+            {
+                "fixture_id": fixture_context.get("fixture_id"),
+                "competition_id": fixture_context.get("competition_id"),
+                "division_code": fixture_context.get("division_code"),
+                "season": fixture_context.get("season"),
+                "kickoff_utc": fixture_context.get("kickoff_utc"),
+                "home_team_name": fixture_context.get("home_team_name"),
+                "away_team_name": fixture_context.get("away_team_name"),
+            }
+        )
+
+    def _resolve_statistics_fixture_id(self, fixture_context: dict[str, Any]) -> str:
+        persisted_provider = str(fixture_context.get("statistics_provider") or "").strip().lower()
+        persisted_fixture_id = str(fixture_context.get("statistics_provider_fixture_id") or "").strip()
+        if persisted_provider == API_FOOTBALL_PROVIDER and persisted_fixture_id:
+            return persisted_fixture_id
+        provider_name = str(fixture_context.get("provider") or "").strip().lower()
+        provider_fixture_id = str(fixture_context.get("provider_fixture_id") or "").strip()
+        if provider_name == API_FOOTBALL_PROVIDER and provider_fixture_id and not provider_fixture_id.startswith("generated:"):
+            return provider_fixture_id
+
+        division_code = str(fixture_context.get("division_code") or "").strip()
+        league_id = self._league_map().get(division_code)
+        if league_id is None:
+            raise FixtureProviderError("STATS_FIXTURE_UNMATCHED")
+        kickoff = parse_iso_datetime(str(fixture_context["kickoff_utc"]))
+        season_value = _coerce_int(fixture_context.get("season")) or kickoff.year
+        expected_home = normalize_text_key(str(fixture_context.get("home_team_name") or ""))
+        expected_away = normalize_text_key(str(fixture_context.get("away_team_name") or ""))
+        rows = self._request_fixtures(
+            params={
+                "date": kickoff.date().isoformat(),
+                "league": league_id,
+                "season": season_value,
+            }
+        )
+        matches: list[str] = []
+        for row in rows:
+            fixture_payload = row.get("fixture") or {}
+            teams_payload = row.get("teams") or {}
+            candidate_fixture_id = str(fixture_payload.get("id") or "").strip()
+            fixture_date = str(fixture_payload.get("date") or "").strip()
+            if not candidate_fixture_id or not fixture_date:
+                continue
+            candidate_kickoff = parse_iso_datetime(fixture_date)
+            if abs((candidate_kickoff - kickoff).total_seconds()) > self._config.kickoff_match_tolerance_seconds:
+                continue
+            home_name = normalize_text_key(str(((teams_payload.get("home") or {}).get("name")) or ""))
+            away_name = normalize_text_key(str(((teams_payload.get("away") or {}).get("name")) or ""))
+            if home_name != expected_home or away_name != expected_away:
+                continue
+            matches.append(candidate_fixture_id)
+        if not matches:
+            raise FixtureProviderError("STATS_FIXTURE_UNMATCHED")
+        if len(matches) > 1:
+            raise FixtureProviderError("STATS_FIXTURE_AMBIGUOUS")
+        return matches[0]
+
+    @staticmethod
+    def _extract_corner_kicks(row: dict[str, Any]) -> int | None:
+        for statistic in row.get("statistics") or []:
+            stat_type = normalize_text_key(str(statistic.get("type") or ""))
+            if stat_type == "corner kicks":
+                return _coerce_int(statistic.get("value"))
+        return None
+
+    def get_authoritative_corner_statistics(
+        self,
+        fixture_context: dict[str, Any],
+    ) -> AuthoritativeFixtureStatistics:
+        provider_fixture_id = self._resolve_statistics_fixture_id(fixture_context)
+        rows = self._request_fixture_statistics(provider_fixture_id=provider_fixture_id)
+        expected_home = normalize_text_key(str(fixture_context.get("home_team_name") or ""))
+        expected_away = normalize_text_key(str(fixture_context.get("away_team_name") or ""))
+        home_corners = None
+        away_corners = None
+        source_timestamp = None
+        for row in rows:
+            team_name = normalize_text_key(str(((row.get("team") or {}).get("name")) or ""))
+            if source_timestamp is None:
+                source_timestamp = (
+                    str(row.get("update") or "").strip()
+                    or str(((row.get("fixture") or {}).get("update")) or "").strip()
+                    or None
+                )
+            corner_kicks = self._extract_corner_kicks(row)
+            if team_name == expected_home:
+                home_corners = corner_kicks
+            elif team_name == expected_away:
+                away_corners = corner_kicks
+        total_corners = None if home_corners is None or away_corners is None else home_corners + away_corners
+        return AuthoritativeFixtureStatistics(
+            fixture_id=str(fixture_context.get("fixture_id") or ""),
+            provider=API_FOOTBALL_PROVIDER,
+            provider_fixture_id=provider_fixture_id,
+            home_corners=home_corners,
+            away_corners=away_corners,
+            total_corners=total_corners,
+            source_timestamp=source_timestamp,
+            captured_at=utc_now_iso(),
+        )
+
     def _division_code_for_league_id(self, league_id: int) -> str | None:
         for division_code, configured_id in self._league_map().items():
             if configured_id == league_id:
                 return division_code
         return None
+
+    def _local_date_for_fixture(self, fixture: NormalizedFixture) -> date:
+        timezone_name = ZoneInfo(self._config.display_timezone)
+        return datetime.fromisoformat(fixture.kickoff_utc).astimezone(timezone_name).date()
 
     def _normalize_fixture(self, payload: dict[str, Any]) -> NormalizedFixture | None:
         fixture_payload = payload.get("fixture") or {}
@@ -794,30 +981,39 @@ class ApiFootballFixtureProvider(FixtureProvider):
     def get_fixtures_for_date(self, target_date: date) -> list[NormalizedFixture]:
         if not self.configured():
             raise FixtureProviderNotConfiguredError("API-Football is not configured")
-        target_date_text = target_date.isoformat()
+        timezone_name = ZoneInfo(self._config.display_timezone)
+        local_start = datetime.combine(target_date, daytime.min, tzinfo=timezone_name)
+        local_end = datetime.combine(target_date + timedelta(days=1), daytime.min, tzinfo=timezone_name)
+        utc_dates: list[date] = []
+        current_utc_date = local_start.astimezone(timezone.utc).date()
+        final_utc_date = (local_end - timedelta(seconds=1)).astimezone(timezone.utc).date()
+        while current_utc_date <= final_utc_date:
+            utc_dates.append(current_utc_date)
+            current_utc_date += timedelta(days=1)
         fixtures: list[NormalizedFixture] = []
         league_items = sorted(self._league_map().items())
 
-        def fetch_league_rows(item: tuple[str, int]) -> tuple[str, list[dict[str, Any]]]:
-            division_code, league_id = item
+        def fetch_league_rows(item: tuple[str, int, date]) -> tuple[str, date, list[dict[str, Any]]]:
+            division_code, league_id, query_date = item
             rows = self._request_fixtures(
                 params={
-                    "date": target_date_text,
+                    "date": query_date.isoformat(),
                     "league": league_id,
                     "season": target_date.year,
                 }
             )
-            return division_code, rows
+            return division_code, query_date, rows
 
-        with ThreadPoolExecutor(max_workers=min(5, max(1, len(league_items)))) as executor:
-            for division_code, rows in executor.map(fetch_league_rows, league_items):
+        fetch_items = [(division_code, league_id, query_date) for division_code, league_id in league_items for query_date in utc_dates]
+        with ThreadPoolExecutor(max_workers=min(5, max(1, len(fetch_items)))) as executor:
+            for division_code, _, rows in executor.map(fetch_league_rows, fetch_items):
                 for row in rows:
                     normalized = self._normalize_fixture(row)
                     if normalized is None:
                         continue
                     if normalized.division_code != division_code:
                         continue
-                    if normalized.kickoff_utc[:10] != target_date_text:
+                    if self._local_date_for_fixture(normalized) != target_date:
                         continue
                     fixtures.append(normalized)
         return self._dedupe(fixtures)

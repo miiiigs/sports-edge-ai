@@ -1,8 +1,22 @@
+{% from "_ui.html" import status_badge %}
+<section class="page-heading edge-page-heading">
+  <div>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Prediction Log</p>
+    <h1>Current Football Predictions</h1>
+    <p class="subhead desk-page-subhead">Persisted pre-match model output and current market readiness.</p>
+  </div>
+  <div class="page-actions">
+    {{ status_badge(payload.system_status.prediction_engine.state, 'positive' if payload.system_status.prediction_engine.state == 'READY' else 'warning') }}
+    <span class="page-stat">{{ payload.rows|length }} rows</span>
+  </div>
+</section>
+
 <section class="section-block">
   <div class="section-heading">
     <div>
       <p class="eyebrow">Operational Output</p>
-      <h2>Predictions</h2>
+      <h2>Prediction Table</h2>
+      <p class="section-intro">Current Football prediction table.</p>
     </div>
     <span>{{ payload.rows|length }} rows</span>
   </div>
@@ -29,11 +43,14 @@
       <tbody>
         {% for row in payload.rows %}
           <tr>
-            <td><a href="/matches/{{ row.fixture.fixture_id }}">{{ row.fixture.home_team_name }} vs {{ row.fixture.away_team_name }}</a></td>
-            <td>{{ row.fixture.kickoff_local }}</td>
+            <td>
+              <a class="desk-match-link" href="/matches/{{ row.fixture.fixture_id }}">{{ row.fixture.home_team_name }} vs {{ row.fixture.away_team_name }}</a>
+              <div class="row-sub">{{ row.fixture.fixture_id }}</div>
+            </td>
+            <td class="num">{{ row.fixture.kickoff_local }}</td>
             <td>{{ row.fixture.competition_name }}</td>
-            <td>{{ row.prediction.generated_at }}</td>
-            <td>{{ row.prediction.model_as_of or 'N/A' }}</td>
+            <td class="num">{{ row.prediction.generated_at }}</td>
+            <td class="num">{{ row.prediction.model_as_of or 'N/A' }}</td>
             <td>
               {% if row.prediction.prediction_status == 'READY' %}
                 {{ "%.2f"|format(row.prediction.expected_home_goals) }} - {{ "%.2f"|format(row.prediction.expected_away_goals) }}
@@ -55,18 +72,28 @@
                 N/A
               {% endif %}
             </td>
-            <td>{{ row.prediction.prediction_status }}</td>
-            <td>{{ row.prediction.lock_state or 'PRE_MATCH_OPEN' }}</td>
-            <td>{{ row.fixture.market_evaluation.state if row.fixture.market_evaluation else 'NOT_SYNCED' }}</td>
+            <td>
+              {{ status_badge(row.prediction.prediction_status, 'positive' if row.prediction.prediction_status == 'READY' else 'inactive') }}
+            </td>
+            <td>
+              {{ status_badge(row.prediction.lock_state or 'PRE_MATCH_OPEN', 'neutral') }}
+            </td>
+            <td>
+              {% set market_state = row.fixture.market_evaluation.state if row.fixture.market_evaluation else 'NOT_SYNCED' %}
+              {{ status_badge(market_state, 'positive' if market_state in ['READY', 'CONNECTED'] else 'inactive') }}
+            </td>
             <td>
               {% if row.fixture.market_signal %}
-                {{ row.fixture.market_signal.decision }} | {{ row.fixture.market_signal.selection }}{% if row.fixture.market_signal.line is not none %} {{ row.fixture.market_signal.line }}{% endif %}
+                {{ row.fixture.market_signal.current_decision_state or row.fixture.market_signal.decision }} | {{ row.fixture.market_signal.selection }}{% if row.fixture.market_signal.line is not none %} {{ row.fixture.market_signal.line }}{% endif %}
+                {% if row.fixture.market_signal.edge is not none %}
+                  <div class="row-sub">{{ "{:+.2%}".format(row.fixture.market_signal.edge|float) }}</div>
+                {% endif %}
               {% else %}
-                {{ row.prediction.manager_decision_status }}
+                {{ row.fixture.market_status_label }}
               {% endif %}
             </td>
-            <td>{{ row.fixture.market_signal.day12_state if row.fixture.market_signal else row.prediction.safeguard_status }}</td>
-            <td><a href="/matches/{{ row.fixture.fixture_id }}">Detail</a></td>
+            <td>{{ status_badge((row.fixture.market_signal.safeguard_label if row.fixture.market_signal else row.prediction.safeguard_status), 'positive' if ((row.fixture.market_signal.safeguard_label if row.fixture.market_signal else row.prediction.safeguard_status) == 'PASS') else 'inactive') }}</td>
+            <td><a class="table-link" href="/matches/{{ row.fixture.fixture_id }}">Open fixture</a></td>
           </tr>
         {% else %}
           <tr>

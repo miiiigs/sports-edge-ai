@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Lock
 from time import monotonic
 from typing import Any
@@ -14,6 +15,13 @@ import httpx
 
 from ..dashboard.models import normalize_text_key, parse_iso_datetime
 from ..locking import canonical_hash
+from .freshness import (
+    FRESHNESS_STATE_FRESH,
+    FRESHNESS_STATE_STALE,
+    FRESHNESS_STATE_UNKNOWN,
+    classify_freshness_state,
+    resolve_market_max_age_minutes,
+)
 from .providers import MarketProviderError, NormalizedMarketSnapshot
 
 API_FOOTBALL_MARKET_PROVIDER = "api-football"
@@ -21,10 +29,6 @@ API_FOOTBALL_ODDS_VERSION = "api_football_current_market_provider_v1"
 API_FOOTBALL_ODDS_ENDPOINT = "https://v3.football.api-sports.io/odds"
 API_FOOTBALL_ODDS_MAPPING_ENDPOINT = "https://v3.football.api-sports.io/odds/mapping"
 API_FOOTBALL_FIXTURE_DETAIL_ENDPOINT = "https://v3.football.api-sports.io/fixtures"
-
-FRESHNESS_STATE_FRESH = "FRESH"
-FRESHNESS_STATE_STALE = "STALE"
-FRESHNESS_STATE_UNKNOWN = "UNKNOWN"
 
 _MARKET_NAME_MAP = {
     "Match Winner": "1x2",
@@ -41,7 +45,7 @@ class ApiFootballOddsProviderConfig:
     token_env_var: str = "SPORTS_AI_API_FOOTBALL_TOKEN"
     league_map_env_var: str = "SPORTS_AI_API_FOOTBALL_LEAGUE_MAP"
     reference_bookmakers_env_var: str = "SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS"
-    freshness_max_age_minutes_env_var: str = "SPORTS_AI_MARKET_MAX_AGE_MINUTES"
+    freshness_max_age_minutes_env_var: str = "SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES"
     timeout_seconds: float = 20.0
     mapping_cache_ttl_seconds: int = 300
     fixture_cache_ttl_seconds: int = 600
@@ -57,6 +61,10 @@ def _parse_env_list(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def _normalize_bookmaker_key(value: str) -> str:
+    return normalize_text_key(value).replace(" ", "")
+
+
 def _parse_decimal_line(raw_line: str) -> float:
     try:
         return float(raw_line)
@@ -66,19 +74,19 @@ def _parse_decimal_line(raw_line: str) -> float:
 
 def _normalize_1x2_selection(value: str) -> str | None:
     mapping = {
-        "Home": "HOME",
-        "Draw": "DRAW",
-        "Away": "AWAY",
+        "home": "HOME",
+        "draw": "DRAW",
+        "away": "AWAY",
     }
-    return mapping.get(value)
+    return mapping.get(value.strip().lower())
 
 
 def _normalize_yes_no_selection(value: str) -> str | None:
     mapping = {
-        "Yes": "YES",
-        "No": "NO",
+        "yes": "YES",
+        "no": "NO",
     }
-    return mapping.get(value)
+    return mapping.get(value.strip().lower())
 
 
 def _normalize_total_value(value: str) -> tuple[str, float] | None:
@@ -86,9 +94,10 @@ def _normalize_total_value(value: str) -> tuple[str, float] | None:
     if len(parts) != 2:
         return None
     side, line = parts
-    if side not in {"Over", "Under"}:
+    normalized_side = side.strip().lower()
+    if normalized_side not in {"over", "under"}:
         return None
-    return side.upper(), _parse_decimal_line(line)
+    return normalized_side.upper(), _parse_decimal_line(line)
 
 
 def _normalize_asian_handicap_value(value: str) -> tuple[str, float] | None:
@@ -96,9 +105,13 @@ def _normalize_asian_handicap_value(value: str) -> tuple[str, float] | None:
     if len(parts) != 2:
         return None
     team_side, line = parts
-    if team_side not in {"Home", "Away"}:
+    normalized_side = team_side.strip().lower()
+    if normalized_side not in {"home", "away"}:
         return None
-    return team_side.upper(), _parse_decimal_line(line)
+    raw_line = _parse_decimal_line(line)
+    selection = normalized_side.upper()
+    canonical_line = raw_line if selection == "HOME" else -raw_line
+    return selection, canonical_line
 
 
 class ApiFootballOddsProvider:
@@ -134,7 +147,11 @@ class ApiFootballOddsProvider:
         if not path_text:
             self._league_map_cache = {}
             return {}
-        with open(path_text, "r", encoding="utf-8") as handle:
+        path = Path(path_text)
+        if not path.exists():
+            repo_relative = Path(__file__).resolve().parents[4] / path_text
+            path = repo_relative
+        with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         self._league_map_cache = {str(key): int(value) for key, value in payload.items()}
         return dict(self._league_map_cache)
@@ -142,20 +159,14 @@ class ApiFootballOddsProvider:
     def _reference_bookmakers(self) -> tuple[str, ...]:
         raw = os.environ.get(self._config.reference_bookmakers_env_var, "").strip()
         if not raw:
-            return ("Pinnacle",)
-        return _parse_env_list(raw)
+            return ("pinnacle", "betfair", "bet365")
+        return tuple(_normalize_bookmaker_key(item) for item in _parse_env_list(raw))
 
     def _freshness_threshold_minutes(self) -> int | None:
-        raw = os.environ.get(self._config.freshness_max_age_minutes_env_var, "").strip()
-        if not raw:
-            return None
-        try:
-            value = int(raw)
-        except ValueError as exc:  # pragma: no cover - defensive
-            raise MarketProviderError(
-                f"{self._config.freshness_max_age_minutes_env_var} must be an integer number of minutes"
-            ) from exc
-        return value if value > 0 else None
+        return resolve_market_max_age_minutes(
+            self._config.freshness_max_age_minutes_env_var,
+            default_when_unset=240,
+        )
 
     def _cache_key(self, endpoint: str, params: dict[str, Any] | None) -> str:
         return json.dumps({"endpoint": endpoint, "params": params or {}}, sort_keys=True)
@@ -277,6 +288,11 @@ class ApiFootballOddsProvider:
         )
 
     def _resolve_provider_fixture_id(self, fixture_context: dict[str, Any]) -> str:
+        provider_name = str(fixture_context.get("provider") or "").strip().lower()
+        provider_fixture_id = str(fixture_context.get("provider_fixture_id") or "").strip()
+        if provider_name == API_FOOTBALL_MARKET_PROVIDER and provider_fixture_id and not provider_fixture_id.startswith("generated:"):
+            return provider_fixture_id
+
         cache_key = self._mapping_cache_key(fixture_context)
         with self._mapping_cache_lock:
             cached = self._mapping_cache.get(cache_key)
@@ -328,18 +344,12 @@ class ApiFootballOddsProvider:
         return str(resolved["provider_fixture_id"])
 
     def _freshness_state(self, *, source_timestamp: str | None, captured_at: str, kickoff_utc: str | None) -> str:
-        threshold = self._freshness_threshold_minutes()
-        if source_timestamp is None or threshold is None:
-            return FRESHNESS_STATE_UNKNOWN
-        try:
-            source_dt = parse_iso_datetime(source_timestamp)
-            captured_dt = parse_iso_datetime(captured_at)
-        except ValueError:
-            return FRESHNESS_STATE_UNKNOWN
-        if kickoff_utc is not None and source_dt > parse_iso_datetime(kickoff_utc):
-            return FRESHNESS_STATE_STALE
-        age_minutes = (captured_dt - source_dt).total_seconds() / 60.0
-        return FRESHNESS_STATE_FRESH if age_minutes <= threshold else FRESHNESS_STATE_STALE
+        return classify_freshness_state(
+            source_timestamp=source_timestamp,
+            evaluated_at=captured_at,
+            threshold_minutes=self._freshness_threshold_minutes(),
+            kickoff_utc=kickoff_utc,
+        )
 
     def _normalize_bet_values(
         self,
@@ -353,7 +363,15 @@ class ApiFootballOddsProvider:
             return normalized_rows
         for value in values:
             raw_value = str(value.get("value") or "")
-            decimal_odds = float(value["odd"])
+            price_raw = value.get("odd")
+            if price_raw is None:
+                continue
+            try:
+                decimal_odds = float(price_raw)
+            except (TypeError, ValueError):
+                continue
+            if decimal_odds <= 1.0:
+                continue
             if market_family == "1x2":
                 selection = _normalize_1x2_selection(raw_value)
                 if selection is None:
@@ -401,7 +419,7 @@ class ApiFootballOddsProvider:
             bookmaker_name = str(bookmaker.get("name") or "").strip()
             if not bookmaker_name:
                 continue
-            reference_rank = bookmaker_priority.get(bookmaker_name)
+            reference_rank = bookmaker_priority.get(_normalize_bookmaker_key(bookmaker_name))
             reference_designation = "reference" if reference_rank is not None else "available"
             for bet in bookmaker.get("bets") or []:
                 market_name = str(bet.get("name") or "").strip()

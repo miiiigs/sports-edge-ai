@@ -64,7 +64,7 @@
         <p class="status-line"><span>Lock</span><strong>{{ fixture.prediction.lock_state or 'PRE_MATCH_OPEN' }}</strong></p>
         <p class="status-line">
           <span>Current Market</span>
-          <strong>{{ fixture.market_signal.decision if fixture.market_signal else fixture.prediction.manager_decision_status }}</strong>
+          <strong>{{ fixture.market_signal.decision if fixture.market_signal else fixture.market_status_label }}</strong>
         </p>
         <p class="status-line">
           <span>Safeguard</span>

@@ -27,6 +27,7 @@ PAPER_TRADE_STATE_VALUES = {
 _TOTAL_MARKETS = {"goals_total", "corner_total"}
 _FINAL_SETTLEMENT_STATES = {"WON", "LOST", "PUSH", "HALF_WIN", "HALF_LOSS", "VOID"}
 _ACTIVE_SETTLEMENT_STATES = {"PENDING", "OPEN", "UNSETTLED"}
+_STRIKE_RATE_STATES = {"WON", "LOST", "HALF_WIN", "HALF_LOSS"}
 
 SCHEMA_STATEMENTS = (
     """
@@ -105,6 +106,30 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _normalize_business_key_line(line: float | None) -> float | None:
+    if line is None:
+        return None
+    normalized = float(line)
+    return 0.0 if normalized == 0.0 else normalized
+
+
+def paper_trade_business_key_signature(
+    *,
+    fixture_id: str,
+    market: str,
+    selection: str,
+    line: float | None,
+) -> str:
+    return canonical_hash(
+        {
+            "fixture_id": fixture_id,
+            "market": market.lower(),
+            "selection": selection.upper(),
+            "line": _normalize_business_key_line(line),
+        }
+    )
+
+
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +155,15 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "freshness_state": "TEXT",
         },
     )
+    _ensure_columns(
+        conn,
+        table_name="paper_trade_entries",
+        columns={
+            "business_key_signature": "TEXT",
+        },
+    )
+    _backfill_paper_trade_business_keys(conn)
+    _ensure_paper_trade_business_key_uniqueness(conn)
 
 
 def _ensure_columns(conn: sqlite3.Connection, *, table_name: str, columns: dict[str, str]) -> None:
@@ -141,6 +175,61 @@ def _ensure_columns(conn: sqlite3.Connection, *, table_name: str, columns: dict[
         for column_name, column_type in columns.items():
             if column_name not in existing_columns:
                 conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _backfill_paper_trade_business_keys(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT rowid, fixture_id, market, selection, line
+        FROM paper_trade_entries
+        WHERE business_key_signature IS NULL
+        """
+    ).fetchall()
+    if not rows:
+        return
+    with conn:
+        for row in rows:
+            conn.execute(
+                """
+                UPDATE paper_trade_entries
+                SET business_key_signature = ?
+                WHERE rowid = ?
+                """,
+                (
+                    paper_trade_business_key_signature(
+                        fixture_id=str(row["fixture_id"]),
+                        market=str(row["market"]),
+                        selection=str(row["selection"]),
+                        line=None if row["line"] is None else float(row["line"]),
+                    ),
+                    int(row["rowid"]),
+                ),
+            )
+
+
+def _ensure_paper_trade_business_key_uniqueness(conn: sqlite3.Connection) -> None:
+    duplicate = conn.execute(
+        """
+        SELECT business_key_signature, COUNT(*) AS duplicate_count
+        FROM paper_trade_entries
+        WHERE business_key_signature IS NOT NULL
+        GROUP BY business_key_signature
+        HAVING COUNT(*) > 1
+        LIMIT 1
+        """
+    ).fetchone()
+    if duplicate is not None:
+        raise sqlite3.IntegrityError(
+            "PAPER_TRADE_BUSINESS_KEY_DUPLICATES_PRESENT: reconcile duplicate paper_trade_entries before enabling the business-key uniqueness migration"
+        )
+    with conn:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_trade_entries_business_key_signature
+            ON paper_trade_entries(business_key_signature)
+            WHERE business_key_signature IS NOT NULL
+            """
+        )
 
 
 @dataclass(frozen=True)
@@ -198,6 +287,7 @@ class PaperTradeEntry:
     closing_captured_at: str | None = None
     closing_snapshot_id: int | None = None
     paper_trade_id: str = field(init=False)
+    business_key_signature: str = field(init=False)
     entry_signature: str = field(init=False)
     created_at: str = field(default_factory=_utc_now)
 
@@ -206,17 +296,25 @@ class PaperTradeEntry:
             raise ValueError("model_fair_price must be > 1")
         if self.available_market_price <= 1.0:
             raise ValueError("available_market_price must be > 1")
+        business_key_signature = paper_trade_business_key_signature(
+            fixture_id=self.fixture_id,
+            market=self.market,
+            selection=self.selection,
+            line=self.line,
+        )
         signature_payload = {
-            "prediction_id": self.prediction_id,
             "fixture_id": self.fixture_id,
-            "market": self.market,
-            "selection": self.selection,
-            "line": self.line,
+            "market": self.market.lower(),
+            "selection": self.selection.upper(),
+            "line": _normalize_business_key_line(self.line),
+            "business_key_signature": business_key_signature,
+            "prediction_id": self.prediction_id,
             "decision_timestamp": self.decision_timestamp,
         }
         signature = canonical_hash(signature_payload)
+        object.__setattr__(self, "business_key_signature", business_key_signature)
         object.__setattr__(self, "entry_signature", signature)
-        object.__setattr__(self, "paper_trade_id", f"paper_{signature}")
+        object.__setattr__(self, "paper_trade_id", f"paper_{business_key_signature}")
 
 
 @dataclass(frozen=True)
@@ -343,8 +441,9 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
                 selection, line, model_probability, model_fair_price, available_market_price, edge,
                 minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
                 safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
-                closing_odds, closing_captured_at, closing_snapshot_id, entry_signature, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                closing_odds, closing_captured_at, closing_snapshot_id, business_key_signature,
+                entry_signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.paper_trade_id,
@@ -373,6 +472,7 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
                 entry.closing_odds,
                 entry.closing_captured_at,
                 entry.closing_snapshot_id,
+                entry.business_key_signature,
                 entry.entry_signature,
                 entry.created_at,
             ),
@@ -383,29 +483,28 @@ def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -
 def find_existing_paper_trade_entry(
     conn: sqlite3.Connection,
     *,
-    prediction_id: str,
+    prediction_id: str | None,
     fixture_id: str,
     market: str,
     selection: str,
     line: float | None,
 ) -> dict[str, Any] | None:
     ensure_schema(conn)
+    business_key_signature = paper_trade_business_key_signature(
+        fixture_id=fixture_id,
+        market=market,
+        selection=selection,
+        line=line,
+    )
     row = conn.execute(
         """
         SELECT *
         FROM paper_trade_entries
-        WHERE prediction_id = ?
-          AND fixture_id = ?
-          AND market = ?
-          AND selection = ?
-          AND (
-              (line IS NULL AND ? IS NULL)
-              OR line = ?
-          )
-        ORDER BY created_at DESC, paper_trade_id DESC
+        WHERE business_key_signature = ?
+        ORDER BY created_at, paper_trade_id
         LIMIT 1
         """,
-        (prediction_id, fixture_id, market, selection, line, line),
+        (business_key_signature,),
     ).fetchone()
     return None if row is None else dict(row)
 
@@ -626,6 +725,26 @@ def build_trade_update_payload(
     )
 
 
+def _stake_units_for_row(row: dict[str, Any]) -> float:
+    payload = row.get("latest_update_payload") or {}
+    stake = payload.get("stake")
+    try:
+        return 1.0 if stake is None else float(stake)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _strike_rate(rows: list[dict[str, Any]]) -> float | None:
+    decision_rows = [row for row in rows if row.get("trade_state") in _STRIKE_RATE_STATES]
+    if not decision_rows:
+        return None
+    weighted_wins = sum(
+        1.0 if row.get("trade_state") == "WON" else 0.5 if row.get("trade_state") == "HALF_WIN" else 0.0
+        for row in decision_rows
+    )
+    return weighted_wins / len(decision_rows)
+
+
 def paper_trading_status(rows: list[dict[str, Any]]) -> dict[str, Any]:
     performance = paper_trading_performance(rows)
     return {
@@ -643,6 +762,7 @@ def paper_trading_status(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
     open_rows = [row for row in rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]
     settled_rows = [row for row in rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
+    settled_stake_units = sum(_stake_units_for_row(row) for row in settled_rows)
     net_units = sum(float(row.get("net_pnl") or 0.0) for row in settled_rows)
     average_odds = (
         sum(float(row["entry_odds"]) for row in rows if row.get("entry_odds")) / len([row for row in rows if row.get("entry_odds")])
@@ -674,6 +794,13 @@ def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "positions": len(market_rows),
             "settled_positions": len([row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]),
             "open_positions": len([row for row in market_rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]),
+            "pending_positions": len([row for row in market_rows if row.get("trade_state") in _ACTIVE_SETTLEMENT_STATES]),
+            "wins": sum(1 for row in market_rows if row.get("trade_state") == "WON"),
+            "losses": sum(1 for row in market_rows if row.get("trade_state") == "LOST"),
+            "pushes": sum(1 for row in market_rows if row.get("trade_state") == "PUSH"),
+            "half_wins": sum(1 for row in market_rows if row.get("trade_state") == "HALF_WIN"),
+            "half_losses": sum(1 for row in market_rows if row.get("trade_state") == "HALF_LOSS"),
+            "voids": sum(1 for row in market_rows if row.get("trade_state") == "VOID"),
             "hit_rate": None
             if not [row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
             else sum(
@@ -697,9 +824,23 @@ def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "net_units": sum(float(row.get("net_pnl") or 0.0) for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES),
             "roi": (
                 sum(float(row.get("net_pnl") or 0.0) for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES)
-                / len([row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES])
-                if [row for row in market_rows if row.get("trade_state") in _FINAL_SETTLEMENT_STATES]
+                / sum(
+                    _stake_units_for_row(row)
+                    for row in market_rows
+                    if row.get("trade_state") in _FINAL_SETTLEMENT_STATES
+                )
+                if sum(
+                    _stake_units_for_row(row)
+                    for row in market_rows
+                    if row.get("trade_state") in _FINAL_SETTLEMENT_STATES
+                )
                 else None
+            ),
+            "strike_rate": _strike_rate(market_rows),
+            "settled_stake_units": sum(
+                _stake_units_for_row(row)
+                for row in market_rows
+                if row.get("trade_state") in _FINAL_SETTLEMENT_STATES
             ),
             "average_clv": (
                 sum(float(row["implied_probability_clv"]) for row in market_rows if row.get("implied_probability_clv") is not None)
@@ -719,18 +860,22 @@ def paper_trading_performance(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "positions": len(rows),
         "open_positions": len(open_rows),
+        "pending_positions": len(open_rows),
         "settled_positions": len(settled_rows),
         "wins": sum(1 for row in settled_rows if row.get("trade_state") == "WON"),
         "losses": sum(1 for row in settled_rows if row.get("trade_state") == "LOST"),
         "pushes": sum(1 for row in settled_rows if row.get("trade_state") == "PUSH"),
         "half_wins": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_WIN"),
         "half_losses": sum(1 for row in settled_rows if row.get("trade_state") == "HALF_LOSS"),
+        "voids": sum(1 for row in settled_rows if row.get("trade_state") == "VOID"),
         "hit_rate": None if not settled_rows else (weighted_wins / len(settled_rows)),
+        "strike_rate": _strike_rate(rows),
         "average_odds": average_odds,
         "break_even_rate": break_even_rate,
+        "settled_stake_units": settled_stake_units,
         "net_units": net_units,
-        "roi": None if not settled_rows else (net_units / len(settled_rows)),
-        "yield": None if not settled_rows else (net_units / len(settled_rows)),
+        "roi": None if settled_stake_units <= 0 else (net_units / settled_stake_units),
+        "yield": None if settled_stake_units <= 0 else (net_units / settled_stake_units),
         "max_drawdown": max_drawdown,
         "clv_state": "PENDING" if rows and not clv_rows else ("AVAILABLE" if clv_rows else "UNAVAILABLE"),
         "average_clv": None

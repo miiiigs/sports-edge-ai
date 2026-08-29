@@ -13,6 +13,7 @@ from ..experiments.football_day11_manager_core import (
     DECISION_STALE_MARKET,
     FRESHNESS_STATE_FRESH,
     REASON_INCOMPLETE_REFERENCE_MARKET,
+    REASON_INVALID_ODDS,
     REASON_MISSING_REFERENCE_MARKET,
     apply_day11_manager_rules,
     build_reference_market_booksum,
@@ -35,8 +36,8 @@ from ..experiments.football_day12_safeguards import (
     evaluate_xg_rule,
 )
 from ..locking import canonical_hash
+from ..market_data.freshness import classify_freshness_state, resolve_market_max_age_minutes_for_provider
 from ..market_data.providers import NormalizedMarketSnapshot
-from ..market_data.the_odds_api import classify_freshness_state, resolve_market_max_age_minutes
 from .day12_rolling_xg import XgRowsByRole, missing_xg_inspection
 from .models import utc_now_iso
 
@@ -90,6 +91,7 @@ def current_snapshot_to_day11_row(
             "source": snapshot.provider,
             "bookmaker": snapshot.bookmaker,
             "reference_designation": snapshot.reference_designation or "available",
+            "reference_rank": snapshot.reference_rank,
             "market_family": snapshot.market,
             "line": snapshot.line,
             "selection": snapshot.selection,
@@ -115,13 +117,20 @@ def _reference_market_by_bookmaker(rows: Sequence[dict[str, Any]]) -> tuple[dict
     for row in reference_rows:
         rank = row.get("reference_rank")
         grouped[(999 if rank is None else int(rank), str(row["bookmaker"]))].append(row)
+    saw_invalid_odds = False
     for group_key in sorted(grouped):
         candidate_rows = grouped[group_key]
         validation = validate_reference_market_rows(candidate_rows)
         if validation["is_complete"]:
             return build_reference_market_booksum(candidate_rows, final_method="shin"), None
+        if validation["reason"] == REASON_INCOMPLETE_REFERENCE_MARKET:
+            continue
+        if validation["reason"] == REASON_MISSING_REFERENCE_MARKET:
+            continue
         if validation["reason"] is not None:
-            return None, validation["reason"]
+            saw_invalid_odds = True
+    if saw_invalid_odds:
+        return None, REASON_INVALID_ODDS
     return None, REASON_INCOMPLETE_REFERENCE_MARKET
 
 
@@ -230,7 +239,6 @@ def build_fixture_market_evaluation(
             model_row = model_index.get(canonical_id)
             if model_row is None:
                 continue
-            available_offer_rows = [row for row in selection_rows if row.get("reference_designation") != "reference"]
             decision_as_of = max(
                 str(model_row["as_of"]),
                 max(str(row["market_as_of"]) for row in selection_rows),
@@ -241,6 +249,10 @@ def build_fixture_market_evaluation(
                     "reason_codes": [_CURRENT_REFERENCE_REASON_BY_VALIDATION.get(reference_reason) or REASON_MISSING_REFERENCE_MARKET],
                 }
             else:
+                selected_reference_bookmaker = str(reference_market["reference_bookmaker"])
+                available_offer_rows = [
+                    row for row in selection_rows if str(row.get("bookmaker") or "") != selected_reference_bookmaker
+                ]
                 decision_payload = apply_day11_manager_rules(
                     model_row=model_row,
                     reference_market=reference_market,
@@ -254,7 +266,9 @@ def build_fixture_market_evaluation(
             market_freshness = classify_freshness_state(
                 source_timestamp=None if best_offer is None else best_offer.get("source_timestamp"),
                 evaluated_at=market_freshness_evaluated_at or utc_now_iso(),
-                threshold_minutes=resolve_market_max_age_minutes(),
+                threshold_minutes=resolve_market_max_age_minutes_for_provider(
+                    None if best_offer is None else best_offer.get("source")
+                ),
                 kickoff_utc=fixture_context.get("kickoff_utc"),
             )
             freshness_gate_passed = market_freshness == FRESHNESS_STATE_FRESH
@@ -322,6 +336,11 @@ def build_fixture_market_evaluation(
                     "best_available_market_snapshot_id": None if best_offer is None else str(best_offer["market_snapshot_id"]),
                     "best_available_provider_market_id": None if best_offer is None else str(best_offer["provider_market_id"]),
                     "best_available_source_timestamp": None if best_offer is None else str(best_offer["market_as_of"]),
+                    "reference_bookmaker": None if reference_market is None else str(reference_market["reference_bookmaker"]),
+                    "reference_source": None if reference_market is None else str(reference_market["reference_source"]),
+                    "reference_market_snapshot_id": None
+                    if reference_market is None
+                    else str(reference_market["reference_market_snapshot_id"]),
                     "minimum_acceptable_price": decision_payload.get("minimum_acceptable_price"),
                     "settlement_aware_edge": decision_payload.get("settlement_aware_edge"),
                     "decision": str(decision_payload["decision"]),

@@ -1,10 +1,24 @@
+{% from "_ui.html" import status_badge %}
+<section class="page-heading edge-page-heading">
+  <div>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Candidate Review</p>
+    <h1>Current-Market Candidates</h1>
+    <p class="subhead desk-page-subhead">Current market decisions for today's Football board.</p>
+  </div>
+  <div class="page-actions">
+    {{ status_badge(payload.system_status.market_sync.state, 'positive' if payload.system_status.market_sync.state == 'READY' else 'warning') }}
+    <span class="page-stat">{{ payload.preliminary_candidates|length }} bets</span>
+  </div>
+</section>
+
 <section class="section-block">
   <div class="section-heading">
     <div>
       <p class="eyebrow">Decision Layer</p>
-      <h2>Candidates</h2>
+      <h2>Desk Summary</h2>
+      <p class="section-intro">Current market decision status.</p>
     </div>
-    <span>{{ payload.system_status.market_sync.state }}</span>
+    {{ status_badge(payload.system_status.market_sync.state, 'positive' if payload.system_status.market_sync.state == 'READY' else 'warning') }}
   </div>
   {% if not payload.connected %}
     <article class="empty-state">
@@ -36,8 +50,9 @@
 <section class="section-block">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Preliminary</p>
-      <h2>Eligible Current-Market Signals</h2>
+      <p class="eyebrow">Bets</p>
+      <h2>Qualified BET Rows</h2>
+      <p class="section-intro">Only rows that passed prediction, price, freshness, and safeguard checks appear here.</p>
     </div>
     <span>{{ payload.preliminary_candidates|length }} rows</span>
   </div>
@@ -50,22 +65,22 @@
           <th>Offer</th>
           <th>Fair</th>
           <th>Edge</th>
-          <th>Day 12</th>
+          <th>Risk</th>
         </tr>
       </thead>
       <tbody>
         {% for row in payload.preliminary_candidates %}
           <tr>
-            <td><a href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
+            <td><a class="table-link" href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
             <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
             <td>{{ row.best_available_bookmaker or 'N/A' }} @ {{ "{:.2f}".format(row.best_available_price|float) if row.best_available_price is not none else 'N/A' }}</td>
             <td>{{ "{:.2f}".format(row.model_fair_decimal_price|float) }}</td>
             <td>{{ "{:+.2%}".format(row.settlement_aware_edge|float) if row.settlement_aware_edge is not none else 'N/A' }}</td>
-            <td>{{ row.day12_state }}</td>
+            <td>{{ status_badge(row.safeguard_label, 'positive' if row.safeguard_label == 'PASS' else 'inactive') }}</td>
           </tr>
         {% else %}
           <tr>
-            <td colspan="6">No preliminary current-market candidates are available yet.</td>
+            <td colspan="6">No qualified current-market bets are available yet.</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -77,7 +92,8 @@
   <div class="section-heading">
     <div>
       <p class="eyebrow">Blocked</p>
-      <h2>Rejected Or Missing-Market Rows</h2>
+      <h2>Blocked Or Unsupported Rows</h2>
+      <p class="section-intro">Non-actionable rows stay visible with their current blocker.</p>
     </div>
     <span>{{ payload.blocked_candidates|length }} rows</span>
   </div>
@@ -94,9 +110,9 @@
       <tbody>
         {% for row in payload.blocked_candidates %}
           <tr>
-            <td><a href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
+            <td><a class="table-link" href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
             <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
-            <td>{{ row.decision }}</td>
+            <td>{{ status_badge(row.current_decision_state, 'warning' if row.current_decision_group == 'blocked' else 'inactive') }}</td>
             <td>{{ row.reason_codes|join(', ') }}</td>
           </tr>
         {% else %}
@@ -113,7 +129,8 @@
   <div class="section-heading">
     <div>
       <p class="eyebrow">No Bet</p>
-      <h2>Priced But Below Threshold</h2>
+      <h2>No Bet Rows</h2>
+      <p class="section-intro">Rows stay on the board when a market exists but does not qualify for a bet.</p>
     </div>
     <span>{{ payload.no_bet_candidates|length }} rows</span>
   </div>
@@ -131,7 +148,7 @@
       <tbody>
         {% for row in payload.no_bet_candidates %}
           <tr>
-            <td><a href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
+            <td><a class="table-link" href="/matches/{{ row.fixture_id }}">{{ row.fixture_id }}</a></td>
             <td>{{ row.market_family }} | {{ row.selection }}{% if row.line is not none %} {{ row.line }}{% endif %}</td>
             <td>{{ "{:.2f}".format(row.best_available_price|float) if row.best_available_price is not none else 'N/A' }}</td>
             <td>{{ "{:.2f}".format(row.minimum_acceptable_price|float) if row.minimum_acceptable_price is not none else 'N/A' }}</td>

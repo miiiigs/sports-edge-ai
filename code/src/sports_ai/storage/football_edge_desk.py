@@ -1213,7 +1213,14 @@ def _group_predictions_by_market(prediction_rows: list[dict[str, Any]]) -> list[
             None if row.get("line") is None else float(row["line"]),
         )
         grouped.setdefault(key, []).append(row)
-    return [grouped[key] for key in sorted(grouped)]
+    return [grouped[key] for key in sorted(grouped, key=_market_group_sort_key)]
+
+
+def _market_group_sort_key(group_key: tuple[str, float | None]) -> tuple[str, int, float]:
+    market_family, line = group_key
+    if line is None:
+        return (market_family, 0, 0.0)
+    return (market_family, 1, float(line))
 
 
 def _build_consensus_row(conn: sqlite3.Connection, grouped_rows: list[dict[str, Any]]) -> dict[str, Any]:

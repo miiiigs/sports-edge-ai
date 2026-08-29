@@ -1,10 +1,23 @@
+{% from "_ui.html" import status_badge %}
+<section class="page-heading edge-page-heading">
+  <div>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Operations</p>
+    <h1>Status</h1>
+    <p class="subhead desk-page-subhead">System health, feeds and model readiness.</p>
+  </div>
+  <div class="page-actions">
+    {{ status_badge(payload.system_status.fixture_feed.state, 'positive' if payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] else 'warning') }}
+    <a class="filter-button" href="/api/system/status" target="_blank" rel="noreferrer">Open raw status JSON</a>
+  </div>
+</section>
+
 <section class="command-deck status-layout">
   <article class="command-panel command-panel--primary">
     <div class="section-heading section-heading--tight">
       <div>
         <p class="eyebrow">Runtime Status</p>
         <h2>System Health</h2>
-        <p class="section-intro">Provider connectivity, prediction-runtime readiness, and current operational blockers as of {{ payload.system_status.current_time_local }}.</p>
+        <p class="section-intro">Current operational status as of {{ payload.system_status.current_time_local }}.</p>
       </div>
     </div>
 
@@ -64,11 +77,26 @@
 
 <section class="ops-grid">
   <article class="detail-card">
-    <p class="eyebrow">Provider</p>
-    <h3>football-data.org</h3>
+    <p class="eyebrow">Model Roster</p>
+    <h3>Football Agent Activation</h3>
     <div class="data-list">
+      <div><span>Route B Composite</span><strong>{{ status_badge('ACTIVE', 'positive') }}</strong></div>
+      <div><span>Route A Direct Classifier</span><strong>{{ status_badge('REJECTED', 'negative') }}</strong></div>
+      <div><span>Agent 3</span><strong>{{ status_badge('NOT IMPLEMENTED', 'inactive') }}</strong></div>
+      <div><span>Fake Consensus</span><strong>{{ status_badge('NO', 'inactive') }}</strong></div>
+    </div>
+  </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Provider</p>
+    <h3>Fixture Feed</h3>
+    <div class="data-list">
+      <div><span>Provider</span><strong>{{ payload.system_status.fixture_feed.provider }}</strong></div>
       <div><span>Status</span><strong>{{ payload.system_status.fixture_feed.state }}</strong></div>
       <div><span>Configured</span><strong>{{ 'YES' if payload.system_status.fixture_feed.configured else 'NO' }}</strong></div>
+      <div><span>Implementation Ready</span><strong>{{ payload.system_status.fixture_feed.requirements.implementation_ready }}</strong></div>
+      <div><span>Required Env</span><strong>{{ payload.system_status.fixture_feed.requirements.required_env_vars|join(', ') if payload.system_status.fixture_feed.requirements.required_env_vars else 'None' }}</strong></div>
+      <div><span>Config Path</span><strong>{{ payload.system_status.fixture_feed.requirements.configuration_path or 'N/A' }}</strong></div>
       <div><span>Last Error</span><strong>{{ payload.system_status.fixture_feed.last_error or 'None' }}</strong></div>
       <div><span>Query Count</span><strong>{{ payload.system_status.fixture_feed.query_count }}</strong></div>
       <div><span>Cache Entries</span><strong>{{ payload.system_status.fixture_feed.cache_entries }}</strong></div>
@@ -99,6 +127,10 @@
       <div><span>Odds Feed</span><strong>{{ payload.system_status.odds_feed.state }}</strong></div>
       <div><span>Provider</span><strong>{{ payload.system_status.odds_feed.provider }}</strong></div>
       <div><span>Reason</span><strong>{{ payload.system_status.odds_feed.reason or 'None' }}</strong></div>
+      <div><span>Implementation Ready</span><strong>{{ payload.system_status.odds_feed.requirements.implementation_ready }}</strong></div>
+      <div><span>Required Env</span><strong>{{ payload.system_status.odds_feed.requirements.required_env_vars|join(', ') if payload.system_status.odds_feed.requirements.required_env_vars else 'None' }}</strong></div>
+      <div><span>Supported Markets</span><strong>{{ payload.system_status.odds_feed.requirements.supported_markets|join(', ') if payload.system_status.odds_feed.requirements.supported_markets else 'None' }}</strong></div>
+      <div><span>Freshness Rule</span><strong>{{ payload.system_status.odds_feed.requirements.freshness_rule or 'Not set' }}</strong></div>
       <div><span>Market Decision Ready</span><strong>{{ payload.system_status.current_market_decision_ready }}</strong></div>
       <div><span>Fixture Feed Ready</span><strong>{{ payload.system_status.current_fixture_feed_ready }}</strong></div>
       <div><span>Prediction Pipeline Ready</span><strong>{{ payload.system_status.current_prediction_pipeline_ready }}</strong></div>
@@ -111,10 +143,12 @@
 
   <article class="detail-card">
     <p class="eyebrow">Safeguards</p>
-    <h3>Day 12 Blockers</h3>
+    <h3>Day 12 Readiness</h3>
     <div class="data-list">
       <div><span>State</span><strong>{{ payload.system_status.safeguards.state }}</strong></div>
       <div><span>xG Availability</span><strong>{{ payload.system_status.safeguards.xg_availability }}</strong></div>
+      <div><span>xG Source</span><strong>{{ payload.system_status.xg.source or 'N/A' }}</strong></div>
+      <div><span>xG Path</span><strong>{{ payload.system_status.xg.path or 'N/A' }}</strong></div>
       <div><span>Blocked Reason</span><strong>{{ payload.system_status.safeguards.blocked_reason or 'None' }}</strong></div>
       <div><span>Live Paper Pipeline</span><strong>{{ payload.system_status.live_paper_pipeline_ready }}</strong></div>
     </div>
@@ -272,6 +306,65 @@
             <td colspan="6">No provider queries have been recorded in the current runtime yet.</td>
           </tr>
         {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="read-api" class="section-block">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Read API</p>
+      <h2>Technical Routes</h2>
+      <p class="section-intro">Machine-readable routes for the Football dashboard.</p>
+    </div>
+    <a class="filter-button" href="/api/system/status" target="_blank" rel="noreferrer">Raw status</a>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Route</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/system/status</code></td>
+          <td>Machine-readable runtime status payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/fixtures/today</code></td>
+          <td>Current today fixture feed payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/fixtures/upcoming</code></td>
+          <td>Upcoming fixture payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/predictions</code></td>
+          <td>Persisted prediction rows for the current slate.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/api/performance</code></td>
+          <td>Existing performance and paper-readiness payload.</td>
+        </tr>
+        <tr>
+          <td>GET</td>
+          <td><code>/health</code></td>
+          <td>Operational health check for the dashboard service.</td>
+        </tr>
+        <tr>
+          <td>POST</td>
+          <td><code>/api/fixtures/refresh</code></td>
+          <td>Manual fixture refresh trigger with cooldown protection.</td>
+        </tr>
       </tbody>
     </table>
   </div>

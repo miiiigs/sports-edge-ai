@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 from pathlib import Path
@@ -970,6 +971,47 @@ def test_route_a_and_route_b_same_direction_pass_consensus_once_per_market(tmp_p
     assert len(decision_rows) == 1
     assert decision_rows[0]["decision_status"] == "CONSENSUS_PASSED"
     assert decision_rows[0]["reason_code"] == "VALUE_RISK_PENDING"
+
+
+def test_record_shadow_prediction_bundle_groups_mixed_none_and_numeric_lines_deterministically(tmp_path) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    fixture = _fixture()
+    market_rows = [
+        _market_row(market_family="goals_total", selection="OVER", line=2.5, probability=0.55, fair_price=1.82),
+        _market_row(market_family="1x2", selection="HOME", probability=0.52, fair_price=1.92),
+        _market_row(market_family="goals_total", selection="OVER", line=None, probability=0.50, fair_price=2.00),
+        _market_row(market_family="1x2", selection="DRAW", probability=0.24, fair_price=4.17),
+        _market_row(market_family="goals_total", selection="UNDER", line=2.5, probability=0.45, fair_price=2.22),
+        _market_row(market_family="1x2", selection="AWAY", probability=0.24, fair_price=4.17),
+        _market_row(market_family="goals_total", selection="UNDER", line=None, probability=0.50, fair_price=2.00),
+    ]
+    prediction = _ready_prediction(market_rows=market_rows, prediction_version="mixed_line_grouping_v1")
+    prediction_before = copy.deepcopy(prediction)
+    market_rows_before = copy.deepcopy(market_rows)
+
+    with football_edge_desk.connect(db_path) as conn:
+        football_edge_desk.ensure_schema(conn)
+        persisted = football_edge_desk.record_shadow_prediction_bundle(conn, fixture=fixture, prediction=prediction)
+        consensus_rows = football_edge_desk.fetch_consensus_evaluations(conn, fixture_id=fixture["fixture_id"])
+        decision_rows = football_edge_desk.fetch_decision_history(conn, fixture_id=fixture["fixture_id"])
+
+    assert prediction == prediction_before
+    assert market_rows == market_rows_before
+    assert [(row["market_family"], row["line"]) for row in persisted["consensus_rows"]] == [
+        ("1x2", None),
+        ("goals_total", None),
+        ("goals_total", 2.5),
+    ]
+    assert [(row["market_family"], row["line"]) for row in consensus_rows] == [
+        ("1x2", None),
+        ("goals_total", None),
+        ("goals_total", 2.5),
+    ]
+    assert len(consensus_rows) == 3
+    assert len(decision_rows) == 3
+    assert all(row["status"] == "INSUFFICIENT_AGENTS" for row in consensus_rows)
+    assert all(row["decision_status"] == "NO_BET" for row in decision_rows)
+    assert all(row["reason_code"] == "CONSENSUS_INSUFFICIENT_AGENTS" for row in decision_rows)
 
 
 def test_route_a_and_route_b_direction_disagreement_fails_consensus(tmp_path) -> None:
