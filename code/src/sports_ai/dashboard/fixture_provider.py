@@ -33,6 +33,15 @@ from .models import (
     parse_iso_datetime,
     utc_now_iso,
 )
+from .provider_budget import (
+    ACTION_CACHE_HIT,
+    PRIORITY_ESSENTIAL,
+    PRIORITY_NORMAL,
+    PROVIDER_API_FOOTBALL,
+    ProviderRequestBudget,
+    classify_provider_response,
+    schedule_fixture_policy,
+)
 
 API_FOOTBALL_SOURCE_VERSION = "api_football_fixture_adapter_v1"
 API_FOOTBALL_PROVIDER = "api-football"
@@ -623,6 +632,11 @@ class ApiFootballFixtureProvider(FixtureProvider):
         self._query_log_lock = Lock()
         self._statistics_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._statistics_cache_lock = Lock()
+        self._budget: ProviderRequestBudget | None = None
+
+    def attach_request_budget(self, budget: ProviderRequestBudget) -> None:
+        """Attach the shared provider request budget (gate + cache + governor)."""
+        self._budget = budget
 
     def provider_name(self) -> str:
         return API_FOOTBALL_PROVIDER
@@ -704,59 +718,186 @@ class ApiFootballFixtureProvider(FixtureProvider):
             "queries": queries,
         }
 
-    def _request_fixtures(self, *, params: dict[str, Any]) -> list[dict[str, Any]]:
-        with self._client() as client:
-            response = client.get("https://v3.football.api-sports.io/fixtures", params=params)
-            response.raise_for_status()
-            payload = response.json()
-        errors_payload = payload.get("errors")
-        errors = errors_payload if isinstance(errors_payload, dict) else {}
+    def _fixture_request_policy(self, params: dict[str, Any]) -> tuple[int, str]:
+        """Endpoint-specific TTL + priority for a fixtures request by lifecycle."""
+        if "live" in params:
+            return 90, PRIORITY_ESSENTIAL
+        if "id" in params:
+            return 300, PRIORITY_ESSENTIAL
+        raw_date = params.get("date")
+        if raw_date:
+            try:
+                target_date = date.fromisoformat(str(raw_date))
+            except ValueError:
+                target_date = self._today_local()
+            return schedule_fixture_policy(target_date, self._today_local())
+        return 300, PRIORITY_NORMAL
+
+    def _record_fixture_query(
+        self,
+        *,
+        params: dict[str, Any],
+        payload: dict[str, Any],
+        http_status: int,
+        response_status: str,
+        errors: dict[str, Any],
+    ) -> None:
         rows = payload.get("response")
-        if not isinstance(rows, list):
-            raise FixtureProviderError("unexpected API-Football fixtures response payload")
         diagnostic_entry = {
             "query_timestamp": utc_now_iso(),
             "provider": API_FOOTBALL_PROVIDER,
-            "http_status": int(response.status_code),
-            "response_status": "OK" if not errors else "ERROR",
+            "http_status": int(http_status),
+            "response_status": response_status,
             "provider_league_id": params.get("league"),
             "provider_season": params.get("season"),
             "params": {str(key): value for key, value in params.items()},
-            "response_results": int(payload.get("results") or 0),
-            "raw_fixture_count": len(rows),
+            "response_results": int(payload.get("results") or 0) if isinstance(payload, dict) else 0,
+            "raw_fixture_count": len(rows) if isinstance(rows, list) else 0,
             "errors": errors,
         }
         with self._query_log_lock:
             self._query_log.append(diagnostic_entry)
+
+    def _request_fixtures(self, *, params: dict[str, Any]) -> list[dict[str, Any]]:
+        ttl_seconds, priority = self._fixture_request_policy(params)
+        if self._budget is not None:
+            decision = self._budget.issue(
+                provider=PROVIDER_API_FOOTBALL,
+                endpoint="fixtures",
+                params=params,
+                ttl_seconds=ttl_seconds,
+                priority=priority,
+            )
+            if decision.action == ACTION_CACHE_HIT and decision.cached_payload is not None:
+                self._record_fixture_query(
+                    params=params,
+                    payload=decision.cached_payload,
+                    http_status=200,
+                    response_status="CACHE_HIT",
+                    errors={},
+                )
+                rows = decision.cached_payload.get("response")
+                return list(rows) if isinstance(rows, list) else []
+            if not decision.allow:
+                blocked_reason = decision.reason or "request blocked"
+                self._record_fixture_query(
+                    params=params,
+                    payload={"response": [], "results": 0},
+                    http_status=0,
+                    response_status=decision.action,
+                    errors={params.get("league") or "fixtures": blocked_reason},
+                )
+                return []
+
+        with self._client() as client:
+            response = client.get("https://v3.football.api-sports.io/fixtures", params=params)
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"errors": {"message": response.text[:200]}, "response": [], "results": 0}
+        errors_payload = payload.get("errors")
+        errors = errors_payload if isinstance(errors_payload, dict) else {}
+        failure_state, failure_message, _ = classify_provider_response(
+            http_status=int(response.status_code),
+            payload=payload,
+            response_headers=response.headers,
+        )
+        if self._budget is not None:
+            if failure_state is not None:
+                self._budget.finish_failure(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint="fixtures",
+                    params=params,
+                    state=failure_state,
+                    message=failure_message,
+                    response_headers=response.headers,
+                )
+            else:
+                provider_timestamp = None
+                rows_payload = payload.get("response")
+                if isinstance(rows_payload, list) and rows_payload:
+                    fixture_payload = rows_payload[0].get("fixture") or {}
+                    provider_timestamp = str(fixture_payload.get("update") or "").strip() or None
+                self._budget.finish_success(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint="fixtures",
+                    params=params,
+                    payload=payload,
+                    provider_timestamp=provider_timestamp,
+                    ttl_seconds=ttl_seconds,
+                    response_headers=response.headers,
+                )
+        rows = payload.get("response")
+        if not isinstance(rows, list):
+            raise FixtureProviderError("unexpected API-Football fixtures response payload")
+        self._record_fixture_query(
+            params=params,
+            payload=payload,
+            http_status=int(response.status_code),
+            response_status="OK" if not errors else "ERROR",
+            errors=errors,
+        )
         return rows
 
     def _request_fixture_statistics(self, *, provider_fixture_id: str) -> list[dict[str, Any]]:
         cache_key = str(provider_fixture_id)
-        with self._statistics_cache_lock:
-            cached = self._statistics_cache.get(cache_key)
-        if cached is not None and monotonic() - cached[0] <= self._config.statistics_cache_ttl_seconds:
-            rows = list(cached[1])
-            diagnostic_entry = {
-                "query_timestamp": utc_now_iso(),
-                "provider": API_FOOTBALL_PROVIDER,
-                "http_status": 200,
-                "response_status": "CACHE_HIT",
-                "provider_fixture_id": provider_fixture_id,
-                "params": {"fixture": provider_fixture_id},
-                "response_results": len(rows),
-                "raw_fixture_count": len(rows),
-                "errors": {},
-            }
-            with self._query_log_lock:
-                self._query_log.append(diagnostic_entry)
-            return rows
+        if self._budget is None:
+            with self._statistics_cache_lock:
+                cached = self._statistics_cache.get(cache_key)
+            if cached is not None and monotonic() - cached[0] <= self._config.statistics_cache_ttl_seconds:
+                return list(cached[1])
+        else:
+            decision = self._budget.issue(
+                provider=PROVIDER_API_FOOTBALL,
+                endpoint="fixtures/statistics",
+                params={"fixture": provider_fixture_id},
+                ttl_seconds=self._config.statistics_cache_ttl_seconds,
+                priority=PRIORITY_ESSENTIAL,
+            )
+            if decision.action == ACTION_CACHE_HIT and decision.cached_payload is not None:
+                rows = decision.cached_payload.get("response")
+                if isinstance(rows, list):
+                    return list(rows)
+            if not decision.allow:
+                return []
 
         with self._client() as client:
             response = client.get(API_FOOTBALL_FIXTURE_STATS_ENDPOINT, params={"fixture": provider_fixture_id})
-            response.raise_for_status()
-            payload = response.json()
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"errors": {"message": response.text[:200]}, "response": [], "results": 0}
         errors_payload = payload.get("errors")
         errors = errors_payload if isinstance(errors_payload, dict) else {}
+        failure_state, failure_message, _ = classify_provider_response(
+            http_status=int(response.status_code),
+            payload=payload,
+            response_headers=response.headers,
+        )
+        if self._budget is not None:
+            if failure_state is not None:
+                self._budget.finish_failure(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint="fixtures/statistics",
+                    params={"fixture": provider_fixture_id},
+                    state=failure_state,
+                    message=failure_message,
+                    response_headers=response.headers,
+                )
+            else:
+                provider_timestamp = None
+                rows_payload = payload.get("response")
+                if isinstance(rows_payload, list) and rows_payload:
+                    provider_timestamp = str((rows_payload[0].get("update") or "")).strip() or None
+                self._budget.finish_success(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint="fixtures/statistics",
+                    params={"fixture": provider_fixture_id},
+                    payload=payload,
+                    provider_timestamp=provider_timestamp,
+                    ttl_seconds=self._config.statistics_cache_ttl_seconds,
+                    response_headers=response.headers,
+                )
         rows = payload.get("response")
         if not isinstance(rows, list):
             raise FixtureProviderError("unexpected API-Football fixture statistics response payload")
@@ -890,6 +1031,9 @@ class ApiFootballFixtureProvider(FixtureProvider):
     def _local_date_for_fixture(self, fixture: NormalizedFixture) -> date:
         timezone_name = ZoneInfo(self._config.display_timezone)
         return datetime.fromisoformat(fixture.kickoff_utc).astimezone(timezone_name).date()
+
+    def _today_local(self) -> date:
+        return datetime.now(timezone.utc).astimezone(ZoneInfo(self._config.display_timezone)).date()
 
     def _normalize_fixture(self, payload: dict[str, Any]) -> NormalizedFixture | None:
         fixture_payload = payload.get("fixture") or {}

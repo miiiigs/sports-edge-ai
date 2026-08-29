@@ -209,6 +209,28 @@
       <div><span>CLV</span><strong>{{ payload.system_status.clv.state }}</strong></div>
     </div>
   </article>
+
+  <article class="detail-card">
+    <p class="eyebrow">Provider Request Budget</p>
+    <h3>API-Football Quota &amp; Cache</h3>
+    <div class="data-list">
+      <div><span>Paid Calls Allowed</span><strong>{{ payload.system_status.paid_provider_calls_allowed }}</strong></div>
+      <div><span>Quota State</span><strong>{{ payload.system_status.provider_budget.quota.state }}</strong></div>
+      <div><span>Daily Limit</span><strong>{{ payload.system_status.provider_budget.quota.daily_limit or 'UNKNOWN' }}</strong></div>
+      <div><span>Daily Remaining</span><strong>{{ payload.system_status.provider_budget.quota.daily_remaining or 'UNKNOWN' }}</strong></div>
+      <div><span>Minute Remaining</span><strong>{{ payload.system_status.provider_budget.quota.minute_remaining or 'UNKNOWN' }}</strong></div>
+      <div><span>Quota Reset</span><strong>{{ payload.system_status.provider_budget.quota.quota_reset_at or 'UNKNOWN' }}</strong></div>
+      <div><span>Last Provider Request</span><strong>{{ payload.system_status.provider_budget.quota.last_request_at or 'N/A' }}</strong></div>
+      <div><span>Last Success</span><strong>{{ payload.system_status.provider_budget.quota.last_success_at or 'N/A' }}</strong></div>
+      <div><span>Circuit State</span><strong>{{ payload.system_status.provider_budget.circuit.state }}</strong></div>
+      <div><span>HTTP Requests</span><strong>{{ payload.system_status.provider_budget.metrics.provider_http_requests }}</strong></div>
+      <div><span>Cache Hits</span><strong>{{ payload.system_status.provider_budget.metrics.requests_cached }}</strong></div>
+      <div><span>Blocked By Gate</span><strong>{{ payload.system_status.provider_budget.metrics.requests_blocked_gate }}</strong></div>
+      <div><span>Blocked By Governor</span><strong>{{ payload.system_status.provider_budget.metrics.requests_blocked_governor }}</strong></div>
+      <div><span>Blocked By Circuit</span><strong>{{ payload.system_status.provider_budget.metrics.requests_blocked_circuit }}</strong></div>
+      <div><span>Cache Entries</span><strong>{{ payload.system_status.provider_budget.cache.entries }}</strong></div>
+    </div>
+  </article>
 </section>
 
 <section class="ops-grid">
