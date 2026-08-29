@@ -78,6 +78,7 @@ def _dashboard_config(tmp_path: Path) -> DashboardConfig:
         enable_scheduler=False,
         current_odds_connected=False,
         current_xg_connected=False,
+        allow_paid_provider_calls=True,
     )
 
 

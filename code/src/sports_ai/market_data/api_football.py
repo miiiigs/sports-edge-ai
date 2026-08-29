@@ -14,6 +14,15 @@ from typing import Any
 import httpx
 
 from ..dashboard.models import normalize_text_key, parse_iso_datetime
+from ..dashboard.provider_budget import (
+    ACTION_CACHE_HIT,
+    PRIORITY_LOW,
+    PRIORITY_NORMAL,
+    PROVIDER_API_FOOTBALL,
+    ProviderRequestBudget,
+    classify_provider_response,
+    odds_policy_for_kickoff,
+)
 from ..locking import canonical_hash
 from .freshness import (
     FRESHNESS_STATE_FRESH,
@@ -29,6 +38,7 @@ API_FOOTBALL_ODDS_VERSION = "api_football_current_market_provider_v1"
 API_FOOTBALL_ODDS_ENDPOINT = "https://v3.football.api-sports.io/odds"
 API_FOOTBALL_ODDS_MAPPING_ENDPOINT = "https://v3.football.api-sports.io/odds/mapping"
 API_FOOTBALL_FIXTURE_DETAIL_ENDPOINT = "https://v3.football.api-sports.io/fixtures"
+API_FOOTBALL_MAPPING_TTL_SECONDS = 12 * 60 * 60
 
 _MARKET_NAME_MAP = {
     "Match Winner": "1x2",
@@ -127,6 +137,11 @@ class ApiFootballOddsProvider:
         self._query_log: list[dict[str, Any]] = []
         self._query_log_lock = Lock()
         self._last_error: str | None = None
+        self._budget: ProviderRequestBudget | None = None
+
+    def attach_request_budget(self, budget: ProviderRequestBudget) -> None:
+        """Attach the shared provider request budget (gate + cache + governor)."""
+        self._budget = budget
 
     def provider_name(self) -> str:
         return API_FOOTBALL_MARKET_PROVIDER
@@ -200,6 +215,15 @@ class ApiFootballOddsProvider:
         with self._query_log_lock:
             self._query_log.append(entry)
 
+    def _endpoint_name(self, endpoint: str) -> str:
+        if endpoint == API_FOOTBALL_ODDS_ENDPOINT:
+            return "odds"
+        if endpoint == API_FOOTBALL_ODDS_MAPPING_ENDPOINT:
+            return "odds/mapping"
+        if endpoint == API_FOOTBALL_FIXTURE_DETAIL_ENDPOINT:
+            return "fixtures"
+        return endpoint
+
     def _request_json(
         self,
         *,
@@ -207,19 +231,52 @@ class ApiFootballOddsProvider:
         params: dict[str, Any] | None,
         ttl_seconds: int,
         query_kind: str,
+        priority: str = PRIORITY_NORMAL,
     ) -> dict[str, Any]:
         cache_key = self._cache_key(endpoint, params)
-        cached = self._cache_get(cache_key, ttl_seconds=ttl_seconds)
-        if cached is not None:
-            self._record_query(
-                query_kind=query_kind,
+        endpoint_name = self._endpoint_name(endpoint)
+        if self._budget is not None:
+            decision = self._budget.issue(
+                provider=PROVIDER_API_FOOTBALL,
+                endpoint=endpoint_name,
                 params=params,
-                status="CACHE_HIT",
-                results=int(cached.get("results") or 0),
-                errors=cached.get("errors") or [],
+                ttl_seconds=ttl_seconds,
+                priority=priority,
             )
-            return cached
+            if decision.action == ACTION_CACHE_HIT and decision.cached_payload is not None:
+                self._record_query(
+                    query_kind=query_kind,
+                    params=params,
+                    status="CACHE_HIT",
+                    results=int(decision.cached_payload.get("results") or 0),
+                    errors=decision.cached_payload.get("errors") or [],
+                )
+                return decision.cached_payload
+            if not decision.allow:
+                self._last_error = decision.reason
+                self._record_query(
+                    query_kind=query_kind,
+                    params=params,
+                    status=decision.action,
+                    results=0,
+                    errors={query_kind: decision.reason or "request blocked"},
+                )
+                return {"response": [], "results": 0, "errors": {query_kind: decision.reason or "request blocked"}}
+        else:
+            cached = self._cache_get(cache_key, ttl_seconds=ttl_seconds)
+            if cached is not None:
+                self._record_query(
+                    query_kind=query_kind,
+                    params=params,
+                    status="CACHE_HIT",
+                    results=int(cached.get("results") or 0),
+                    errors=cached.get("errors") or [],
+                )
+                return cached
 
+        payload: dict[str, Any] | None = None
+        response_status_code: int | None = None
+        response_headers: Any | None = None
         try:
             with httpx.Client(
                 timeout=self._config.timeout_seconds,
@@ -227,30 +284,92 @@ class ApiFootballOddsProvider:
                 headers={"x-apisports-key": self._token()},
             ) as client:
                 response = client.get(endpoint, params=params)
+                response_status_code = int(response.status_code)
+                response_headers = response.headers
                 response.raise_for_status()
                 payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            failure_state, failure_message, _ = classify_provider_response(
+                http_status=int(exc.response.status_code),
+                payload=payload,
+                response_headers=exc.response.headers,
+            )
+            if self._budget is not None:
+                self._budget.finish_failure(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint=endpoint_name,
+                    params=params,
+                    state=failure_state,
+                    message=failure_message or str(exc),
+                    response_headers=exc.response.headers,
+                )
+            self._last_error = str(exc)
+            self._record_query(query_kind=query_kind, params=params, status="ERROR", results=0, errors=str(exc))
+            raise MarketProviderError(f"API-Football market request failed: {exc}") from exc
         except httpx.HTTPError as exc:  # pragma: no cover - network defensive
+            if self._budget is not None:
+                self._budget.finish_failure(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint=endpoint_name,
+                    params=params,
+                    state=None,
+                    message=str(exc),
+                )
             self._last_error = str(exc)
             self._record_query(query_kind=query_kind, params=params, status="ERROR", results=0, errors=str(exc))
             raise MarketProviderError(f"API-Football market request failed: {exc}") from exc
 
-        self._last_error = None
-        self._cache_set(cache_key, payload)
+        failure_state, failure_message, _ = classify_provider_response(
+            http_status=int(response_status_code or 0),
+            payload=payload,
+            response_headers=response_headers,
+        )
+        if self._budget is not None:
+            if failure_state is not None:
+                self._budget.finish_failure(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint=endpoint_name,
+                    params=params,
+                    state=failure_state,
+                    message=failure_message,
+                    response_headers=response_headers,
+                )
+            else:
+                provider_timestamp = None
+                if isinstance(payload, dict):
+                    rows = payload.get("response") or []
+                    if rows:
+                        provider_timestamp = str((rows[0].get("update") or "")).strip() or None
+                self._budget.finish_success(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint=endpoint_name,
+                    params=params,
+                    payload=payload or {},
+                    provider_timestamp=provider_timestamp,
+                    ttl_seconds=ttl_seconds,
+                    response_headers=response_headers,
+                )
+        if failure_state is not None:
+            self._last_error = failure_message
+        else:
+            self._last_error = None
+        self._cache_set(cache_key, payload or {})
         self._record_query(
             query_kind=query_kind,
             params=params,
-            status="OK",
-            results=int(payload.get("results") or 0),
-            errors=payload.get("errors") or [],
+            status="ERROR" if failure_state is not None else "OK",
+            results=int((payload or {}).get("results") or 0),
+            errors=(payload or {}).get("errors") or [] if isinstance(payload, dict) else [],
         )
-        return payload
+        return payload or {}
 
     def _mapping_rows(self) -> list[dict[str, Any]]:
         payload = self._request_json(
             endpoint=API_FOOTBALL_ODDS_MAPPING_ENDPOINT,
             params=None,
-            ttl_seconds=self._config.mapping_cache_ttl_seconds,
+            ttl_seconds=API_FOOTBALL_MAPPING_TTL_SECONDS,
             query_kind="odds_mapping_page_1",
+            priority=PRIORITY_LOW,
         )
         total_pages = int(((payload.get("paging") or {}).get("total")) or 1)
         rows = list(payload.get("response") or [])
@@ -258,8 +377,9 @@ class ApiFootballOddsProvider:
             page_payload = self._request_json(
                 endpoint=API_FOOTBALL_ODDS_MAPPING_ENDPOINT,
                 params={"page": page},
-                ttl_seconds=self._config.mapping_cache_ttl_seconds,
+                ttl_seconds=API_FOOTBALL_MAPPING_TTL_SECONDS,
                 query_kind=f"odds_mapping_page_{page}",
+                priority=PRIORITY_LOW,
             )
             rows.extend(page_payload.get("response") or [])
         return rows
@@ -470,11 +590,15 @@ class ApiFootballOddsProvider:
         if fixture_context is None:
             raise MarketProviderError("fixture_context is required for cross-provider market mapping")
         provider_fixture_id = self._resolve_provider_fixture_id(fixture_context)
+        odds_ttl, odds_priority = odds_policy_for_kickoff(
+            None if fixture_context.get("kickoff_utc") is None else str(fixture_context["kickoff_utc"])
+        )
         payload = self._request_json(
             endpoint=API_FOOTBALL_ODDS_ENDPOINT,
             params={"fixture": provider_fixture_id},
-            ttl_seconds=self._config.odds_cache_ttl_seconds,
+            ttl_seconds=odds_ttl,
             query_kind="fixture_odds",
+            priority=odds_priority,
         )
         return self._snapshot_rows_from_payload(
             fixture_id=fixture_id,

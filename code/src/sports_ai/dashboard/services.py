@@ -47,6 +47,7 @@ from .models import (
     utc_now_iso,
 )
 from .prediction_service import PredictionContext, attach_edge_desk_shadow_bundle, build_prediction_for_fixture
+from .provider_budget import QUOTA_EXHAUSTED, ProviderRequestBudget
 from .runtime_paths import ensure_operational_data_dir, resolve_dashboard_operational_paths
 from .snapshot_service import CurrentFootballModelSnapshot, CurrentSnapshotError, build_current_football_model_snapshot
 
@@ -61,6 +62,11 @@ DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR = "SPORTS_AI_CURRENT_ODDS_CONNECTED"
 DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_ODDS_SYNC"
 DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR = "SPORTS_AI_ODDS_SYNC_ONCE_TOKEN"
 DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR = "SPORTS_AI_STARTUP_SYNC_TIMEOUT_SECONDS"
+DEFAULT_ALLOW_PAID_PROVIDER_CALLS_ENV_VAR = "SPORTS_AI_ALLOW_PAID_PROVIDER_CALLS"
+DEFAULT_API_FOOTBALL_DAILY_BUDGET_ENV_VAR = "SPORTS_AI_API_FOOTBALL_DAILY_BUDGET"
+DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR = "SPORTS_AI_API_FOOTBALL_QUOTA_RESET_HOUR_UTC"
+
+PAID_PROVIDER_DISABLED_STATE = "PAID_PROVIDER_CALLS_DISABLED"
 
 logger = logging.getLogger(__name__)
 PAPER_ACTIVE_STATES = {"PENDING", "OPEN", "UNSETTLED"}
@@ -391,6 +397,9 @@ class DashboardConfig:
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
     startup_sync_timeout_seconds: int = 15
+    allow_paid_provider_calls: bool = False
+    api_football_daily_budget: int | None = None
+    api_football_quota_reset_hour_utc: int = 0
 
     @classmethod
     def default(cls) -> "DashboardConfig":
@@ -416,6 +425,9 @@ class DashboardConfig:
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
             startup_sync_timeout_seconds=_env_int(DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR, 15),
+            allow_paid_provider_calls=_env_bool(DEFAULT_ALLOW_PAID_PROVIDER_CALLS_ENV_VAR, False),
+            api_football_daily_budget=_env_int(DEFAULT_API_FOOTBALL_DAILY_BUDGET_ENV_VAR, None),
+            api_football_quota_reset_hour_utc=_env_int(DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR, 0) or 0,
         )
 
 
@@ -435,6 +447,16 @@ class DashboardServices:
         self.fixture_provider = fixture_provider or _default_fixture_provider()
         self.market_provider = market_provider or _default_market_provider(self.config)
         self.statistics_provider = statistics_provider or _default_statistics_provider()
+        self._provider_budget = ProviderRequestBudget(
+            self.config.dashboard_db_path,
+            allow_paid_provider_calls=self.config.allow_paid_provider_calls,
+            daily_budget=self.config.api_football_daily_budget,
+            quota_reset_hour_utc=self.config.api_football_quota_reset_hour_utc,
+        )
+        for provider in (self.fixture_provider, self.market_provider, self.statistics_provider):
+            attach = getattr(provider, "attach_request_budget", None)
+            if callable(attach):
+                attach(self._provider_budget)
         self._xg_profile_factory = xg_profile_factory
         self.snapshot: CurrentFootballModelSnapshot | None = None
         self.snapshot_error: str | None = None
@@ -2260,7 +2282,14 @@ class DashboardServices:
 
                 provider_error_text = self._provider_error_text(provider_diagnostics)
                 provider_state = "DEGRADED" if provider_diagnostics.get("has_errors") else "CONNECTED"
-                if provider_state == "CONNECTED":
+                paid_fixture_provider = self.fixture_provider.provider_name() == "api-football"
+                if paid_fixture_provider and not self.config.allow_paid_provider_calls:
+                    provider_state = PAID_PROVIDER_DISABLED_STATE
+                    provider_error_text = (
+                        f"{PAID_PROVIDER_DISABLED_STATE}: set {DEFAULT_ALLOW_PAID_PROVIDER_CALLS_ENV_VAR}=1 "
+                        "to enable paid provider polling"
+                    )
+                elif provider_state == "CONNECTED":
                     self._provider_state["last_successful_sync_at"] = attempted_at
 
                 nearest_supported_fixture = self._nearest_supported_fixture(rows_with_predictions)
@@ -2884,6 +2913,57 @@ class DashboardServices:
         last_sync_at = utc_now_iso()
         paper_entry_count = 0
         settlement_queue_count = 0
+        paid_market_provider = self.market_provider.provider_name() == "api-football"
+        if paid_market_provider and not self.config.allow_paid_provider_calls:
+            self._persist_market_runtime_checkpoint(
+                market_state={
+                    **market_state,
+                    "state": PAID_PROVIDER_DISABLED_STATE,
+                    "reason": f"Set {DEFAULT_ALLOW_PAID_PROVIDER_CALLS_ENV_VAR}=1 to enable paid market polling.",
+                },
+                evaluations={},
+                snapshot_count=0,
+                matched_count=0,
+                candidate_count=0,
+                passed_safeguards=0,
+                unresolved_fixture_count=0,
+                stale_market_count=0,
+                markets_covered=set(),
+                freshness_values=set(),
+                fixtures_considered=0,
+                paper_entry_count=0,
+                settlement_queue_count=0,
+                last_successful_snapshot_at=None,
+                last_sync_at=last_sync_at,
+                dashboard_conn=dashboard_conn,
+            )
+            return
+
+        if paid_market_provider and self._provider_budget.quota_state() == QUOTA_EXHAUSTED:
+            self._persist_market_runtime_checkpoint(
+                market_state={
+                    **market_state,
+                    "state": "QUOTA_EXHAUSTED",
+                    "reason": "API-Football daily request allowance exhausted; market polling paused until reset.",
+                },
+                evaluations={},
+                snapshot_count=0,
+                matched_count=0,
+                candidate_count=0,
+                passed_safeguards=0,
+                unresolved_fixture_count=0,
+                stale_market_count=0,
+                markets_covered=set(),
+                freshness_values=set(),
+                fixtures_considered=0,
+                paper_entry_count=0,
+                settlement_queue_count=0,
+                last_successful_snapshot_at=None,
+                last_sync_at=last_sync_at,
+                dashboard_conn=dashboard_conn,
+            )
+            return
+
         if not market_state["configured"]:
             self._persist_market_runtime_checkpoint(
                 market_state=market_state,
@@ -4856,6 +4936,8 @@ class DashboardServices:
             "dashboard_ui_ready": "YES",
             "historical_validation": performance_status["historical_validation"],
             "market_provider": market_state,
+            "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
+            "provider_budget": self._provider_budget.snapshot(),
             "paper_tracking": {
                 "ledger_ready": "YES" if performance_status["paper_ledger"]["state"] == "READY" else "NO",
                 "waiting_for_market_provider": "YES" if not market_state["configured"] else "NO",
@@ -4909,6 +4991,8 @@ class DashboardServices:
             "last_fixture_sync_at": self._provider_state["last_sync_at"],
             "market_sync_state": self._market_runtime_state["state"],
             "last_market_sync_at": self._market_runtime_state["last_sync_at"],
+            "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
+            "provider_budget_quota_state": self._provider_budget.quota_state(),
             "settlement_queue_count": int(self._market_runtime_state.get("settlement_queue_count") or 0),
             "prediction_snapshot_ready": snapshot_ready,
             "dashboard_db_reachable": storage_state["dashboard_db_reachable"],
