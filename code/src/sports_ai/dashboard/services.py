@@ -2658,6 +2658,16 @@ class DashboardServices:
             try:
                 football_paper_trading.record_paper_trade_entry(conn, entry)
             except sqlite3.IntegrityError:
+                canonical_existing = self._find_canonical_existing_paper_entry(
+                    conn,
+                    prediction=prediction,
+                    market=str(row["market_family"]),
+                    selection=str(row["selection"]),
+                    line=None if row.get("line") is None else float(row["line"]),
+                )
+                if canonical_existing is not None:
+                    row["paper_trade_id"] = canonical_existing["paper_trade_id"]
+                    continue
                 existing = football_paper_trading.find_existing_paper_trade_entry(
                     conn,
                     prediction_id=str(prediction["prediction_id"]),

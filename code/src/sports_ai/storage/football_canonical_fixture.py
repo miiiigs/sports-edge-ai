@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -91,12 +91,16 @@ SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS paper_position_reconciliations (
         reconciliation_id INTEGER PRIMARY KEY AUTOINCREMENT,
         duplicate_paper_trade_id TEXT NOT NULL UNIQUE,
-        canonical_paper_trade_id TEXT NOT NULL UNIQUE,
+        canonical_paper_trade_id TEXT NOT NULL,
         reason TEXT NOT NULL,
         canonical_fixture_id TEXT NOT NULL,
         created_at TEXT NOT NULL,
         reconciliation_version TEXT NOT NULL
     )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_reconciliations_canonical_paper_trade_id
+    ON paper_position_reconciliations(canonical_paper_trade_id)
     """,
 )
 
@@ -153,7 +157,14 @@ def canonical_fixture_id_from_identity(
     kickoff_utc: str,
     season: str | None = None,
 ) -> str:
-    """Deterministic provider-independent canonical fixture identity."""
+    """Deterministic provider-independent canonical fixture identity.
+
+    The identity hash is based on competition + canonical home + canonical
+    away + kickoff ONLY. Season is deliberately excluded from the hash so a
+    fixture represented with season metadata by one provider and without it by
+    another still resolves to the SAME canonical fixture. Season is retained as
+    metadata on the ``canonical_fixtures`` row.
+    """
     normalized_kickoff = normalize_kickoff_utc(kickoff_utc) or ""
     payload = {
         "competition_id": str(competition_id or "").upper(),
@@ -161,8 +172,6 @@ def canonical_fixture_id_from_identity(
         "away": canonical_team_name(away_team_name),
         "kickoff_utc": normalized_kickoff,
     }
-    if season:
-        payload["season"] = str(season)
     return canonical_hash(payload)
 
 
@@ -200,9 +209,33 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    with conn:
-        for statement in SCHEMA_STATEMENTS:
-            conn.execute(statement)
+    # NOTE: statements run without an explicit commit so that callers inside a
+    # transaction (e.g. atomic APPLY) control the commit/rollback boundary.
+    for statement in SCHEMA_STATEMENTS:
+        conn.execute(statement)
+    has_paper_table = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='paper_trade_entries'"
+    ).fetchone()[0] > 0
+    if not has_paper_table:
+        return
+    # Defensively ensure the derived canonical-key column exists (it is normally
+    # added by football_paper_trading.ensure_schema).
+    existing_columns = {
+        str(row["name"]) for row in conn.execute("PRAGMA table_info(paper_trade_entries)").fetchall()
+    }
+    if "canonical_business_key_signature" not in existing_columns:
+        conn.execute("ALTER TABLE paper_trade_entries ADD COLUMN canonical_business_key_signature TEXT")
+    # Enforce the canonical business-key invariant: a COUNTED position may have
+    # at most one canonical business key. Duplicate/superseded representations
+    # keep NULL canonical keys so they never compete for the unique value.
+    # This fails loudly if non-NULL duplicates already exist.
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_trade_entries_canonical_business_key_signature
+        ON paper_trade_entries(canonical_business_key_signature)
+        WHERE canonical_business_key_signature IS NOT NULL
+        """
+    )
 
 
 def split_provider_fixture_id(fixture_id: str) -> tuple[str, str]:
@@ -241,15 +274,14 @@ def resolve_or_create_canonical_fixture(
     ).fetchone()
     if existing_alias is not None:
         canonical_fixture_id = str(existing_alias["canonical_fixture_id"])
-        with conn:
-            conn.execute(
-                "UPDATE fixture_provider_aliases SET last_seen_at = ? WHERE provider = ? AND provider_fixture_id = ?",
-                (now_iso, provider, provider_fixture_id),
-            )
-            conn.execute(
-                "UPDATE canonical_fixtures SET last_seen_at = ? WHERE canonical_fixture_id = ?",
-                (now_iso, canonical_fixture_id),
-            )
+        conn.execute(
+            "UPDATE fixture_provider_aliases SET last_seen_at = ? WHERE provider = ? AND provider_fixture_id = ?",
+            (now_iso, provider, provider_fixture_id),
+        )
+        conn.execute(
+            "UPDATE canonical_fixtures SET last_seen_at = ? WHERE canonical_fixture_id = ?",
+            (now_iso, canonical_fixture_id),
+        )
         return canonical_fixture_id, "aliased"
 
     canonical_fixture_id = canonical_fixture_id_from_identity(
@@ -283,41 +315,39 @@ def resolve_or_create_canonical_fixture(
         status = "matched"
     else:
         status = "created"
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO canonical_fixtures (
-                    canonical_fixture_id, competition_id, season, normalized_home_team,
-                    normalized_away_team, kickoff_utc, created_at, last_seen_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    canonical_fixture_id,
-                    str(competition_id or "").upper(),
-                    season,
-                    normalized_home,
-                    normalized_away,
-                    normalized_kickoff,
-                    now_iso,
-                    now_iso,
-                ),
-            )
-    with conn:
         conn.execute(
             """
-            INSERT INTO fixture_provider_aliases (
-                provider, provider_fixture_id, canonical_fixture_id, first_seen_at, last_seen_at, matching_method
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO canonical_fixtures (
+                canonical_fixture_id, competition_id, season, normalized_home_team,
+                normalized_away_team, kickoff_utc, created_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                provider,
-                provider_fixture_id,
                 canonical_fixture_id,
+                str(competition_id or "").upper(),
+                season,
+                normalized_home,
+                normalized_away,
+                normalized_kickoff,
                 now_iso,
                 now_iso,
-                "identity_match",
             ),
         )
+    conn.execute(
+        """
+        INSERT INTO fixture_provider_aliases (
+            provider, provider_fixture_id, canonical_fixture_id, first_seen_at, last_seen_at, matching_method
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            provider,
+            provider_fixture_id,
+            canonical_fixture_id,
+            now_iso,
+            now_iso,
+            "identity_match",
+        ),
+    )
     return canonical_fixture_id, status
 
 
@@ -341,6 +371,10 @@ def fetch_reconciliation_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def conn_row_count(conn: sqlite3.Connection, table_name: str) -> int:
+    return int(conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0])
+
+
 def record_reconciliation(
     conn: sqlite3.Connection,
     *,
@@ -350,18 +384,39 @@ def record_reconciliation(
     reason: str = REASON_CROSS_PROVIDER_DUPLICATE,
     version: str = CANONICAL_RECONCILIATION_VERSION,
 ) -> None:
-    """Additively mark a duplicate representation. Idempotent per duplicate."""
+    """Additively mark a duplicate representation.
+
+    Idempotency is explicit:
+
+    * same ``duplicate_paper_trade_id`` already reconciled to the SAME
+      canonical row  -> safe no-op;
+    * same ``duplicate_paper_trade_id`` mapped to a DIFFERENT canonical row
+      -> integrity failure (never silently ignored).
+
+    One canonical position may have any number of duplicate representations.
+    """
     ensure_schema(conn)
-    with conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO paper_position_reconciliations (
-                duplicate_paper_trade_id, canonical_paper_trade_id, reason,
-                canonical_fixture_id, created_at, reconciliation_version
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (duplicate_paper_trade_id, canonical_paper_trade_id, reason, canonical_fixture_id, _utc_now(), version),
-        )
+    existing = conn.execute(
+        "SELECT canonical_paper_trade_id FROM paper_position_reconciliations WHERE duplicate_paper_trade_id = ?",
+        (duplicate_paper_trade_id,),
+    ).fetchone()
+    if existing is not None:
+        if str(existing["canonical_paper_trade_id"]) != canonical_paper_trade_id:
+            raise sqlite3.IntegrityError(
+                "DUPLICATE_ALREADY_RECONCILED_TO_DIFFERENT_CANONICAL: "
+                f"{duplicate_paper_trade_id} already maps to {existing['canonical_paper_trade_id']}, "
+                f"cannot remap to {canonical_paper_trade_id}"
+            )
+        return
+    conn.execute(
+        """
+        INSERT INTO paper_position_reconciliations (
+            duplicate_paper_trade_id, canonical_paper_trade_id, reason,
+            canonical_fixture_id, created_at, reconciliation_version
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (duplicate_paper_trade_id, canonical_paper_trade_id, reason, canonical_fixture_id, _utc_now(), version),
+    )
 
 
 def find_counted_paper_trade_by_canonical_key(
@@ -412,6 +467,7 @@ class ReconciliationPlan:
     inconsistencies: tuple[dict[str, Any], ...] = ()
     canonical_fixture_count: int = 0
     cross_provider_fixture_groups: int = 0
+    canonical_fixture_by_fixture_id: dict[str, str] = field(default_factory=dict)
 
     @property
     def duplicate_representation_count(self) -> int:
@@ -440,20 +496,22 @@ def build_reconciliation_plan(
     fixture_identity: Mapping[str, Mapping[str, Any]],
     *,
     kickoff_tolerance_seconds: int = DEFAULT_KICKOFF_TOLERANCE_SECONDS,
+    persist_conn: sqlite3.Connection | None = None,
 ) -> ReconciliationPlan:
-    """Build the deterministic cross-provider reconciliation plan (non-mutating).
+    """Build the deterministic cross-provider reconciliation plan.
 
     ``paper_rows`` is a list of merged paper-trade rows. ``fixture_identity``
     maps each provider-qualified fixture_id to a dict with ``competition_id``,
     ``home_team_name``, ``away_team_name``, ``kickoff_utc`` and optional
     ``season``.
 
-    Fixture identity resolution runs against an in-memory canonical store so the
-    exact same deterministic logic (kickoff tolerance + ambiguity fail-closed)
-    applies as in the persisted DB path.
+    When ``persist_conn`` is provided the canonical fixtures + provider aliases
+    are persisted into that connection as each fixture is resolved (APPLY path);
+    otherwise resolution runs against an in-memory store so the dry run is
+    non-mutating.
     """
-    scratch = connect(":memory:")
-    ensure_schema(scratch)
+    resolution_store = persist_conn if persist_conn is not None else connect(":memory:")
+    ensure_schema(resolution_store)
     canonical_by_fixture: dict[str, str] = {}
     ambiguous: list[str] = []
     unresolved: list[str] = []
@@ -472,7 +530,7 @@ def build_reconciliation_plan(
         provider, provider_fixture_id = split_provider_fixture_id(fixture_id)
         try:
             canonical_fixture_id, _ = resolve_or_create_canonical_fixture(
-                scratch,
+                resolution_store,
                 provider=provider,
                 provider_fixture_id=provider_fixture_id,
                 competition_id=str(competition_id),
@@ -559,6 +617,7 @@ def build_reconciliation_plan(
         inconsistencies=tuple(inconsistencies),
         canonical_fixture_count=len(set(canonical_by_fixture.values())),
         cross_provider_fixture_groups=cross_provider_groups,
+        canonical_fixture_by_fixture_id=dict(canonical_by_fixture),
     )
 
 
@@ -640,6 +699,14 @@ class ReconciliationResult:
     records_written: int = 0
     violations: tuple[str, ...] = ()
     existing_excluded: int = 0
+    canonical_keys_populated: int = 0
+    aliases_persisted: int = 0
+
+
+class _ReconciliationBlocked(RuntimeError):
+    def __init__(self, violations: list[str]) -> None:
+        super().__init__("; ".join(violations))
+        self.violations = tuple(violations)
 
 
 def build_plan_from_conn(
@@ -656,38 +723,122 @@ def build_plan_from_conn(
     return build_reconciliation_plan(rows, fixture_identity, kickoff_tolerance_seconds=kickoff_tolerance_seconds)
 
 
+def _populate_counted_canonical_keys(
+    conn: sqlite3.Connection,
+    paper_rows: list[dict[str, Any]],
+    plan: ReconciliationPlan,
+) -> int:
+    """Populate canonical business keys for COUNTED historical positions.
+
+    Only positions that will remain counted receive a canonical key; duplicate /
+    superseded representations keep ``canonical_business_key_signature = NULL``
+    so they never compete for the partial unique index.
+    """
+    excluded = plan.projected_excluded_ids
+    populated = 0
+    for row in paper_rows:
+        paper_trade_id = str(row.get("paper_trade_id") or "")
+        if paper_trade_id in excluded:
+            continue
+        fixture_id = str(row.get("fixture_id") or "")
+        canonical_fixture_id = plan.canonical_fixture_by_fixture_id.get(fixture_id)
+        if not canonical_fixture_id or canonical_fixture_id.startswith(("unresolved:", "ambiguous:")):
+            continue
+        signature = canonical_paper_business_key_signature(
+            canonical_fixture_id=canonical_fixture_id,
+            market=str(row.get("market") or ""),
+            selection=str(row.get("selection") or ""),
+            line=None if row.get("line") is None else float(row["line"]),
+        )
+        conn.execute(
+            "UPDATE paper_trade_entries SET canonical_business_key_signature = ? WHERE paper_trade_id = ?",
+            (signature, paper_trade_id),
+        )
+        populated += 1
+    return populated
+
+
 def apply_reconciliation(
     paper_conn: sqlite3.Connection,
     fixture_identity: Mapping[str, Mapping[str, Any]],
     *,
     kickoff_tolerance_seconds: int = DEFAULT_KICKOFF_TOLERANCE_SECONDS,
 ) -> ReconciliationResult:
-    """Validate safety invariants and apply the additive reconciliation."""
+    """Atomically validate and apply the additive reconciliation.
+
+    All canonical-fixture persistence, provider-alias persistence, reconciliation
+    exclusions, and counted canonical-key population run inside ONE SQLite
+    transaction. Any failure rolls back everything; there is no partially
+    applied reconciliation.
+    """
     from . import football_paper_trading
 
     ensure_schema(paper_conn)
     rows = football_paper_trading.fetch_paper_trade_rows(paper_conn)
-    plan = build_reconciliation_plan(rows, fixture_identity, kickoff_tolerance_seconds=kickoff_tolerance_seconds)
-    violations = validate_reconciliation_safety(paper_conn, plan, rows)
-    if violations:
-        return ReconciliationResult(plan=plan, applied=False, violations=tuple(violations))
-    existing = fetch_excluded_paper_trade_ids(paper_conn)
-    records_written = 0
-    for group in plan.duplicate_groups:
-        for duplicate in group.duplicate_rows:
-            duplicate_id = str(duplicate.get("paper_trade_id") or "")
-            if duplicate_id in existing:
-                continue
-            record_reconciliation(
-                paper_conn,
-                duplicate_paper_trade_id=duplicate_id,
-                canonical_paper_trade_id=str(group.canonical_row.get("paper_trade_id") or ""),
-                canonical_fixture_id=group.canonical_fixture_id,
+
+    integrity = paper_conn.execute("PRAGMA integrity_check").fetchone()[0]
+    if str(integrity).lower() != "ok":
+        return ReconciliationResult(
+            plan=ReconciliationPlan(total_rows=len(rows)),
+            applied=False,
+            violations=(f"PAPER_DB_INTEGRITY: {integrity}",),
+        )
+
+    try:
+        with paper_conn:
+            # Build the plan against the real connection so canonical fixtures
+            # and provider aliases are persisted as part of the same transaction.
+            plan = build_reconciliation_plan(
+                rows,
+                fixture_identity,
+                kickoff_tolerance_seconds=kickoff_tolerance_seconds,
+                persist_conn=paper_conn,
             )
-            records_written += 1
-    return ReconciliationResult(
-        plan=plan,
-        applied=True,
-        records_written=records_written,
-        existing_excluded=len(existing),
-    )
+            violations = validate_reconciliation_safety(paper_conn, plan, rows)
+            if violations:
+                raise _ReconciliationBlocked(list(violations))
+
+            existing = fetch_excluded_paper_trade_ids(paper_conn)
+            records_written = 0
+            for group in plan.duplicate_groups:
+                for duplicate in group.duplicate_rows:
+                    duplicate_id = str(duplicate.get("paper_trade_id") or "")
+                    # record_reconciliation is idempotent for an identical
+                    # existing mapping and raises on a conflicting one, so the
+                    # same duplicate can never be silently remapped.
+                    record_reconciliation(
+                        paper_conn,
+                        duplicate_paper_trade_id=duplicate_id,
+                        canonical_paper_trade_id=str(group.canonical_row.get("paper_trade_id") or ""),
+                        canonical_fixture_id=group.canonical_fixture_id,
+                    )
+                    if duplicate_id not in existing:
+                        records_written += 1
+
+            # Duplicates already carry reconciliation exclusions above; now mark
+            # counted positions with their canonical business keys. The partial
+            # unique index enforces the invariant inside this transaction.
+            keys_populated = _populate_counted_canonical_keys(paper_conn, rows, plan)
+
+        aliases = paper_conn.execute("SELECT COUNT(*) FROM fixture_provider_aliases").fetchone()[0]
+        return ReconciliationResult(
+            plan=plan,
+            applied=True,
+            records_written=records_written,
+            existing_excluded=len(existing),
+            canonical_keys_populated=keys_populated,
+            aliases_persisted=int(aliases),
+        )
+    except _ReconciliationBlocked as exc:
+        return ReconciliationResult(
+            plan=plan if "plan" in locals() else ReconciliationPlan(total_rows=len(rows)),
+            applied=False,
+            violations=tuple(exc.violations),
+            existing_excluded=len(fetch_excluded_paper_trade_ids(paper_conn)),
+        )
+    except sqlite3.IntegrityError as exc:
+        return ReconciliationResult(
+            plan=plan if "plan" in locals() else ReconciliationPlan(total_rows=len(rows)),
+            applied=False,
+            violations=(f"INTEGRITY_ERROR: {exc}",),
+        )

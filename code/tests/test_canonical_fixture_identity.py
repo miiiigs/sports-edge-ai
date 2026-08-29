@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ def _paper_db(tmp_path: Path):
     db_path = tmp_path / "paper.sqlite"
     conn = pt.connect(db_path)
     pt.ensure_schema(conn)
+    cf.ensure_schema(conn)
     return db_path, conn
 
 
@@ -54,6 +56,7 @@ def _entry(
     prediction_id: str = "prediction_a",
     kickoff: str = SUNDERLAND_FULHAM_KICK,
     bookmaker: str = "Pinnacle",
+    provider: str = "api-football",
 ) -> pt.PaperTradeEntry:
     return pt.PaperTradeEntry(
         prediction_id=prediction_id,
@@ -72,7 +75,7 @@ def _entry(
         safeguard_state="PASSED",
         entry_eligibility="ELIGIBLE",
         bookmaker=bookmaker,
-        provider="api-football",
+        provider=provider,
         entry_odds=2.5,
         created_at=created_at,
         canonical_business_key_signature=canonical_key,
@@ -124,18 +127,18 @@ def test_different_real_matches_never_merge_due_to_similar_names():
 
 def test_ambiguous_fixture_mapping_fails_closed(tmp_path):
     _, conn = _paper_db(tmp_path)
-    cf.ensure_schema(conn)
-    cf.resolve_or_create_canonical_fixture(conn, provider="football-data.org", provider_fixture_id="1",
-                                           competition_id=ENG1, home_team_name="Home", away_team_name="Away",
-                                           kickoff_utc="2026-08-30T13:00:00+00:00", kickoff_tolerance_seconds=0)
-    cf.resolve_or_create_canonical_fixture(conn, provider="api-football", provider_fixture_id="2",
-                                           competition_id=ENG1, home_team_name="Home", away_team_name="Away",
-                                           kickoff_utc="2026-08-30T13:05:00+00:00", kickoff_tolerance_seconds=0)
-    # A third fixture whose kickoff is within tolerance of BOTH canonical rows must fail closed.
-    with pytest.raises(cf.CanonicalFixtureAmbiguityError):
-        cf.resolve_or_create_canonical_fixture(conn, provider="api-football", provider_fixture_id="3",
+    with conn:
+        cf.resolve_or_create_canonical_fixture(conn, provider="football-data.org", provider_fixture_id="1",
                                                competition_id=ENG1, home_team_name="Home", away_team_name="Away",
-                                               kickoff_utc="2026-08-30T13:02:30+00:00", kickoff_tolerance_seconds=180)
+                                               kickoff_utc="2026-08-30T13:00:00+00:00", kickoff_tolerance_seconds=0)
+        cf.resolve_or_create_canonical_fixture(conn, provider="api-football", provider_fixture_id="2",
+                                               competition_id=ENG1, home_team_name="Home", away_team_name="Away",
+                                               kickoff_utc="2026-08-30T13:05:00+00:00", kickoff_tolerance_seconds=0)
+        # A third fixture whose kickoff is within tolerance of BOTH canonical rows must fail closed.
+        with pytest.raises(cf.CanonicalFixtureAmbiguityError):
+            cf.resolve_or_create_canonical_fixture(conn, provider="api-football", provider_fixture_id="3",
+                                                   competition_id=ENG1, home_team_name="Home", away_team_name="Away",
+                                                   kickoff_utc="2026-08-30T13:02:30+00:00", kickoff_tolerance_seconds=180)
 
 
 def test_kickoff_tolerance_behaves_exactly_as_configured():
@@ -530,3 +533,282 @@ def test_zero_live_provider_calls_occur_during_all_tests(tmp_path):
     services = _services(tmp_path)
     assert services.config.allow_paid_provider_calls is False
     assert services._provider_budget.metrics().get("http_requests", 0) == 0
+
+
+# ================================================================ PR #13 remediation
+THIRD_PROVIDER_FIXTURE = "the-odds-api:560554"
+FD_NEWCASTLE = "football-data.org:560548"
+API_NEWCASTLE = "api-football:1557378"
+
+
+def _three_provider_entries(created_offsets=("2026-08-28T23:00:00+00:00", "2026-08-28T23:05:00+00:00", "2026-08-28T23:10:00+00:00")):
+    return [
+        _entry(FD_SUNDERLAND, created_at=created_offsets[0]),
+        _entry(API_SUNDERLAND, created_at=created_offsets[1]),
+        _entry(THIRD_PROVIDER_FIXTURE, created_at=created_offsets[2]),
+    ]
+
+
+def _three_provider_identity():
+    return {
+        FD_SUNDERLAND: _identity(FD_SUNDERLAND),
+        API_SUNDERLAND: _identity(API_SUNDERLAND),
+        THIRD_PROVIDER_FIXTURE: _identity(THIRD_PROVIDER_FIXTURE),
+    }
+
+
+def test_one_canonical_row_supports_multiple_duplicate_reconciliations(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    result = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert result.applied is True
+    assert result.records_written == 2
+    rows = cf.fetch_reconciliation_rows(conn)
+    assert len(rows) == 2
+    # Both duplicates map to the SAME canonical paper trade.
+    canonical_ids = {r["canonical_paper_trade_id"] for r in rows}
+    assert len(canonical_ids) == 1
+    excluded = cf.fetch_excluded_paper_trade_ids(conn)
+    assert len(excluded) == 2
+
+
+def test_duplicate_paper_trade_id_remains_unique(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    plan = cf.build_reconciliation_plan(pt.fetch_paper_trade_rows(conn), _three_provider_identity())
+    cf.apply_reconciliation(conn, _three_provider_identity())
+    # Inserting a second reconciliation row for the same duplicate must be a safe no-op.
+    group = plan.duplicate_groups[0]
+    cf.record_reconciliation(
+        conn,
+        duplicate_paper_trade_id=str(group.duplicate_rows[0]["paper_trade_id"]),
+        canonical_paper_trade_id=str(group.canonical_row["paper_trade_id"]),
+        canonical_fixture_id=group.canonical_fixture_id,
+    )
+    assert len(cf.fetch_reconciliation_rows(conn)) == 2
+
+
+def test_same_duplicate_cannot_be_remapped_to_another_canonical(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    plan = cf.build_reconciliation_plan(pt.fetch_paper_trade_rows(conn), _three_provider_identity())
+    group = plan.duplicate_groups[0]
+    duplicate_id = str(group.duplicate_rows[0]["paper_trade_id"])
+    canonical_id = str(group.canonical_row["paper_trade_id"])
+    with conn:
+        cf.record_reconciliation(conn, duplicate_paper_trade_id=duplicate_id, canonical_paper_trade_id=canonical_id, canonical_fixture_id=group.canonical_fixture_id)
+        # Remapping the SAME duplicate to a different canonical must fail loudly.
+        with pytest.raises(sqlite3.IntegrityError):
+            cf.record_reconciliation(conn, duplicate_paper_trade_id=duplicate_id, canonical_paper_trade_id="paper_other", canonical_fixture_id=group.canonical_fixture_id)
+
+
+def test_reconciliation_does_not_silently_ignore_conflicting_writes(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    # Pre-seed a WRONG mapping for one planned duplicate -> apply must fail and roll back.
+    duplicate_id = _entry(API_SUNDERLAND, created_at="2026-08-28T23:05:00+00:00").paper_trade_id
+    with conn:
+        cf.record_reconciliation(conn, duplicate_paper_trade_id=duplicate_id, canonical_paper_trade_id="paper_wrong_canonical", canonical_fixture_id="cf_wrong")
+    result = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert result.applied is False
+    assert any("INTEGRITY_ERROR" in v or "ALREADY_RECONCILED" in v for v in result.violations)
+
+
+def test_three_providers_produce_one_counted_two_reconciled(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    result = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert result.applied is True
+    rows = pt.fetch_paper_trade_rows(conn)
+    assert len(rows) == 3  # raw preserved
+    counted = result.plan.counted_rows(rows)
+    assert len(counted) == 1
+    assert len(cf.fetch_reconciliation_rows(conn)) == 2
+
+
+def test_canonical_key_populated_for_counted_historical_positions_on_apply(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    # pre-apply: historical rows have no canonical key
+    assert all(r["canonical_business_key_signature"] is None for r in pt.fetch_paper_trade_rows(conn))
+    result = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert result.applied is True
+    assert result.canonical_keys_populated == 1
+    rows = pt.fetch_paper_trade_rows(conn)
+    counted = result.plan.counted_rows(rows)
+    assert len(counted) == 1
+    assert counted[0]["canonical_business_key_signature"] is not None
+
+
+def test_excluded_duplicates_do_not_receive_counted_canonical_key(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    result = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert result.applied is True
+    rows = pt.fetch_paper_trade_rows(conn)
+    excluded = result.plan.projected_excluded_ids
+    for row in rows:
+        if row["paper_trade_id"] in excluded:
+            assert row["canonical_business_key_signature"] is None
+
+
+def test_canonical_business_key_database_uniqueness_invariant(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    key = _canonical_key_for()
+    e1 = _entry(FD_SUNDERLAND, canonical_key=key)
+    pt.record_paper_trade_entry(conn, e1)
+    # A second counted position claiming the SAME canonical key is rejected by the index.
+    with pytest.raises(sqlite3.IntegrityError):
+        pt.record_paper_trade_entry(conn, _entry(API_SUNDERLAND, created_at="2026-08-28T23:05:00+00:00", canonical_key=key))
+
+
+def test_race_safe_capture_resolves_to_existing_counted_position(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    key = _canonical_key_for()
+    e1 = _entry(FD_SUNDERLAND, canonical_key=key)
+    pt.record_paper_trade_entry(conn, e1)
+    # Simulated racing capture under the OTHER provider fixture.
+    hit = cf.find_counted_paper_trade_by_canonical_key(conn, key)
+    assert hit is not None
+    assert hit["paper_trade_id"] == e1.paper_trade_id
+
+
+def test_existing_provider_specific_uniqueness_still_works(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    e1 = _entry(FD_SUNDERLAND)
+    pt.record_paper_trade_entry(conn, e1)
+    # Same provider fixture + market + selection + line -> fixture-specific key collides.
+    with pytest.raises(sqlite3.IntegrityError):
+        pt.record_paper_trade_entry(conn, _entry(FD_SUNDERLAND, created_at="2026-08-28T23:05:00+00:00", prediction_id="prediction_b"))
+
+
+def test_provider_aliases_persisted_on_apply(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    cf.apply_reconciliation(conn, _three_provider_identity())
+    aliases = cf.conn_row_count(conn, "fixture_provider_aliases")
+    assert aliases == 3
+    canonical = cf.conn_row_count(conn, "canonical_fixtures")
+    assert canonical == 1
+
+
+def test_two_provider_aliases_resolve_to_same_canonical_fixture(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    cf.apply_reconciliation(conn, _three_provider_identity())
+    rows = conn.execute("SELECT provider, provider_fixture_id, canonical_fixture_id FROM fixture_provider_aliases").fetchall()
+    canonical_ids = {str(r["canonical_fixture_id"]) for r in rows}
+    assert len(canonical_ids) == 1
+
+
+def test_alias_mapping_survives_reconnect(tmp_path):
+    db_path, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    cf.apply_reconciliation(conn, _three_provider_identity())
+    conn.close()
+    conn = pt.connect(db_path)
+    cf.ensure_schema(conn)
+    alias = conn.execute(
+        "SELECT canonical_fixture_id FROM fixture_provider_aliases WHERE provider = 'api-football' AND provider_fixture_id = '1557385'"
+    ).fetchone()
+    assert alias is not None
+
+
+def test_unresolved_identities_not_fabricated(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    e1 = _entry(FD_SUNDERLAND)
+    pt.record_paper_trade_entry(conn, e1)
+    # No identity provided for the fixture -> unresolved, must NOT create a fake alias.
+    result = cf.apply_reconciliation(conn, {})
+    assert result.applied is True
+    assert result.plan.unresolved_fixture_ids == (FD_SUNDERLAND,)
+    assert cf.conn_row_count(conn, "fixture_provider_aliases") == 0
+    rows = pt.fetch_paper_trade_rows(conn)
+    assert rows[0]["canonical_business_key_signature"] is None
+
+
+def test_ambiguous_identity_blocks_apply(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    e1 = _entry(FD_SUNDERLAND, created_at="2026-08-28T23:00:00+00:00")
+    e2 = _entry(API_SUNDERLAND, created_at="2026-08-28T23:05:00+00:00")
+    pt.record_paper_trade_entry(conn, e1)
+    pt.record_paper_trade_entry(conn, e2)
+    # Force ambiguity by pre-registering TWO canonical fixtures for the identity at close kickoffs
+    # and then resolving with a tolerance that matches both.
+    with conn:
+        cf.resolve_or_create_canonical_fixture(conn, provider="x", provider_fixture_id="1", competition_id=ENG1,
+                                               home_team_name="Sunderland", away_team_name="Fulham",
+                                               kickoff_utc="2026-08-30T13:00:00+00:00", kickoff_tolerance_seconds=0)
+        cf.resolve_or_create_canonical_fixture(conn, provider="x", provider_fixture_id="2", competition_id=ENG1,
+                                               home_team_name="Sunderland", away_team_name="Fulham",
+                                               kickoff_utc="2026-08-30T13:05:00+00:00", kickoff_tolerance_seconds=0)
+    identity = {
+        FD_SUNDERLAND: _identity(FD_SUNDERLAND, kickoff="2026-08-30T13:02:30+00:00"),
+        API_SUNDERLAND: _identity(API_SUNDERLAND, kickoff="2026-08-30T13:02:30+00:00"),
+    }
+    result = cf.apply_reconciliation(conn, identity, kickoff_tolerance_seconds=180)
+    assert result.applied is False
+    assert any("CANONICAL_FIXTURE_AMBIGUOUS" in v for v in result.violations)
+
+
+def test_season_present_vs_missing_resolves_to_same_canonical_fixture():
+    a = cf.canonical_fixture_id_from_identity(competition_id=ENG1, home_team_name="Sunderland", away_team_name="Fulham", kickoff_utc=SUNDERLAND_FULHAM_KICK, season="2026")
+    b = cf.canonical_fixture_id_from_identity(competition_id=ENG1, home_team_name="Sunderland", away_team_name="Fulham", kickoff_utc=SUNDERLAND_FULHAM_KICK, season=None)
+    assert a == b
+
+
+def test_apply_is_atomic_and_rolls_back_on_forced_failure(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    # Force a mid-apply integrity failure: one planned duplicate already maps to a WRONG canonical.
+    wrong_duplicate_id = _entry(API_SUNDERLAND, created_at="2026-08-28T23:05:00+00:00").paper_trade_id
+    with conn:
+        cf.record_reconciliation(conn, duplicate_paper_trade_id=wrong_duplicate_id, canonical_paper_trade_id="paper_wrong", canonical_fixture_id="cf_wrong")
+    result = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert result.applied is False
+    # Everything written during the failed transaction rolled back.
+    assert cf.conn_row_count(conn, "fixture_provider_aliases") == 0
+    assert len(cf.fetch_reconciliation_rows(conn)) == 1  # only the pre-seeded row
+    rows = pt.fetch_paper_trade_rows(conn)
+    assert all(r["canonical_business_key_signature"] is None for r in rows)
+
+
+def test_second_apply_is_idempotent(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    for e in _three_provider_entries():
+        pt.record_paper_trade_entry(conn, e)
+    first = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert first.applied is True
+    assert first.records_written == 2
+    second = cf.apply_reconciliation(conn, _three_provider_identity())
+    assert second.applied is True
+    assert second.records_written == 0
+    assert len(cf.fetch_reconciliation_rows(conn)) == 2
+
+
+def test_original_paper_facts_remain_unchanged_after_apply(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    e1 = _entry(FD_SUNDERLAND, created_at="2026-08-28T23:00:00+00:00")
+    e2 = _entry(API_SUNDERLAND, created_at="2026-08-28T23:05:00+00:00", bookmaker="Bet365", provider="api-football")
+    pt.record_paper_trade_entry(conn, e1)
+    pt.record_paper_trade_entry(conn, e2)
+    pt.append_trade_update(conn, pt.build_trade_update_payload(paper_trade_id=e1.paper_trade_id, trade_state="LOST", settlement_context={"final_status": "FINISHED", "actual_home_goals": 1, "actual_away_goals": 2}, odds=3.15))
+    cf.apply_reconciliation(conn, {FD_SUNDERLAND: _identity(FD_SUNDERLAND), API_SUNDERLAND: _identity(API_SUNDERLAND)})
+    rows = pt.fetch_paper_trade_rows(conn)
+    by_id = {r["paper_trade_id"]: r for r in rows}
+    assert by_id[e1.paper_trade_id]["fixture_id"] == FD_SUNDERLAND
+    assert by_id[e1.paper_trade_id]["entry_odds"] == 2.5
+    assert by_id[e1.paper_trade_id]["trade_state"] == "LOST"
+    assert by_id[e2.paper_trade_id]["bookmaker"] == "Bet365"
+    assert by_id[e2.paper_trade_id]["provider"] == "api-football"
