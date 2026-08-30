@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -21,6 +22,24 @@ def _template_directory() -> Path:
 
 def _static_directory() -> Path:
     return Path(__file__).resolve().parent / "static"
+
+
+def _build_query_href(request: Request, *, anchor: str | None = None, **updates: object) -> str:
+    params = dict(request.query_params)
+    params.pop("partial", None)
+    for key, value in updates.items():
+        if value in {None, ""}:
+            params.pop(key, None)
+            continue
+        if (key == "page" or key.endswith("_page")) and str(value) == "1":
+            params.pop(key, None)
+            continue
+        params[key] = str(value)
+    query = urlencode(params)
+    href = request.url.path if not query else f"{request.url.path}?{query}"
+    if anchor:
+        href = f"{href}#{anchor}"
+    return href
 
 
 def create_app(
@@ -52,12 +71,29 @@ def create_app(
             "request": request,
             "page": page,
             "payload": payload,
+            "query_href": lambda anchor=None, **updates: _build_query_href(request, anchor=anchor, **updates),
+            "set_query_param_href": (
+                lambda param_name, param_value=None, anchor=None: _build_query_href(
+                    request,
+                    anchor=anchor,
+                    **{str(param_name): param_value},
+                )
+            ),
         }
 
     @app.get("/", response_class=HTMLResponse)
     @app.get("/today", response_class=HTMLResponse)
-    async def dashboard_home(request: Request):
-        payload = resolved_services.get_dashboard_payload()
+    async def dashboard_home(
+        request: Request,
+        picks_page: int = Query(default=1, ge=1),
+        matches_page: int = Query(default=1, ge=1),
+        desk_page: int = Query(default=1, ge=1),
+    ):
+        payload = resolved_services.get_dashboard_payload(
+            picks_page=picks_page,
+            matches_page=matches_page,
+            desk_page=desk_page,
+        )
         template_name = "dashboard_sections.html" if request.query_params.get("partial") == "1" else "dashboard.html"
         return templates.TemplateResponse(
             request=request,
@@ -72,12 +108,14 @@ def create_app(
         team: str | None = Query(default=None),
         prediction_status: str | None = Query(default=None),
         status_bucket: str | None = Query(default=None),
-        ):
+        page: int = Query(default=1, ge=1),
+    ):
         payload = resolved_services.get_matches_payload(
             competition=competition,
             team=team,
             prediction_status=prediction_status,
             status_bucket=status_bucket,
+            page=page,
         )
         template_name = "matches_table.html" if request.query_params.get("partial") == "1" else "matches.html"
         return templates.TemplateResponse(
@@ -100,8 +138,8 @@ def create_app(
         )
 
     @app.get("/predictions", response_class=HTMLResponse)
-    async def predictions_page(request: Request):
-        payload = resolved_services.get_predictions_payload()
+    async def predictions_page(request: Request, page: int = Query(default=1, ge=1)):
+        payload = resolved_services.get_predictions_payload(page=page)
         template_name = "predictions_table.html" if request.query_params.get("partial") == "1" else "predictions.html"
         return templates.TemplateResponse(
             request=request,
@@ -111,8 +149,8 @@ def create_app(
 
     @app.get("/candidates", response_class=HTMLResponse)
     @app.get("/betting-desk", response_class=HTMLResponse)
-    async def candidates_page(request: Request):
-        payload = resolved_services.get_betting_desk_payload()
+    async def candidates_page(request: Request, page: int = Query(default=1, ge=1)):
+        payload = resolved_services.get_betting_desk_payload(page=page)
         template_name = "betting_desk_content.html" if request.query_params.get("partial") == "1" else "betting_desk.html"
         return templates.TemplateResponse(
             request=request,
@@ -132,8 +170,8 @@ def create_app(
         )
 
     @app.get("/member-card", response_class=HTMLResponse)
-    async def member_card_page(request: Request):
-        payload = resolved_services.get_member_card_payload()
+    async def member_card_page(request: Request, page: int = Query(default=1, ge=1)):
+        payload = resolved_services.get_member_card_payload(page=page)
         template_name = "member_card_content.html" if request.query_params.get("partial") == "1" else "member_card.html"
         return templates.TemplateResponse(
             request=request,
@@ -162,8 +200,8 @@ def create_app(
         )
 
     @app.get("/no-bet-archive", response_class=HTMLResponse)
-    async def no_bet_archive_page(request: Request):
-        payload = resolved_services.get_no_bet_archive_payload()
+    async def no_bet_archive_page(request: Request, page: int = Query(default=1, ge=1)):
+        payload = resolved_services.get_no_bet_archive_payload(page=page)
         template_name = "no_bet_archive_content.html" if request.query_params.get("partial") == "1" else "no_bet_archive.html"
         return templates.TemplateResponse(
             request=request,

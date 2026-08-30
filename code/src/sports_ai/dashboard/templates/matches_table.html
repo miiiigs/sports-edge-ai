@@ -1,4 +1,4 @@
-{% from "_ui.html" import status_badge %}
+{% from "_ui.html" import status_badge, pagination_nav %}
 <section class="page-heading edge-desk-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Matches &amp; Live Monitor</p>
@@ -7,7 +7,7 @@
   </div>
   <div class="page-actions">
     {{ status_badge(payload.system_status.fixture_feed.state, 'positive' if payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] else 'warning') }}
-    <span class="page-stat">{{ payload.rows|length }} fixtures</span>
+    <span class="page-stat">{{ payload.pagination.total_items }} fixtures</span>
   </div>
 </section>
 
@@ -20,14 +20,15 @@
   </div>
 
   <div class="quick-filter-bar" aria-label="Match windows">
-    <a class="filter-chip {% if not payload.filters.status_bucket %}filter-chip-active{% endif %}" href="/matches">All</a>
-    <a class="filter-chip {% if payload.filters.status_bucket == 'today' %}filter-chip-active{% endif %}" href="/matches?status_bucket=today">Today</a>
-    <a class="filter-chip {% if payload.filters.status_bucket == 'upcoming' %}filter-chip-active{% endif %}" href="/matches?status_bucket=upcoming">Upcoming</a>
-    <a class="filter-chip {% if payload.filters.status_bucket == 'live' %}filter-chip-active{% endif %}" href="/matches?status_bucket=live">Live</a>
-    <a class="filter-chip {% if payload.filters.status_bucket == 'finished' %}filter-chip-active{% endif %}" href="/matches?status_bucket=finished">Finished</a>
+    <a class="filter-chip {% if not payload.filters.status_bucket %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket=None, page=1) }}">All</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'today' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='today', page=1) }}">Today</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'upcoming' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='upcoming', page=1) }}">Upcoming</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'live' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='live', page=1) }}">Live</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'finished' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='finished', page=1) }}">Finished</a>
   </div>
 
   <form class="filters-bar" method="get" action="/matches" data-auto-submit-filters="true">
+    <input type="hidden" name="page" value="1">
     <div class="filter-group">
       <label for="status_bucket">Window</label>
       <select id="status_bucket" name="status_bucket">
@@ -77,7 +78,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for row in payload.rows %}
+          {% for row in payload.visible_rows %}
             {% set prediction_tone = 'positive' if row.prediction_eligibility_status == 'PREDICTION_READY' else 'warning' if row.prediction_eligibility_status == 'PREDICTION_PENDING' else 'inactive' %}
             {% set market_state = row.market_signal.current_decision_state if row.market_signal else row.market_status_label %}
             {% set market_tone = 'positive' if market_state == 'BET' else 'inactive' if 'NO BET' in market_state else 'warning' %}
@@ -120,7 +121,7 @@
   </div>
 
   <div class="mobile-card-list">
-    {% for row in payload.rows %}
+    {% for row in payload.visible_rows %}
       {% set prediction_tone = 'positive' if row.prediction_eligibility_status == 'PREDICTION_READY' else 'warning' if row.prediction_eligibility_status == 'PREDICTION_PENDING' else 'inactive' %}
       {% set market_state = row.market_signal.current_decision_state if row.market_signal else row.market_status_label %}
       {% set market_tone = 'positive' if market_state == 'BET' else 'inactive' if 'NO BET' in market_state else 'warning' %}
@@ -156,4 +157,5 @@
       </article>
     {% endfor %}
   </div>
+  {{ pagination_nav(payload.pagination, "page", set_query_param_href) }}
 </section>

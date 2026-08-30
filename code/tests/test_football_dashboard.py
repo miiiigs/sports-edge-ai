@@ -4,7 +4,7 @@ import asyncio
 import json
 import math
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -298,6 +298,11 @@ def _fixture(
     )
 
 
+def _kickoff_utc_for_local_date(local_date: date, *, hour: int, minute: int = 0, timezone_name: str = "Asia/Manila") -> str:
+    local_dt = datetime.combine(local_date, time(hour=hour, minute=minute), tzinfo=ZoneInfo(timezone_name))
+    return local_dt.astimezone(timezone.utc).isoformat()
+
+
 def _market_snapshot(
     *,
     fixture: NormalizedFixture,
@@ -362,6 +367,144 @@ def _xg_factory_for_fixtures(*fixtures: NormalizedFixture):
         return lambda: (rows, inspection)
 
     return factory
+
+
+def _build_paginated_dashboard_services(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    fixture_count: int,
+    target_date: date = date(2026, 8, 30),
+) -> tuple[DashboardServices, list[dict[str, object]], dict[str, dict[str, object]]]:
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    today_fixture_rows: list[dict[str, object]] = []
+    all_fixture_rows: list[dict[str, object]] = []
+    market_evaluations: dict[str, dict[str, object]] = {}
+    for index in range(fixture_count):
+        fixture_number = index + 1
+        fixture = replace(
+            _fixture(
+                fixture_id=f"fake:today_{fixture_number:02d}",
+                home_team_name=f"Today {fixture_number:02d}",
+                away_team_name=f"Opponent {fixture_number:02d}",
+            ),
+            kickoff_utc=_kickoff_utc_for_local_date(target_date, hour=10 + (index % 11), minute=index % 2),
+        )
+        fixture_row = fixture.to_dict(timezone_name="UTC")
+        today_fixture_rows.append(fixture_row)
+        all_fixture_rows.append(fixture_row)
+        market_evaluations[fixture.fixture_id] = {
+            "state": "READY",
+            "reason": None,
+            "decision_rows": [
+                {
+                    "fixture_id": fixture.fixture_id,
+                    "competition_id": "ENG1",
+                    "competition_name": "Premier League",
+                    "decision": "PRELIMINARY_CANDIDATE",
+                    "current_decision_state": "BET",
+                    "market_family": "1x2",
+                    "selection": "HOME",
+                    "line": None,
+                    "model_probability": 0.60 - (index * 0.005),
+                    "model_fair_decimal_price": 1.60 + (index * 0.01),
+                    "best_available_price": 2.20 + (index * 0.01),
+                    "best_available_bookmaker": "Pinnacle",
+                    "best_available_source_timestamp": "2026-08-30T09:00:00Z",
+                    "settlement_aware_edge": 0.40 - (index * 0.01),
+                    "paper_entry_eligible": True,
+                    "paper_trade_id": None,
+                    "market_freshness": "FRESH",
+                    "day12_state": "PASSED",
+                    "reason_codes": [],
+                },
+                {
+                    "fixture_id": fixture.fixture_id,
+                    "competition_id": "ENG1",
+                    "competition_name": "Premier League",
+                    "decision": "NO_BET",
+                    "current_decision_state": "NO_BET_VALUE",
+                    "market_family": "btts",
+                    "selection": "YES",
+                    "line": None,
+                    "model_probability": 0.52,
+                    "model_fair_decimal_price": 1.90,
+                    "best_available_price": 1.70,
+                    "best_available_bookmaker": "bet365",
+                    "best_available_source_timestamp": "2026-08-30T09:00:00Z",
+                    "settlement_aware_edge": -0.07,
+                    "paper_entry_eligible": False,
+                    "paper_trade_id": None,
+                    "market_freshness": "FRESH",
+                    "day12_state": "PASSED",
+                    "reason_codes": ["PRICE_NO_VALUE"],
+                },
+                {
+                    "fixture_id": fixture.fixture_id,
+                    "competition_id": "ENG1",
+                    "competition_name": "Premier League",
+                    "decision": "STALE_MARKET",
+                    "current_decision_state": "NO_BET_STALE_MARKET",
+                    "market_family": "goals_total",
+                    "selection": "OVER",
+                    "line": 2.5,
+                    "model_probability": 0.49,
+                    "model_fair_decimal_price": 2.02,
+                    "best_available_price": 1.88,
+                    "best_available_bookmaker": "matchbook",
+                    "best_available_source_timestamp": "2026-08-30T06:00:00Z",
+                    "settlement_aware_edge": -0.03,
+                    "paper_entry_eligible": False,
+                    "paper_trade_id": None,
+                    "market_freshness": "STALE",
+                    "day12_state": "PASSED",
+                    "reason_codes": ["MARKET_STALE"],
+                },
+            ],
+            "display_rows": [],
+        }
+        market_evaluations[fixture.fixture_id]["display_rows"] = list(market_evaluations[fixture.fixture_id]["decision_rows"])
+
+    tomorrow_fixture = replace(
+        _fixture(
+            fixture_id="fake:tomorrow_fixture",
+            home_team_name="Tomorrow FC",
+            away_team_name="Next Opponent",
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date + timedelta(days=1), hour=15),
+    )
+    tomorrow_row = tomorrow_fixture.to_dict(timezone_name="UTC")
+    all_fixture_rows.append(tomorrow_row)
+
+    monkeypatch.setattr(services, "_current_local_date", lambda: target_date)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: all_fixture_rows)
+    monkeypatch.setattr(
+        services,
+        "_future_fixture_rows",
+        lambda rows: sorted(today_fixture_rows + [tomorrow_row], key=lambda row: (str(row["kickoff_utc"]), str(row["fixture_id"]))),
+    )
+    monkeypatch.setattr(
+        services,
+        "_filter_fixture_rows",
+        lambda *, bucket, fixture_rows: (
+            today_fixture_rows
+            if bucket == "today"
+            else [tomorrow_row]
+            if bucket == "upcoming"
+            else []
+        ),
+    )
+    monkeypatch.setattr(services, "_market_evaluation_map", lambda: market_evaluations)
+    monkeypatch.setattr(
+        services,
+        "_paper_positions",
+        lambda: ([], football_paper_trading.paper_trading_status([])),
+    )
+    return services, today_fixture_rows, market_evaluations
 
 
 def _record_test_paper_trade(
@@ -2985,3 +3128,187 @@ def test_match_detail_separates_current_market_from_published_entry_and_uses_cur
     assert "<span>Safeguard Reason</span><strong>PASSED</strong>" in response.text
 
     asyncio.run(services.shutdown())
+
+
+def test_dashboard_home_today_matches_stay_on_strict_local_day_and_upcoming_is_link_only(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    target_date = date(2026, 8, 30)
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    today_live = replace(
+        _fixture(
+            fixture_id="fake:today_live",
+            home_team_name="Today Live",
+            away_team_name="Current Club",
+            status=FIXTURE_STATUS_LIVE,
+            home_score=1,
+            away_score=0,
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date, hour=13),
+    )
+    today_scheduled = replace(
+        _fixture(
+            fixture_id="fake:today_scheduled",
+            home_team_name="Today Scheduled",
+            away_team_name="Current Opponent",
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date, hour=20),
+    )
+    previous_day_live = replace(
+        _fixture(
+            fixture_id="fake:previous_day_live",
+            home_team_name="Previous Live",
+            away_team_name="Old Club",
+            status=FIXTURE_STATUS_LIVE,
+            home_score=2,
+            away_score=2,
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date - timedelta(days=1), hour=23),
+    )
+    tomorrow_fixture = replace(
+        _fixture(
+            fixture_id="fake:tomorrow",
+            home_team_name="Tomorrow Match",
+            away_team_name="Future Club",
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date + timedelta(days=1), hour=19),
+    )
+    today_live_row = today_live.to_dict(timezone_name="UTC")
+    today_scheduled_row = today_scheduled.to_dict(timezone_name="UTC")
+    previous_day_live_row = previous_day_live.to_dict(timezone_name="UTC")
+    tomorrow_row = tomorrow_fixture.to_dict(timezone_name="UTC")
+
+    monkeypatch.setattr(services, "_current_local_date", lambda: target_date)
+    monkeypatch.setattr(
+        services,
+        "_all_fixtures_with_predictions",
+        lambda: [today_live_row, today_scheduled_row, previous_day_live_row, tomorrow_row],
+    )
+    monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: [tomorrow_row])
+    monkeypatch.setattr(
+        services,
+        "_filter_fixture_rows",
+        lambda *, bucket, fixture_rows: (
+            [today_live_row, previous_day_live_row]
+            if bucket == "live"
+            else [today_scheduled_row]
+            if bucket == "today"
+            else [tomorrow_row]
+            if bucket == "upcoming"
+            else []
+        ),
+    )
+    monkeypatch.setattr(services, "_market_evaluation_map", lambda: {})
+    monkeypatch.setattr(
+        services,
+        "_paper_positions",
+        lambda: ([], football_paper_trading.paper_trading_status([])),
+    )
+
+    app = create_app(services=services)
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Today Live vs Current Club" in response.text
+    assert "Today Scheduled vs Current Opponent" in response.text
+    assert "Previous Live vs Old Club" not in response.text
+    assert "Tomorrow Match vs Future Club" not in response.text
+    assert 'href="/matches?status_bucket=upcoming"' in response.text
+    assert "View Upcoming Matches (1)" in response.text
+
+
+def test_dashboard_home_places_best_picks_before_today_matches_and_current_desk(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, _, _ = _build_paginated_dashboard_services(tmp_path, monkeypatch, fixture_count=11)
+    app = create_app(services=services)
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.text.index('id="best-picks"') < response.text.index('id="today-matches"')
+    assert response.text.index('id="today-matches"') < response.text.index('id="current-desk"')
+
+
+def test_dashboard_payload_paginates_today_sections_and_clamps_out_of_range_pages(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, today_fixture_rows, _ = _build_paginated_dashboard_services(tmp_path, monkeypatch, fixture_count=11)
+
+    payload = services.get_dashboard_payload(picks_page=2, matches_page=2, desk_page=4)
+    visible_best_pick_ids = [row["fixture_id"] for row in payload["visible_best_picks"]]
+    full_best_pick_ids = [row["fixture_id"] for row in payload["best_picks"][8:]]
+    visible_match_ids = [row["fixture_id"] for row in payload["visible_today_matches"]]
+    expected_match_ids = [str(row["fixture_id"]) for row in sorted(today_fixture_rows, key=lambda row: (str(row["kickoff_utc"]), str(row["fixture_id"])))[8:]]
+    visible_desk_keys = [(row["fixture_id"], row["bet_label"]) for row in payload["visible_today_desk_rows"]]
+    expected_desk_keys = [(row["fixture_id"], row["bet_label"]) for row in payload["today_desk_rows"][30:]]
+
+    assert payload["best_picks_pagination"]["page"] == 2
+    assert payload["best_picks_pagination"]["total_pages"] == 2
+    assert visible_best_pick_ids == full_best_pick_ids
+    assert payload["today_matches_pagination"]["page"] == 2
+    assert payload["today_matches_pagination"]["total_pages"] == 2
+    assert visible_match_ids == expected_match_ids
+    assert payload["today_desk_pagination"]["page"] == 4
+    assert payload["today_desk_pagination"]["total_pages"] == 4
+    assert visible_desk_keys == expected_desk_keys
+
+    clamped_payload = services.get_dashboard_payload(picks_page=99, matches_page=99, desk_page=99)
+    assert clamped_payload["best_picks_pagination"]["page"] == clamped_payload["best_picks_pagination"]["total_pages"]
+    assert clamped_payload["today_matches_pagination"]["page"] == clamped_payload["today_matches_pagination"]["total_pages"]
+    assert clamped_payload["today_desk_pagination"]["page"] == clamped_payload["today_desk_pagination"]["total_pages"]
+
+
+def test_matches_page_pagination_preserves_filters_and_resets_form_page(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, _, _ = _build_paginated_dashboard_services(tmp_path, monkeypatch, fixture_count=21)
+    page_one_payload = services.get_matches_payload(competition="ENG1", status_bucket="today", page=1)
+    page_two_payload = services.get_matches_payload(competition="ENG1", status_bucket="today", page=2)
+    app = create_app(services=services)
+
+    with TestClient(app) as client:
+        response = client.get("/matches?competition=ENG1&status_bucket=today&page=2")
+
+    assert response.status_code == 200
+    assert "Showing 21-21 of 21" in response.text
+    assert 'href="/matches?competition=ENG1&amp;status_bucket=today"' in response.text
+    assert 'name="page" value="1"' in response.text
+    assert f"{page_two_payload['visible_rows'][0]['home_team_name']} vs {page_two_payload['visible_rows'][0]['away_team_name']}" in response.text
+    assert f"{page_one_payload['visible_rows'][0]['home_team_name']} vs {page_one_payload['visible_rows'][0]['away_team_name']}" not in response.text
+
+
+def test_betting_desk_and_no_bet_archive_paginate_without_provider_http_work(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, _, _ = _build_paginated_dashboard_services(tmp_path, monkeypatch, fixture_count=21)
+
+    before = services.get_system_status()["provider_budget"]["metrics"]["provider_http_requests"]
+    betting_payload = services.get_betting_desk_payload(page=2)
+    archive_payload = services.get_no_bet_archive_payload(page=2)
+    after = services.get_system_status()["provider_budget"]["metrics"]["provider_http_requests"]
+
+    visible_betting_keys = [(row["fixture_id"], row["bet_label"]) for row in betting_payload["visible_rows"]]
+    expected_betting_keys = [(row["fixture_id"], row["bet_label"]) for row in betting_payload["rows"][20:40]]
+    visible_archive_keys = [(row["fixture_id"], row["bet_label"]) for row in archive_payload["visible_rows"]]
+    expected_archive_keys = [(row["fixture_id"], row["bet_label"]) for row in archive_payload["rows"][20:40]]
+
+    assert before == 0
+    assert after == 0
+    assert betting_payload["pagination"]["page"] == 2
+    assert betting_payload["pagination"]["total_pages"] == 4
+    assert visible_betting_keys == expected_betting_keys
+    assert archive_payload["pagination"]["page"] == 2
+    assert archive_payload["pagination"]["total_pages"] == 3
+    assert visible_archive_keys == expected_archive_keys

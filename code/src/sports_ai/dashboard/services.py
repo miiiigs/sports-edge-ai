@@ -96,6 +96,53 @@ TODAY_PRIMARY_KPI_LABELS = (
 )
 
 
+def _fixture_sort_key(row: dict[str, Any]) -> tuple[str, str]:
+    return (str(row.get("kickoff_utc") or ""), str(row.get("fixture_id") or ""))
+
+
+def _pagination_window(*, page: int, total_pages: int, max_pages: int = 5) -> list[int | None]:
+    if total_pages <= max_pages + 2:
+        return list(range(1, total_pages + 1))
+    window_radius = max(1, max_pages // 2)
+    start = max(2, page - window_radius)
+    end = min(total_pages - 1, page + window_radius)
+    if page <= window_radius + 2:
+        end = min(total_pages - 1, max_pages)
+    if page >= total_pages - (window_radius + 1):
+        start = max(2, total_pages - (max_pages - 1))
+    pages: list[int | None] = [1]
+    if start > 2:
+        pages.append(None)
+    pages.extend(range(start, end + 1))
+    if end < total_pages - 1:
+        pages.append(None)
+    pages.append(total_pages)
+    return pages
+
+
+def _paginate_collection(items: list[Any], *, page: int, page_size: int) -> dict[str, Any]:
+    safe_page_size = max(1, int(page_size))
+    total_items = len(items)
+    total_pages = max(1, (total_items + safe_page_size - 1) // safe_page_size)
+    current_page = min(max(1, int(page)), total_pages)
+    start_index = (current_page - 1) * safe_page_size
+    end_index = min(start_index + safe_page_size, total_items)
+    return {
+        "items": items[start_index:end_index],
+        "page": current_page,
+        "page_size": safe_page_size,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "has_previous": current_page > 1,
+        "has_next": current_page < total_pages,
+        "previous_page": current_page - 1 if current_page > 1 else None,
+        "next_page": current_page + 1 if current_page < total_pages else None,
+        "showing_from": 0 if total_items == 0 else start_index + 1,
+        "showing_to": end_index,
+        "visible_pages": _pagination_window(page=current_page, total_pages=total_pages),
+    }
+
+
 def _market_identity(row: dict[str, Any]) -> tuple[str, str, float | None]:
     market = str(row.get("market_family") or row.get("market") or "")
     selection = str(row.get("selection") or "")
@@ -3744,6 +3791,20 @@ class DashboardServices:
                 filtered.append(row)
         return filtered
 
+    def _strict_today_fixture_rows(
+        self,
+        fixture_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        today_local = self._current_local_date()
+        return sorted(
+            [
+                row
+                for row in fixture_rows
+                if self._local_date_for_timestamp(row.get("kickoff_utc")) == today_local
+            ],
+            key=_fixture_sort_key,
+        )
+
     def _counts_for_rows(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         counts = self._empty_counts()
         counts["live"] = len(self._filter_fixture_rows(bucket="live", fixture_rows=rows))
@@ -4625,7 +4686,13 @@ class DashboardServices:
             {"label": "NO BET rows", "value": str(no_bet_count), "note": "tracked, not actionable"},
         ]
 
-    def get_dashboard_payload(self) -> dict[str, Any]:
+    def get_dashboard_payload(
+        self,
+        *,
+        picks_page: int = 1,
+        matches_page: int = 1,
+        desk_page: int = 1,
+    ) -> dict[str, Any]:
         fixture_rows = self._all_fixtures_with_predictions()
         live_rows = [self.serialize_fixture_row(row) for row in self._filter_fixture_rows(bucket="live", fixture_rows=fixture_rows)]
         today_rows = [
@@ -4633,6 +4700,7 @@ class DashboardServices:
             for row in self._filter_fixture_rows(bucket="today", fixture_rows=fixture_rows)
             if str(row["status"]) not in FIXTURE_TERMINAL_STATUSES
         ]
+        strict_today_rows = [self.serialize_fixture_row(row) for row in self._strict_today_fixture_rows(fixture_rows)]
         upcoming_rows = [
             self.serialize_fixture_row(row)
             for row in self._filter_fixture_rows(bucket="upcoming", fixture_rows=fixture_rows)
@@ -4675,13 +4743,22 @@ class DashboardServices:
         no_bet_count = sum(1 for row in today_working_rows if str(row.get("current_decision_state") or "") == "NO BET")
         blocking_reasons = self._blocking_reason_counts(today_working_rows)
         client_blocking_reasons = self._client_blocking_reasons(blocking_reasons)
+        best_picks_pagination = _paginate_collection(best_picks, page=picks_page, page_size=8)
+        today_matches_pagination = _paginate_collection(strict_today_rows, page=matches_page, page_size=8)
+        today_desk_pagination = _paginate_collection(today_working_rows, page=desk_page, page_size=10)
         return {
             "live": live_rows,
             "today": today_rows,
+            "today_matches": strict_today_rows,
+            "visible_today_matches": today_matches_pagination["items"],
+            "today_matches_pagination": today_matches_pagination,
             "upcoming": upcoming_rows[:24],
+            "upcoming_count": len(upcoming_rows),
             "next_matches": next_rows,
             "prediction_watchlist": prediction_watchlist,
             "best_picks": best_picks,
+            "visible_best_picks": best_picks_pagination["items"],
+            "best_picks_pagination": best_picks_pagination,
             "best_picks_summary": {
                 "count": len(best_picks),
                 "empty_message": "No genuine published paper picks are currently attached to today's board.",
@@ -4691,6 +4768,8 @@ class DashboardServices:
             "today_published_rows": today_published_rows,
             "current_slate_rows": current_slate_rows,
             "today_desk_rows": today_working_rows,
+            "visible_today_desk_rows": today_desk_pagination["items"],
+            "today_desk_pagination": today_desk_pagination,
             "other_decision_rows": other_decision_rows,
             "current_slate_summary": current_slate_summary,
             "today_summary": {
@@ -4765,6 +4844,7 @@ class DashboardServices:
         team: str | None = None,
         prediction_status: str | None = None,
         status_bucket: str | None = None,
+        page: int = 1,
     ) -> dict[str, Any]:
         rows = self._all_fixtures_with_predictions()
         if status_bucket in {"live", "today", "upcoming", "finished"}:
@@ -4787,7 +4867,8 @@ class DashboardServices:
                 if self._prediction_eligibility_status(row.get("prediction")) == prediction_status
                 or (row.get("prediction") or {}).get("prediction_status") == prediction_status
             ]
-        serializable_rows = [self.serialize_fixture_row(row) for row in rows]
+        serializable_rows = [self.serialize_fixture_row(row) for row in sorted(rows, key=_fixture_sort_key)]
+        pagination = _paginate_collection(serializable_rows, page=page, page_size=20)
         return {
             "filters": {
                 "competition": competition,
@@ -4796,6 +4877,8 @@ class DashboardServices:
                 "status_bucket": status_bucket,
             },
             "rows": serializable_rows,
+            "visible_rows": pagination["items"],
+            "pagination": pagination,
             "system_status": self.get_system_status(),
         }
 
@@ -4867,7 +4950,7 @@ class DashboardServices:
             prediction = storage.fetch_latest_prediction_for_fixture(conn, fixture_id)
         return self._decorate_prediction_runtime(prediction)
 
-    def get_predictions_payload(self) -> dict[str, Any]:
+    def get_predictions_payload(self, *, page: int = 1) -> dict[str, Any]:
         now_utc = datetime.now(timezone.utc)
         with storage.connect(self.config.dashboard_db_path) as conn:
             predictions = storage.fetch_all_predictions(conn)
@@ -4887,12 +4970,16 @@ class DashboardServices:
                     "prediction": decorated_prediction,
                 }
             )
+        rows.sort(key=lambda row: _fixture_sort_key(row["fixture"]))
+        pagination = _paginate_collection(rows, page=page, page_size=20)
         return {
             "rows": rows,
+            "visible_rows": pagination["items"],
+            "pagination": pagination,
             "system_status": self.get_system_status(),
         }
 
-    def get_betting_desk_payload(self) -> dict[str, Any]:
+    def get_betting_desk_payload(self, *, page: int = 1) -> dict[str, Any]:
         fixture_rows = self._all_fixtures_with_predictions()
         market_state = self._market_provider_state()
         desk_fixture_rows = self._future_fixture_rows(fixture_rows)
@@ -4927,6 +5014,7 @@ class DashboardServices:
                 or market_state["reason"]
                 or "Current desk rows are staged as provider market data becomes available."
             )
+        pagination = _paginate_collection(desk_rows, page=page, page_size=20)
         return {
             "connected": bool(
                 market_state["configured"]
@@ -4937,6 +5025,8 @@ class DashboardServices:
             "quota_waiting_reset": waiting_for_reset,
             "quota_state": quota_state,
             "rows": desk_rows,
+            "visible_rows": pagination["items"],
+            "pagination": pagination,
             "preliminary_candidates": preliminary,
             "blocked_candidates": blocked,
             "no_bet_candidates": no_bets,
@@ -4954,7 +5044,7 @@ class DashboardServices:
     def get_candidates_payload(self) -> dict[str, Any]:
         return self.get_betting_desk_payload()
 
-    def get_member_card_payload(self) -> dict[str, Any]:
+    def get_member_card_payload(self, *, page: int = 1) -> dict[str, Any]:
         paper_rows, _ = self._paper_positions()
         published_rows = self._published_pick_rows(paper_rows)
         visible_rows = [
@@ -4963,19 +5053,23 @@ class DashboardServices:
             if str(row.get("trade_state") or "") in PAPER_ACTIVE_STATES
             or self._local_date_for_timestamp(row.get("kickoff_utc") or row.get("kickoff")) == self._current_local_date()
         ]
+        member_rows = [
+            {
+                "fixture_id": str(row["fixture_id"]),
+                "match": f"{row['home_team_name']} vs {row['away_team_name']}",
+                "pick": row["bet_label"],
+                "model_probability": row.get("model_probability"),
+                "entry_odds": row.get("entry_odds"),
+                "confidence_label": row.get("confidence_label"),
+                "status": row.get("trade_state"),
+            }
+            for row in visible_rows
+        ]
+        pagination = _paginate_collection(member_rows, page=page, page_size=12)
         return {
-            "rows": [
-                {
-                    "fixture_id": str(row["fixture_id"]),
-                    "match": f"{row['home_team_name']} vs {row['away_team_name']}",
-                    "pick": row["bet_label"],
-                    "model_probability": row.get("model_probability"),
-                    "entry_odds": row.get("entry_odds"),
-                    "confidence_label": row.get("confidence_label"),
-                    "status": row.get("trade_state"),
-                }
-                for row in visible_rows[:12]
-            ],
+            "rows": member_rows,
+            "visible_rows": pagination["items"],
+            "pagination": pagination,
             "publish_state": "DISABLED",
             "publish_note": "Publishing remains read-only in this phase; historical published picks are shown truthfully.",
             "system_status": self.get_system_status(),
@@ -5110,15 +5204,18 @@ class DashboardServices:
             "system_status": betting_desk["system_status"],
         }
 
-    def get_no_bet_archive_payload(self) -> dict[str, Any]:
+    def get_no_bet_archive_payload(self, *, page: int = 1) -> dict[str, Any]:
         desk_payload = self.get_betting_desk_payload()
         archive_rows = [
             row
             for row in desk_payload["rows"]
             if row["decision_group"] != "bet"
         ]
+        pagination = _paginate_collection(archive_rows, page=page, page_size=20)
         return {
             "rows": archive_rows,
+            "visible_rows": pagination["items"],
+            "pagination": pagination,
             "count": len(archive_rows),
             "blocking_reasons": desk_payload["blocking_reasons"],
             "system_status": desk_payload["system_status"],

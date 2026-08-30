@@ -1,4 +1,4 @@
-{% from "_ui.html" import status_badge %}
+{% from "_ui.html" import status_badge, pagination_nav %}
 <section class="page-heading edge-page-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Prediction Log</p>
@@ -7,7 +7,7 @@
   </div>
   <div class="page-actions">
     {{ status_badge(payload.system_status.prediction_engine.state, 'positive' if payload.system_status.prediction_engine.state == 'READY' else 'warning') }}
-    <span class="page-stat">{{ payload.rows|length }} rows</span>
+    <span class="page-stat">{{ payload.pagination.total_items }} rows</span>
   </div>
 </section>
 
@@ -18,7 +18,7 @@
       <h2>Prediction Table</h2>
       <p class="section-intro">Current Football prediction table.</p>
     </div>
-    <span>{{ payload.rows|length }} rows</span>
+    <span>{{ payload.pagination.total_items }} rows</span>
   </div>
   <div class="table-shell">
     <table>
@@ -41,7 +41,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for row in payload.rows %}
+        {% for row in payload.visible_rows %}
           <tr>
             <td>
               <a class="desk-match-link" href="/matches/{{ row.fixture.fixture_id }}">{{ row.fixture.home_team_name }} vs {{ row.fixture.away_team_name }}</a>
@@ -103,4 +103,5 @@
       </tbody>
     </table>
   </div>
+  {{ pagination_nav(payload.pagination, "page", set_query_param_href) }}
 </section>

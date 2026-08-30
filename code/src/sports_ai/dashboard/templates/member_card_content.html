@@ -1,3 +1,4 @@
+{% from "_ui.html" import pagination_nav %}
 <section class="page-heading edge-desk-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Published Picks</p>
@@ -14,7 +15,7 @@
     </div>
     <span class="desk-panel-meta">{{ payload.publish_state }}</span>
   </div>
-  {% if payload.rows %}
+  {% if payload.visible_rows %}
     <div class="desktop-table">
       <div class="desk-table-wrap">
         <table class="desk-table">
@@ -29,7 +30,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in payload.rows %}
+            {% for row in payload.visible_rows %}
               <tr>
                 <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.match }}</a></td>
                 <td>{{ row.pick }}</td>
@@ -44,7 +45,7 @@
       </div>
     </div>
     <div class="mobile-card-list">
-      {% for row in payload.rows %}
+      {% for row in payload.visible_rows %}
         <article class="mobile-data-card">
           <div class="mobile-data-card__header">
             <div>
@@ -62,6 +63,7 @@
         </article>
       {% endfor %}
     </div>
+    {{ pagination_nav(payload.pagination, "page", set_query_param_href) }}
   {% else %}
     <article class="empty-state desk-empty-state">
       <strong>No published picks are visible for the current board.</strong>
