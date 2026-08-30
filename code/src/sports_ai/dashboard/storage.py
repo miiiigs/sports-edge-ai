@@ -247,6 +247,37 @@ def fetch_fixture(conn: sqlite3.Connection, fixture_id: str, *, initialize_schem
     return _merge_fixture_result(payload, fetch_fixture_result(conn, fixture_id, initialize_schema=False))
 
 
+def fetch_fixtures_by_ids(
+    conn: sqlite3.Connection,
+    fixture_ids: Iterable[str],
+    *,
+    initialize_schema: bool = True,
+) -> dict[str, dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    unique_fixture_ids = sorted({str(fixture_id) for fixture_id in fixture_ids if str(fixture_id)})
+    if not unique_fixture_ids:
+        return {}
+    rows: list[sqlite3.Row] = []
+    chunk_size = 900
+    for start in range(0, len(unique_fixture_ids), chunk_size):
+        chunk = unique_fixture_ids[start : start + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        rows.extend(
+            conn.execute(
+                f"""
+                SELECT fixture_id, payload_json
+                FROM dashboard_fixtures
+                WHERE fixture_id IN ({placeholders})
+                """,
+                chunk,
+            ).fetchall()
+        )
+    return {
+        str(row["fixture_id"]): json.loads(str(row["payload_json"]))
+        for row in rows
+    }
+
+
 def upsert_fixture_result(
     conn: sqlite3.Connection,
     *,

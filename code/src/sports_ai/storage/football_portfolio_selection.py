@@ -39,6 +39,17 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE INDEX IF NOT EXISTS idx_football_portfolio_evaluations_fixture_policy_recency
+    ON football_portfolio_evaluations(
+        canonical_fixture_id,
+        policy_id,
+        policy_version,
+        evaluated_at,
+        created_at,
+        evaluation_id
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS football_portfolio_selections (
         portfolio_selection_id TEXT PRIMARY KEY,
         evaluation_id TEXT NOT NULL,
@@ -89,6 +100,22 @@ def _ensure_schema_if_requested(conn: sqlite3.Connection, *, initialize_schema: 
         ensure_schema(conn)
 
 
+CURRENT_EVALUATION_IS_NEWER_CLAUSE = """
+                AND (
+                    newer.evaluated_at > e.evaluated_at
+                    OR (
+                        newer.evaluated_at = e.evaluated_at
+                        AND newer.created_at > e.created_at
+                    )
+                    OR (
+                        newer.evaluated_at = e.evaluated_at
+                        AND newer.created_at = e.created_at
+                        AND newer.evaluation_id > e.evaluation_id
+                    )
+                )
+"""
+
+
 def portfolio_evaluation_signature(
     *,
     policy: PortfolioPolicy,
@@ -129,8 +156,9 @@ def record_portfolio_evaluation(
     candidate_snapshot_at: str,
     evaluation_signature: str,
     dispositions: list[PortfolioDisposition],
+    initialize_schema: bool = True,
 ) -> PortfolioEvaluationWriteResult:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     created_at = _utc_now()
     evaluation_id = "portfolio_eval_" + canonical_hash(
         {
@@ -232,7 +260,7 @@ def fetch_current_portfolio_selections(
 ) -> list[dict[str, Any]]:
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     rows = conn.execute(
-        """
+        f"""
         SELECT s.*, e.candidate_snapshot_at, e.candidate_count, e.evaluation_signature
         FROM football_portfolio_selections s
         JOIN football_portfolio_evaluations e ON e.evaluation_id = s.evaluation_id
@@ -244,24 +272,7 @@ def fetch_current_portfolio_selections(
               WHERE newer.canonical_fixture_id = e.canonical_fixture_id
                 AND newer.policy_id = e.policy_id
                 AND newer.policy_version = e.policy_version
-                AND (
-                    newer.candidate_snapshot_at > e.candidate_snapshot_at
-                    OR (
-                        newer.candidate_snapshot_at = e.candidate_snapshot_at
-                        AND newer.candidate_count > e.candidate_count
-                    )
-                    OR (
-                        newer.candidate_snapshot_at = e.candidate_snapshot_at
-                        AND newer.candidate_count = e.candidate_count
-                        AND newer.created_at > e.created_at
-                    )
-                    OR (
-                        newer.candidate_snapshot_at = e.candidate_snapshot_at
-                        AND newer.candidate_count = e.candidate_count
-                        AND newer.created_at = e.created_at
-                        AND newer.evaluation_id > e.evaluation_id
-                    )
-                )
+{CURRENT_EVALUATION_IS_NEWER_CLAUSE}
           )
         ORDER BY e.canonical_fixture_id, s.selection_rank, s.paper_trade_id
         """,
@@ -279,7 +290,7 @@ def fetch_current_portfolio_evaluations(
 ) -> list[dict[str, Any]]:
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     rows = conn.execute(
-        """
+        f"""
         SELECT e.*
         FROM football_portfolio_evaluations e
         WHERE e.policy_id = ?
@@ -290,24 +301,7 @@ def fetch_current_portfolio_evaluations(
               WHERE newer.canonical_fixture_id = e.canonical_fixture_id
                 AND newer.policy_id = e.policy_id
                 AND newer.policy_version = e.policy_version
-                AND (
-                    newer.candidate_snapshot_at > e.candidate_snapshot_at
-                    OR (
-                        newer.candidate_snapshot_at = e.candidate_snapshot_at
-                        AND newer.candidate_count > e.candidate_count
-                    )
-                    OR (
-                        newer.candidate_snapshot_at = e.candidate_snapshot_at
-                        AND newer.candidate_count = e.candidate_count
-                        AND newer.created_at > e.created_at
-                    )
-                    OR (
-                        newer.candidate_snapshot_at = e.candidate_snapshot_at
-                        AND newer.candidate_count = e.candidate_count
-                        AND newer.created_at = e.created_at
-                        AND newer.evaluation_id > e.evaluation_id
-                    )
-                )
+{CURRENT_EVALUATION_IS_NEWER_CLAUSE}
           )
         ORDER BY e.canonical_fixture_id
         """,

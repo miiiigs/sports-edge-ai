@@ -1732,12 +1732,13 @@ class DashboardServices:
         )
         identity: dict[str, dict[str, Any]] = {}
         with storage.connect(self.config.dashboard_db_path) as dashboard_conn:
+            fixtures = storage.fetch_fixtures_by_ids(
+                dashboard_conn,
+                fixture_ids,
+                initialize_schema=self._read_requires_schema_init(),
+            )
             for fixture_id in fixture_ids:
-                fixture = storage.fetch_fixture(
-                    dashboard_conn,
-                    fixture_id,
-                    initialize_schema=self._read_requires_schema_init(),
-                )
+                fixture = fixtures.get(fixture_id)
                 if fixture is not None:
                     provider, provider_fixture_id = football_canonical_fixture.split_provider_fixture_id(fixture_id)
                     identity[fixture_id] = {
@@ -1828,12 +1829,15 @@ class DashboardServices:
             if str(row.get("paper_trade_id") or "") not in excluded
             and self._portfolio_policy_applies_to_timestamp(row.get("decision_timestamp"), policy)
         ]
-        identity_map = self._paper_fixture_identity_map_from_rows(conn, counted_rows)
-        canonical_fixture_id_by_fixture_id: dict[str, str] = {}
-        for fixture_id, identity in identity_map.items():
-            canonical_fixture_id = self._canonical_fixture_for_identity(conn, identity)
-            if canonical_fixture_id is not None:
-                canonical_fixture_id_by_fixture_id[str(fixture_id)] = canonical_fixture_id
+        canonical_fixture_id_by_fixture_id = football_canonical_fixture.fetch_canonical_fixture_ids_for_fixture_ids(
+            conn,
+            [
+                str(row.get("fixture_id") or "")
+                for row in counted_rows
+                if row.get("fixture_id") not in {None, ""}
+            ],
+            initialize_schema=self._read_requires_schema_init(),
+        )
         counted_rows_by_trade_id: dict[str, dict[str, Any]] = {}
         canonical_fixture_id_by_trade_id: dict[str, str] = {}
         for row in counted_rows:
@@ -1860,11 +1864,11 @@ class DashboardServices:
         snapshot_at_by_canonical_fixture_id: dict[str, str] = {}
         candidates_by_canonical_fixture_id: dict[str, list[PortfolioCandidate]] = defaultdict(list)
         counted_canonical_fixture_ids = set(canonical_fixture_id_by_trade_id.values())
-        canonical_fixture_id_by_fixture_id: dict[str, str] = {}
-        for fixture_id, prediction in prediction_by_fixture_id.items():
-            canonical_fixture_id = self._canonical_fixture_for_prediction(conn, prediction)
-            if canonical_fixture_id is not None:
-                canonical_fixture_id_by_fixture_id[str(fixture_id)] = canonical_fixture_id
+        canonical_fixture_id_by_fixture_id = football_canonical_fixture.fetch_canonical_fixture_ids_for_fixture_ids(
+            conn,
+            {str(fixture_id) for fixture_id in prediction_by_fixture_id},
+            initialize_schema=self._read_requires_schema_init(),
+        )
         for fixture_id, evaluation in evaluations.items():
             decision_rows = list((evaluation or {}).get("decision_rows") or [])
             if not decision_rows:
@@ -1955,6 +1959,7 @@ class DashboardServices:
                 candidate_snapshot_at=snapshot_at_by_canonical_fixture_id.get(canonical_fixture_id, evaluated_at),
                 evaluation_signature=evaluation_signature,
                 dispositions=dispositions,
+                initialize_schema=self._read_requires_schema_init(),
             )
 
     def _sync_portfolio_selection_for_prediction(

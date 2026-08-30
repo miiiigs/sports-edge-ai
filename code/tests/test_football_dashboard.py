@@ -3879,6 +3879,7 @@ def test_dashboard_portfolio_policy_separates_selected_subset_from_opportunity_t
     }
 
     with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
         services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
         services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
         selection_rows = football_portfolio_selection.fetch_current_portfolio_selections(
@@ -3953,6 +3954,7 @@ def test_current_portfolio_removes_position_when_current_bet_becomes_no_bet(tmp_
 
     asyncio.run(services.initialize())
     with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
         paper_trade_id = _record_portfolio_test_trade(
             conn,
             fixture=fixture,
@@ -4047,6 +4049,7 @@ def test_current_portfolio_removes_position_when_current_bet_becomes_stale(tmp_p
 
     asyncio.run(services.initialize())
     with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
         paper_trade_id = _record_portfolio_test_trade(
             conn,
             fixture=fixture,
@@ -4116,6 +4119,108 @@ def test_current_portfolio_removes_position_when_current_bet_becomes_stale(tmp_p
 
     assert current_rows == []
     assert evaluation_count == 2
+
+    asyncio.run(services.shutdown())
+
+
+def test_current_portfolio_same_source_timestamp_fresh_to_stale_uses_newer_evaluation(tmp_path: Path, monkeypatch) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    prediction = _portfolio_prediction(fixture)
+    evaluation_times = iter(
+        [
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+        ]
+    )
+
+    asyncio.run(services.initialize())
+    monkeypatch.setattr("sports_ai.dashboard.services.utc_now_iso", lambda: next(evaluation_times))
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
+        paper_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=fixture,
+            prediction_id="portfolio_same_source_timestamp_stale",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.08,
+            fair_price=1.76,
+            entry_odds=2.01,
+            decision_timestamp="2026-08-31T09:55:00+00:00",
+        )
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.08,
+                        model_probability=0.57,
+                        fair_price=1.76,
+                        best_price=2.01,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.02,
+                        model_probability=0.55,
+                        fair_price=1.82,
+                        best_price=1.88,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                        current_decision_state="NO_BET_STALE_MARKET",
+                        decision="STALE_MARKET",
+                        paper_entry_eligible=False,
+                        market_freshness="STALE",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+            initialize_schema=False,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T12:30:00+00:00"
+    assert current_evaluations[0]["candidate_snapshot_at"] == "2026-08-31T09:55:00+00:00"
+    assert current_rows == []
 
     asyncio.run(services.shutdown())
 
@@ -4515,6 +4620,8 @@ def test_current_portfolio_sync_reads_paper_ledger_once_per_batch(tmp_path: Path
 
     with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
         football_paper_trading.ensure_schema(conn)
+        football_portfolio_selection.ensure_schema(conn)
+        football_canonical_fixture.ensure_schema(conn)
         recorded = 0
         for fixture in fixtures:
             decision_rows = []
@@ -4565,14 +4672,63 @@ def test_current_portfolio_sync_reads_paper_ledger_once_per_batch(tmp_path: Path
             if recorded >= position_count:
                 break
 
-        fetch_calls = {"count": 0}
+        for fixture_id in evaluations:
+            assert services._canonical_fixture_for_prediction(conn, prediction_by_fixture_id[fixture_id]) is not None
+        services._schema_initialized = True
+
+        counts = {
+            "paper_fetch": 0,
+            "portfolio_ensure": 0,
+            "canonical_ensure": 0,
+            "canonical_resolve": 0,
+            "fixture_lookup": 0,
+            "portfolio_writes": 0,
+        }
         original_fetch = football_paper_trading.fetch_paper_trade_rows
+        original_portfolio_ensure = football_portfolio_selection.ensure_schema
+        original_canonical_ensure = football_canonical_fixture.ensure_schema
+        original_resolve = football_canonical_fixture.resolve_or_create_canonical_fixture
+        original_fetch_fixture = dashboard_storage.fetch_fixture
+        original_record = football_portfolio_selection.record_portfolio_evaluation
+        original_dashboard_connect = dashboard_storage.connect
+        dashboard_sql = {"count": 0}
 
         def counted_fetch(*args, **kwargs):
-            fetch_calls["count"] += 1
+            counts["paper_fetch"] += 1
             return original_fetch(*args, **kwargs)
 
+        def counted_portfolio_ensure(*args, **kwargs):
+            counts["portfolio_ensure"] += 1
+            return original_portfolio_ensure(*args, **kwargs)
+
+        def counted_canonical_ensure(*args, **kwargs):
+            counts["canonical_ensure"] += 1
+            return original_canonical_ensure(*args, **kwargs)
+
+        def counted_resolve(*args, **kwargs):
+            counts["canonical_resolve"] += 1
+            return original_resolve(*args, **kwargs)
+
+        def counted_fetch_fixture(*args, **kwargs):
+            counts["fixture_lookup"] += 1
+            return original_fetch_fixture(*args, **kwargs)
+
+        def counted_record(*args, **kwargs):
+            counts["portfolio_writes"] += 1
+            return original_record(*args, **kwargs)
+
+        def counted_dashboard_connect(*args, **kwargs):
+            dashboard_conn = original_dashboard_connect(*args, **kwargs)
+            dashboard_conn.set_trace_callback(lambda _: dashboard_sql.__setitem__("count", dashboard_sql["count"] + 1))
+            return dashboard_conn
+
         monkeypatch.setattr(football_paper_trading, "fetch_paper_trade_rows", counted_fetch)
+        monkeypatch.setattr(football_portfolio_selection, "ensure_schema", counted_portfolio_ensure)
+        monkeypatch.setattr(football_canonical_fixture, "ensure_schema", counted_canonical_ensure)
+        monkeypatch.setattr(football_canonical_fixture, "resolve_or_create_canonical_fixture", counted_resolve)
+        monkeypatch.setattr(dashboard_storage, "fetch_fixture", counted_fetch_fixture)
+        monkeypatch.setattr(football_portfolio_selection, "record_portfolio_evaluation", counted_record)
+        monkeypatch.setattr(dashboard_storage, "connect", counted_dashboard_connect)
         started = time_module.perf_counter()
         services._sync_current_portfolio_selections(
             conn,
@@ -4584,11 +4740,18 @@ def test_current_portfolio_sync_reads_paper_ledger_once_per_batch(tmp_path: Path
             conn,
             policy_id=PORTFOLIO_POLICY_ID_V1,
             policy_version=PORTFOLIO_POLICY_VERSION_V1,
+            initialize_schema=False,
         )
 
-    assert fetch_calls["count"] == 1
+    assert counts["paper_fetch"] == 1
+    assert counts["portfolio_ensure"] == 0
+    assert counts["canonical_ensure"] == 0
+    assert counts["canonical_resolve"] == 0
+    assert counts["fixture_lookup"] == 0
+    assert counts["portfolio_writes"] == len(evaluations)
+    assert dashboard_sql["count"] <= 1
     assert len(current_evaluations) == len(evaluations)
-    assert elapsed >= 0.0
+    assert elapsed > 0.0
 
 
 def test_sync_once_runs_blocking_body_off_event_loop_and_today_request_stays_responsive(

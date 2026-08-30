@@ -47,6 +47,48 @@ def _candidate(
     )
 
 
+def _candidate_payloads(candidates: list[PortfolioCandidate]) -> list[dict[str, object]]:
+    return [
+        {
+            "paper_trade_id": candidate.paper_trade_id,
+            "market": candidate.market,
+            "selection": candidate.selection,
+            "line": candidate.line,
+            "edge_at_selection": candidate.settlement_aware_edge,
+            "decision_timestamp": candidate.decision_timestamp,
+            "created_at": candidate.created_at,
+            "safeguard_state": candidate.safeguard_state,
+        }
+        for candidate in candidates
+    ]
+
+
+def _record_evaluation(
+    conn,
+    *,
+    policy: PortfolioPolicy,
+    canonical_fixture_id: str,
+    evaluated_at: str,
+    candidate_snapshot_at: str,
+    candidates: list[PortfolioCandidate],
+):
+    result = select_fixture_portfolio(candidates, policy=policy)
+    signature = football_portfolio_selection.portfolio_evaluation_signature(
+        policy=policy,
+        canonical_fixture_id=canonical_fixture_id,
+        candidates=_candidate_payloads(candidates),
+    )
+    return football_portfolio_selection.record_portfolio_evaluation(
+        conn,
+        policy=policy,
+        canonical_fixture_id=canonical_fixture_id,
+        evaluated_at=evaluated_at,
+        candidate_snapshot_at=candidate_snapshot_at,
+        evaluation_signature=signature,
+        dispositions=list(result.dispositions),
+    )
+
+
 def test_adjacent_goals_lines_select_one_highest_edge() -> None:
     result = select_fixture_portfolio(
         [
@@ -198,28 +240,15 @@ def test_portfolio_evaluation_storage_is_idempotent_and_prefers_newer_snapshot(t
         first_signature = football_portfolio_selection.portfolio_evaluation_signature(
             policy=policy,
             canonical_fixture_id="cf_1",
-            candidates=[
-                {
-                    "paper_trade_id": candidate.paper_trade_id,
-                    "market": candidate.market,
-                    "selection": candidate.selection,
-                    "line": candidate.line,
-                    "edge_at_selection": candidate.settlement_aware_edge,
-                    "decision_timestamp": candidate.decision_timestamp,
-                    "created_at": candidate.created_at,
-                    "safeguard_state": candidate.safeguard_state,
-                }
-                for candidate in first_candidates
-            ],
+            candidates=_candidate_payloads(first_candidates),
         )
-        first_write = football_portfolio_selection.record_portfolio_evaluation(
+        first_write = _record_evaluation(
             conn,
             policy=policy,
             canonical_fixture_id="cf_1",
             evaluated_at="2026-08-20T10:00:00+00:00",
             candidate_snapshot_at="2026-08-20T10:00:00+00:00",
-            evaluation_signature=first_signature,
-            dispositions=list(first_result.dispositions),
+            candidates=first_candidates,
         )
         duplicate_write = football_portfolio_selection.record_portfolio_evaluation(
             conn,
@@ -230,31 +259,13 @@ def test_portfolio_evaluation_storage_is_idempotent_and_prefers_newer_snapshot(t
             evaluation_signature=first_signature,
             dispositions=list(first_result.dispositions),
         )
-        second_signature = football_portfolio_selection.portfolio_evaluation_signature(
-            policy=policy,
-            canonical_fixture_id="cf_1",
-            candidates=[
-                {
-                    "paper_trade_id": candidate.paper_trade_id,
-                    "market": candidate.market,
-                    "selection": candidate.selection,
-                    "line": candidate.line,
-                    "edge_at_selection": candidate.settlement_aware_edge,
-                    "decision_timestamp": candidate.decision_timestamp,
-                    "created_at": candidate.created_at,
-                    "safeguard_state": candidate.safeguard_state,
-                }
-                for candidate in second_candidates
-            ],
-        )
-        second_write = football_portfolio_selection.record_portfolio_evaluation(
+        second_write = _record_evaluation(
             conn,
             policy=policy,
             canonical_fixture_id="cf_1",
             evaluated_at="2026-08-20T10:06:00+00:00",
             candidate_snapshot_at="2026-08-20T10:05:00+00:00",
-            evaluation_signature=second_signature,
-            dispositions=list(second_result.dispositions),
+            candidates=second_candidates,
         )
         current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
             conn,
@@ -267,3 +278,132 @@ def test_portfolio_evaluation_storage_is_idempotent_and_prefers_newer_snapshot(t
     assert second_write.inserted is True
     assert {row["paper_trade_id"] for row in current_rows} == {"paper_1", "paper_2"}
     assert {row["selection_state"] for row in current_rows} == {PORTFOLIO_STATE_SELECTED}
+
+
+def test_current_evaluation_prefers_later_evaluated_at_when_same_snapshot_becomes_empty(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_latest_empty.sqlite"
+    policy = _policy()
+    first_candidates = [
+        _candidate("paper_1", market="goals_total", selection="OVER", line=2.5, edge=0.08, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_bug",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=first_candidates,
+        )
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_bug",
+            evaluated_at="2026-08-31T12:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=[],
+        )
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T12:30:00+00:00"
+    assert current_evaluations[0]["candidate_snapshot_at"] == "2026-08-31T09:55:00+00:00"
+    assert current_evaluations[0]["candidate_count"] == 0
+    assert current_rows == []
+
+
+def test_current_evaluation_prefers_later_evaluated_at_when_same_snapshot_grows(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_latest_growth.sqlite"
+    policy = _policy()
+    first_candidates = [
+        _candidate("paper_1", market="1x2", selection="HOME", line=None, edge=0.08, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+    second_candidates = [
+        _candidate("paper_1", market="1x2", selection="HOME", line=None, edge=0.08, decision_timestamp="2026-08-31T09:55:00+00:00"),
+        _candidate("paper_2", market="goals_total", selection="OVER", line=2.5, edge=0.09, decision_timestamp="2026-08-31T09:55:00+00:00"),
+        _candidate("paper_3", market="btts", selection="YES", line=None, edge=0.07, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_growth",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=first_candidates,
+        )
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_growth",
+            evaluated_at="2026-08-31T12:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=second_candidates,
+        )
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T12:30:00+00:00"
+    assert current_evaluations[0]["candidate_count"] == 3
+    assert {row["paper_trade_id"] for row in current_rows} == {"paper_1", "paper_2", "paper_3"}
+
+
+def test_current_evaluation_prefers_later_evaluated_at_over_snapshot_metadata(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_latest_recency.sqlite"
+    policy = _policy()
+    older_candidates = [
+        _candidate("paper_old", market="goals_total", selection="OVER", line=2.5, edge=0.08, decision_timestamp="2026-08-31T10:05:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_recency",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T10:05:00+00:00",
+            candidates=older_candidates,
+        )
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_recency",
+            evaluated_at="2026-08-31T12:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T10:00:00+00:00",
+            candidates=[],
+        )
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T12:30:00+00:00"
+    assert current_evaluations[0]["candidate_snapshot_at"] == "2026-08-31T10:00:00+00:00"
+    assert current_rows == []
