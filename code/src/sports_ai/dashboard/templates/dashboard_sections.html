@@ -1,6 +1,4 @@
-{% from "_ui.html" import status_badge %}
-{% set today_fixtures = payload.live + payload.today %}
-{% set upcoming_matches = payload.upcoming[:8] %}
+{% from "_ui.html" import status_badge, pagination_nav %}
 {% set headline_pick = payload.best_picks[0] if payload.best_picks else None %}
 <section class="page-heading edge-desk-heading">
   <div>
@@ -51,102 +49,7 @@
   </div>
 </section>
 
-<section class="surface-grid surface-grid--sidebar">
-  <section class="section-block desk-panel">
-    <div class="desk-panel-head">
-      <div>
-        <span class="desk-panel-title">Today's Matches</span>
-        <span class="desk-panel-note">Live and scheduled fixtures for the current local day</span>
-      </div>
-      <span class="desk-panel-meta">{{ today_fixtures|length }} FIXTURES</span>
-    </div>
-
-    {% if today_fixtures %}
-      <div class="fixture-list">
-        {% for row in today_fixtures %}
-          {% set prediction_ready = row.prediction_eligibility_status == 'PREDICTION_READY' %}
-          {% set market_ready = row.market_evaluation and row.market_evaluation.state == 'READY' %}
-          {% set desk_state = row.market_signal.current_decision_state if row.market_signal else row.market_status_label %}
-          {% set desk_tone = 'positive' if desk_state == 'BET' else 'inactive' if 'NO BET' in desk_state else 'warning' %}
-          <article class="fixture-row">
-            <div class="fixture-row-main">
-              <div class="fixture-time">{{ row.kickoff_local }}</div>
-              <div class="fixture-match-block">
-                <a class="fixture-match-link" href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
-                <div class="fixture-meta">{{ row.competition_name }}</div>
-              </div>
-            </div>
-            <div class="fixture-statuses">
-              {% if row.status in ['LIVE', 'HALFTIME'] %}
-                {{ status_badge(row.status ~ ((" " ~ row.elapsed_minute ~ "'") if row.elapsed_minute else ''), 'live') }}
-              {% elif row.status == 'FINISHED' %}
-                {{ status_badge('Finished', 'inactive') }}
-              {% else %}
-                {{ status_badge(row.status, 'neutral') }}
-              {% endif %}
-              {{ status_badge('Model Ready' if prediction_ready else row.prediction_eligibility_status.replace('_', ' '), 'positive' if prediction_ready else 'warning' if 'PENDING' in row.prediction_eligibility_status else 'inactive') }}
-              {{ status_badge('Market Ready' if market_ready else row.market_status_label.replace('_', ' '), 'positive' if market_ready else 'inactive') }}
-              {{ status_badge(desk_state.replace('_', ' '), desk_tone) }}
-            </div>
-            <div class="fixture-actions">
-              {% if row.status in ['LIVE', 'HALFTIME', 'FINISHED'] %}
-                <span class="fixture-score">{{ row.home_score if row.home_score is not none else 0 }}-{{ row.away_score if row.away_score is not none else 0 }}</span>
-              {% endif %}
-              <a class="table-link" href="/matches/{{ row.fixture_id }}">View match</a>
-            </div>
-          </article>
-        {% endfor %}
-      </div>
-    {% else %}
-      <article class="empty-state desk-empty-state">
-        <strong>No in-scope matches are scheduled for today.</strong>
-        <p>The match board still contains upcoming fixtures and completed results.</p>
-      </article>
-    {% endif %}
-  </section>
-
-  <aside class="stack-column">
-    <section class="section-block desk-panel">
-      <div class="desk-panel-head">
-        <div>
-          <span class="desk-panel-title">Today Snapshot</span>
-          <span class="desk-panel-note">What the client needs first</span>
-        </div>
-      </div>
-      <div class="data-list">
-        <div><span>Live Matches</span><strong>{{ payload.live|length }}</strong></div>
-        <div><span>Scheduled Today</span><strong>{{ payload.today|length }}</strong></div>
-        <div><span>Current BET Rows</span><strong>{{ payload.today_summary.approved }}</strong></div>
-        <div><span>Current Desk Rows</span><strong>{{ payload.today_summary.predictions }}</strong></div>
-        <div><span>Published Picks</span><strong>{{ payload.best_picks_summary.count }}</strong></div>
-        <div><span>Upcoming Matches</span><strong>{{ payload.upcoming|length }}</strong></div>
-      </div>
-    </section>
-
-    <section class="section-block desk-panel">
-      <div class="desk-panel-head">
-        <div>
-          <span class="desk-panel-title">Performance Snapshot</span>
-          <span class="desk-panel-note">Recent paper outcomes and trend</span>
-        </div>
-      </div>
-      <div class="data-list">
-        <div><span>Last 20 Form</span><strong>{{ payload.last_20.sequence|join(' ') if payload.last_20.sequence else 'NONE' }}</strong></div>
-        <div><span>Wins</span><strong>{{ payload.last_20.summary.wins }}</strong></div>
-        <div><span>Losses</span><strong>{{ payload.last_20.summary.losses }}</strong></div>
-        <div><span>Strike Rate</span><strong>{{ "{:.2%}".format(payload.last_20.summary.strike_rate|float) if payload.last_20.summary.strike_rate is not none else 'NOT AVAILABLE' }}</strong></div>
-        <div><span>ROI</span><strong>{{ "{:+.2%}".format(payload.last_20.summary.roi|float) if payload.last_20.summary.roi is not none else 'NOT AVAILABLE' }}</strong></div>
-        <div><span>Net Units</span><strong>{{ "{:+.2f}".format(payload.cumulative_profit.net_units|float) if payload.cumulative_profit.net_units is not none else 'NOT AVAILABLE' }}</strong></div>
-      </div>
-      <div class="inline-actions">
-        <a class="rail-link" href="/model-performance">Model performance</a>
-        <a class="rail-link" href="/reports">Reports</a>
-      </div>
-    </section>
-  </aside>
-</section>
-
-<section class="section-block desk-panel">
+<section class="section-block desk-panel" id="best-picks">
   <div class="desk-panel-head">
     <div>
       <span class="desk-panel-title">Best Picks</span>
@@ -155,7 +58,7 @@
     <span class="desk-panel-meta">{{ payload.best_picks_summary.count }} PICKS</span>
   </div>
 
-  {% if payload.best_picks %}
+  {% if payload.visible_best_picks %}
     <div class="desktop-table">
       <div class="desk-table-wrap">
         <table class="desk-table">
@@ -174,7 +77,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in payload.best_picks %}
+            {% for row in payload.visible_best_picks %}
               {% set pick_state = row.paper_trade_state if row.paper_trade_state is defined else row.trade_state %}
               {% set pick_tone = row.paper_result_tone if row.paper_result_tone is defined else row.result_tone %}
               <tr class="desk-row-featured">
@@ -216,7 +119,7 @@
     </div>
 
     <div class="mobile-card-list">
-      {% for row in payload.best_picks %}
+      {% for row in payload.visible_best_picks %}
         {% set pick_state = row.paper_trade_state if row.paper_trade_state is defined else row.trade_state %}
         {% set pick_tone = row.paper_result_tone if row.paper_result_tone is defined else row.result_tone %}
         <article class="mobile-data-card mobile-data-card--bet">
@@ -250,6 +153,7 @@
         </article>
       {% endfor %}
     </div>
+    {{ pagination_nav(payload.best_picks_pagination, "picks_page", set_query_param_href, "best-picks") }}
   {% else %}
     <article class="empty-state desk-empty-state">
       <strong>{{ payload.best_picks_summary.empty_message }}</strong>
@@ -258,7 +162,85 @@
   {% endif %}
 </section>
 
-<section class="section-block desk-panel">
+<section class="surface-grid surface-grid--sidebar">
+  <section class="section-block desk-panel" id="today-matches">
+    <div class="desk-panel-head">
+      <div>
+        <span class="desk-panel-title">Today's Matches</span>
+        <span class="desk-panel-note">Only fixtures whose kickoff belongs to the current local date</span>
+      </div>
+      <span class="desk-panel-meta">{{ payload.today_matches_pagination.total_items }} FIXTURES</span>
+    </div>
+
+    {% if payload.visible_today_matches %}
+      <div class="fixture-list">
+        {% for row in payload.visible_today_matches %}
+          {% set prediction_ready = row.prediction_eligibility_status == 'PREDICTION_READY' %}
+          {% set market_ready = row.market_evaluation and row.market_evaluation.state == 'READY' %}
+          {% set desk_state = row.market_signal.current_decision_state if row.market_signal else row.market_status_label %}
+          {% set desk_tone = 'positive' if desk_state == 'BET' else 'inactive' if 'NO BET' in desk_state else 'warning' %}
+          <article class="fixture-row">
+            <div class="fixture-row-main">
+              <div class="fixture-time">{{ row.kickoff_local }}</div>
+              <div class="fixture-match-block">
+                <a class="fixture-match-link" href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+                <div class="fixture-meta">{{ row.competition_name }}</div>
+              </div>
+            </div>
+            <div class="fixture-statuses">
+              {% if row.status in ['LIVE', 'HALFTIME'] %}
+                {{ status_badge(row.status ~ ((" " ~ row.elapsed_minute ~ "'") if row.elapsed_minute else ''), 'live') }}
+              {% elif row.status == 'FINISHED' %}
+                {{ status_badge('Finished', 'inactive') }}
+              {% else %}
+                {{ status_badge(row.status, 'neutral') }}
+              {% endif %}
+              {{ status_badge('Model Ready' if prediction_ready else row.prediction_eligibility_status.replace('_', ' '), 'positive' if prediction_ready else 'warning' if 'PENDING' in row.prediction_eligibility_status else 'inactive') }}
+              {{ status_badge('Market Ready' if market_ready else row.market_status_label.replace('_', ' '), 'positive' if market_ready else 'inactive') }}
+              {{ status_badge(desk_state.replace('_', ' '), desk_tone) }}
+            </div>
+            <div class="fixture-actions">
+              {% if row.status in ['LIVE', 'HALFTIME', 'FINISHED'] %}
+                <span class="fixture-score">{{ row.home_score if row.home_score is not none else 0 }}-{{ row.away_score if row.away_score is not none else 0 }}</span>
+              {% endif %}
+              <a class="table-link" href="/matches/{{ row.fixture_id }}">View match</a>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+      {{ pagination_nav(payload.today_matches_pagination, "matches_page", set_query_param_href, "today-matches") }}
+    {% else %}
+      <article class="empty-state desk-empty-state">
+        <strong>No in-scope matches are scheduled for today.</strong>
+        <p>The match board still contains upcoming fixtures and completed results.</p>
+      </article>
+    {% endif %}
+  </section>
+
+  <aside class="stack-column">
+    <section class="section-block desk-panel">
+      <div class="desk-panel-head">
+        <div>
+          <span class="desk-panel-title">Today Snapshot</span>
+          <span class="desk-panel-note">What the client needs first</span>
+        </div>
+      </div>
+      <div class="data-list">
+        <div><span>Live Matches</span><strong>{{ payload.live|length }}</strong></div>
+        <div><span>Scheduled Today</span><strong>{{ payload.today|length }}</strong></div>
+        <div><span>Current BET Rows</span><strong>{{ payload.today_summary.approved }}</strong></div>
+        <div><span>Current Desk Rows</span><strong>{{ payload.today_summary.predictions }}</strong></div>
+        <div><span>Published Picks</span><strong>{{ payload.best_picks_summary.count }}</strong></div>
+        <div><span>Upcoming Matches</span><strong>{{ payload.upcoming_count }}</strong></div>
+      </div>
+      <div class="inline-actions">
+        <a class="filter-button" href="/matches?status_bucket=upcoming">View Upcoming Matches{% if payload.upcoming_count %} ({{ payload.upcoming_count }}){% endif %}</a>
+      </div>
+    </section>
+  </aside>
+</section>
+
+<section class="section-block desk-panel" id="current-desk">
   <div class="desk-panel-head">
     <div>
       <span class="desk-panel-title">Current Desk</span>
@@ -267,7 +249,7 @@
     <span class="desk-panel-meta">{{ payload.today_summary.predictions }} ROWS</span>
   </div>
 
-  {% if payload.today_desk_rows %}
+  {% if payload.visible_today_desk_rows %}
     <div class="desktop-table">
       <div class="desk-table-wrap">
         <table class="desk-table">
@@ -285,7 +267,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in payload.today_desk_rows %}
+            {% for row in payload.visible_today_desk_rows %}
               <tr class="{% if row.current_decision_group == 'bet' %}desk-row-featured{% else %}desk-row-dim{% endif %}">
                 <td class="desk-time">{{ row.kickoff_time_local }}</td>
                 <td class="desk-match-cell">
@@ -299,7 +281,9 @@
                 <td class="num">{{ "{:.2f}".format(row.market_odds|float) if row.market_odds is not none else "N/A" }}</td>
                 <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
                 <td class="num">{{ "{:.1%}".format(row.implied_probability|float) if row.implied_probability is not none else "N/A" }}</td>
-                <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">{{ "{:+.2%}".format(row.edge|float) if row.edge is not none else "N/A" }}</td>
+                <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">
+                  {{ "{:+.2%}".format(row.edge|float) if row.edge is not none else "N/A" }}
+                </td>
                 <td class="desk-decision-cell">
                   <span class="desk-pill {% if row.current_decision_group == 'bet' %}desk-pill-bet{% elif row.current_decision_group == 'no_bet' %}desk-pill-nobet{% else %}desk-pill-final{% endif %}">{{ row.desk_label }}</span>
                   {% if row.desk_note %}
@@ -317,7 +301,7 @@
     </div>
 
     <div class="mobile-card-list">
-      {% for row in payload.today_desk_rows %}
+      {% for row in payload.visible_today_desk_rows %}
         <article class="mobile-data-card {% if row.current_decision_group == 'bet' %}mobile-data-card--bet{% endif %}">
           <div class="mobile-data-card__header">
             <div>
@@ -341,6 +325,7 @@
         </article>
       {% endfor %}
     </div>
+    {{ pagination_nav(payload.today_desk_pagination, "desk_page", set_query_param_href, "current-desk") }}
   {% else %}
     <article class="empty-state desk-empty-state">
       <strong>{{ payload.today_summary.empty_message }}</strong>
@@ -352,35 +337,22 @@
   <section class="section-block desk-panel">
     <div class="desk-panel-head">
       <div>
-        <span class="desk-panel-title">Upcoming Matches</span>
-        <span class="desk-panel-note">A compact look ahead without duplicating the full match board</span>
+        <span class="desk-panel-title">Performance Snapshot</span>
+        <span class="desk-panel-note">Recent paper outcomes and trend</span>
       </div>
-      <a class="rail-link" href="/matches?status_bucket=upcoming">View all upcoming</a>
     </div>
-
-    {% if upcoming_matches %}
-      <div class="fixture-list fixture-list--compact">
-        {% for row in upcoming_matches %}
-          <article class="fixture-row">
-            <div class="fixture-row-main">
-              <div class="fixture-time">{{ row.kickoff_local }}</div>
-              <div class="fixture-match-block">
-                <a class="fixture-match-link" href="/matches/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
-                <div class="fixture-meta">{{ row.competition_name }}</div>
-              </div>
-            </div>
-            <div class="fixture-actions">
-              {{ status_badge(row.prediction_eligibility_status.replace('_', ' '), 'positive' if row.prediction_eligibility_status == 'PREDICTION_READY' else 'warning' if 'PENDING' in row.prediction_eligibility_status else 'inactive') }}
-              <a class="table-link" href="/matches/{{ row.fixture_id }}">View match</a>
-            </div>
-          </article>
-        {% endfor %}
-      </div>
-    {% else %}
-      <article class="empty-state desk-empty-state">
-        <strong>No upcoming fixtures are currently staged beyond today.</strong>
-      </article>
-    {% endif %}
+    <div class="data-list">
+      <div><span>Last 20 Form</span><strong>{{ payload.last_20.sequence|join(' ') if payload.last_20.sequence else 'NONE' }}</strong></div>
+      <div><span>Wins</span><strong>{{ payload.last_20.summary.wins }}</strong></div>
+      <div><span>Losses</span><strong>{{ payload.last_20.summary.losses }}</strong></div>
+      <div><span>Strike Rate</span><strong>{{ "{:.2%}".format(payload.last_20.summary.strike_rate|float) if payload.last_20.summary.strike_rate is not none else 'NOT AVAILABLE' }}</strong></div>
+      <div><span>ROI</span><strong>{{ "{:+.2%}".format(payload.last_20.summary.roi|float) if payload.last_20.summary.roi is not none else 'NOT AVAILABLE' }}</strong></div>
+      <div><span>Net Units</span><strong>{{ "{:+.2f}".format(payload.cumulative_profit.net_units|float) if payload.cumulative_profit.net_units is not none else 'NOT AVAILABLE' }}</strong></div>
+    </div>
+    <div class="inline-actions">
+      <a class="rail-link" href="/model-performance">Model performance</a>
+      <a class="rail-link" href="/reports">Reports</a>
+    </div>
   </section>
 
   <aside class="stack-column">

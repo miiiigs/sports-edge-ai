@@ -1194,6 +1194,66 @@ thead th,
   color: var(--muted-soft);
 }
 
+.pagination-nav {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.pagination-summary {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pagination-desktop,
+.pagination-mobile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-link,
+.pagination-mobile-status,
+.pagination-ellipsis {
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(24, 28, 27, 0.92);
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pagination-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.pagination-link-active {
+  border-color: rgba(230, 179, 87, 0.34);
+  background: var(--amber-wash);
+  color: var(--amber-strong);
+}
+
+.pagination-link-disabled {
+  opacity: 0.48;
+}
+
+.pagination-mobile {
+  display: none;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+}
+
 .desktop-table,
 .mobile-card-list--always {
   display: block;
@@ -1662,8 +1722,29 @@ code {
   .details-button,
   .rail-link,
   .table-link,
-  .filter-chip {
+  .filter-chip,
+  .pagination-link {
     width: 100%;
     justify-content: center;
+  }
+
+  .pagination-desktop {
+    display: none;
+  }
+
+  .pagination-mobile {
+    display: flex;
+  }
+
+  .pagination-mobile .pagination-link {
+    width: auto;
+    min-width: 96px;
+    flex: 0 0 auto;
+  }
+
+  .pagination-mobile-status {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: center;
   }
 }

@@ -1,4 +1,4 @@
-{% from "_ui.html" import status_badge %}
+{% from "_ui.html" import status_badge, pagination_nav %}
 <section class="page-heading edge-desk-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Betting Desk</p>
@@ -49,7 +49,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in payload.rows %}
+            {% for row in payload.visible_rows %}
               <tr class="{% if row.decision_group == 'bet' %}desk-row-featured{% else %}desk-row-dim{% endif %}">
                 <td class="desk-time">{{ row.kickoff_time_local }}</td>
                 <td class="desk-match-cell">
@@ -84,7 +84,7 @@
     </div>
 
     <div class="mobile-card-list">
-      {% for row in payload.rows %}
+      {% for row in payload.visible_rows %}
         <article class="mobile-data-card {% if row.decision_group == 'bet' %}mobile-data-card--bet{% endif %}">
           <div class="mobile-data-card__header">
             <div>
@@ -115,6 +115,7 @@
         </article>
       {% endfor %}
     </div>
+    {{ pagination_nav(payload.pagination, "page", set_query_param_href) }}
   {% else %}
     <article class="empty-state desk-empty-state">
       {% if payload.quota_waiting_reset %}
