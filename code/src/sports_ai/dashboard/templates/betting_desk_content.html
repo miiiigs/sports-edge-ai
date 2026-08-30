@@ -45,6 +45,7 @@
               <th>Reference</th>
               <th>Freshness</th>
               <th>Safeguard</th>
+              <th>Portfolio</th>
               <th>Desk Decision</th>
             </tr>
           </thead>
@@ -72,6 +73,10 @@
                 <td>{{ row.reference_bookmaker or "N/A" }}<div class="row-sub">{{ row.reference_source or "Reference book" }}</div></td>
                 <td>{{ row.freshness }}</td>
                 <td>{{ row.safeguard }}</td>
+                <td>
+                  <strong>{{ row.portfolio_selection_state_label }}</strong>
+                  <div class="row-sub">{{ row.portfolio_selection_reason }}</div>
+                </td>
                 <td class="desk-decision-cell">
                   <span class="desk-pill {% if row.decision_group == 'bet' %}desk-pill-bet{% elif row.decision_group == 'no_bet' %}desk-pill-nobet{% else %}desk-pill-final{% endif %}">{{ row.desk_decision }}</span>
                   <small>{{ row.reason }}</small>
@@ -105,9 +110,10 @@
             <div><span>Min Odds</span><strong>{{ "{:.2f}".format(row.minimum_acceptable_odds|float) if row.minimum_acceptable_odds is not none else "N/A" }}</strong></div>
             <div><span>Freshness</span><strong>{{ row.freshness }}</strong></div>
             <div><span>Safeguard</span><strong>{{ row.safeguard }}</strong></div>
+            <div><span>Portfolio</span><strong>{{ row.portfolio_selection_state_label }}</strong></div>
             <div><span>Reference</span><strong>{{ row.reference_bookmaker or "N/A" }}</strong></div>
           </div>
-          <p class="mobile-data-card__note">{{ row.reason }}</p>
+          <p class="mobile-data-card__note">{{ row.reason }} · {{ row.portfolio_selection_reason }}</p>
           <div class="mobile-data-card__footer">
             <span>{{ row.reference_source or "Reference book" }}</span>
             <a class="table-link" href="/pick-detail/{{ row.fixture_id }}">Open match</a>

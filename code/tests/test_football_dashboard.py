@@ -19,6 +19,12 @@ from sports_ai.dashboard import storage as dashboard_storage
 from sports_ai.dashboard.day12_rolling_xg import SOURCE_IDENTIFIER, build_xg_inspection
 from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FixtureProviderError, FootballDataOrgFixtureProvider
 from sports_ai.dashboard.fixture_provider import API_FOOTBALL_PROVIDER, AuthoritativeFixtureStatistics
+from sports_ai.dashboard.portfolio_selection import (
+    PORTFOLIO_POLICY_ID_V1,
+    PORTFOLIO_POLICY_VERSION_V1,
+    PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT,
+    PORTFOLIO_STATE_SELECTED,
+)
 from sports_ai.dashboard.models import (
     FIXTURE_STATUS_FINISHED,
     FIXTURE_STATUS_LIVE,
@@ -28,7 +34,7 @@ from sports_ai.dashboard.models import (
 )
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _default_market_provider, _humanize_market_selection
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
-from sports_ai.storage import football_canonical_fixture, football_edge_desk, football_paper_trading
+from sports_ai.storage import football_canonical_fixture, football_edge_desk, football_paper_trading, football_portfolio_selection
 
 
 class FakeFixtureProvider:
@@ -3565,6 +3571,262 @@ def test_dashboard_get_routes_do_not_run_schema_initialization_after_startup(
 
     assert all(response.status_code == 200 for response in responses)
     assert schema_calls == {"dashboard": 0, "paper": 0, "canonical": 0}
+
+
+def test_dashboard_portfolio_policy_separates_selected_subset_from_opportunity_truth(tmp_path: Path) -> None:
+    services, fixtures = _build_today_read_path_services(tmp_path)
+    services.config = replace(
+        services.config,
+        portfolio_policy_effective_from="2026-08-01T00:00:00+00:00",
+    )
+    primary_fixture = fixtures[0]
+    decision_timestamp = "2026-08-20T10:00:00+00:00"
+
+    def record_trade(
+        conn,
+        *,
+        prediction_id: str,
+        market: str,
+        selection: str,
+        line: float | None,
+        edge: float,
+        fair_price: float,
+        entry_odds: float,
+    ) -> str:
+        return football_paper_trading.record_paper_trade_entry(
+            conn,
+            football_paper_trading.PaperTradeEntry(
+                prediction_id=prediction_id,
+                fixture_id=primary_fixture.fixture_id,
+                model_snapshot_id=f"snapshot_{prediction_id}",
+                model_version="football_day11_manager_core_v1",
+                market=market,
+                selection=selection,
+                line=line,
+                model_probability=0.55,
+                model_fair_price=fair_price,
+                available_market_price=entry_odds,
+                edge=edge,
+                minimum_acceptable_price=1.8,
+                decision="PAPER_CANDIDATE",
+                decision_timestamp=decision_timestamp,
+                kickoff=primary_fixture.kickoff_utc,
+                safeguard_state="READY",
+                entry_eligibility="ELIGIBLE",
+                bookmaker="Pinnacle",
+                provider="fake-market-provider",
+                entry_odds=entry_odds,
+                entry_captured_at=decision_timestamp,
+            ),
+        )
+
+    asyncio.run(services.initialize())
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        goals_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_goals",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.09,
+            fair_price=1.72,
+            entry_odds=2.04,
+        )
+        one_x_two_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_1x2",
+            market="1x2",
+            selection="HOME",
+            line=None,
+            edge=0.07,
+            fair_price=1.64,
+            entry_odds=2.18,
+        )
+        btts_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_btts",
+            market="btts",
+            selection="YES",
+            line=None,
+            edge=0.06,
+            fair_price=1.90,
+            entry_odds=2.12,
+        )
+        corners_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_corners",
+            market="corner_total",
+            selection="OVER",
+            line=9.5,
+            edge=0.04,
+            fair_price=1.95,
+            entry_odds=2.08,
+        )
+
+    primary_decision_rows = [
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "goals_total",
+            "selection": "OVER",
+            "line": 2.5,
+            "model_probability": 0.58,
+            "model_fair_decimal_price": 1.72,
+            "best_available_price": 2.04,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.09,
+            "paper_entry_eligible": True,
+            "paper_trade_id": goals_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "1x2",
+            "selection": "HOME",
+            "line": None,
+            "model_probability": 0.61,
+            "model_fair_decimal_price": 1.64,
+            "best_available_price": 2.18,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.07,
+            "paper_entry_eligible": True,
+            "paper_trade_id": one_x_two_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "btts",
+            "selection": "YES",
+            "line": None,
+            "model_probability": 0.52,
+            "model_fair_decimal_price": 1.90,
+            "best_available_price": 2.12,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.06,
+            "paper_entry_eligible": True,
+            "paper_trade_id": btts_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "corner_total",
+            "selection": "OVER",
+            "line": 9.5,
+            "model_probability": 0.50,
+            "model_fair_decimal_price": 1.95,
+            "best_available_price": 2.08,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.04,
+            "paper_entry_eligible": True,
+            "paper_trade_id": corners_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+    ]
+    services._market_evaluation_map = lambda: {
+        primary_fixture.fixture_id: {
+            "state": "READY",
+            "reason": None,
+            "decision_rows": primary_decision_rows,
+            "display_rows": list(primary_decision_rows),
+        }
+    }
+
+    prediction = {
+        "prediction_id": "portfolio_prediction_primary",
+        "fixture_id": primary_fixture.fixture_id,
+        "competition_id": primary_fixture.competition_id,
+        "home_team_name": primary_fixture.home_team_name,
+        "away_team_name": primary_fixture.away_team_name,
+        "kickoff_utc": primary_fixture.kickoff_utc,
+        "season": primary_fixture.season,
+    }
+
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        selection_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+
+    selection_by_trade_id = {
+        str(row["paper_trade_id"]): str(row["selection_state"])
+        for row in selection_rows
+    }
+    assert selection_by_trade_id[goals_trade_id] == PORTFOLIO_STATE_SELECTED
+    assert selection_by_trade_id[one_x_two_trade_id] == PORTFOLIO_STATE_SELECTED
+    assert selection_by_trade_id[btts_trade_id] == PORTFOLIO_STATE_SELECTED
+    assert selection_by_trade_id[corners_trade_id] == PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT
+    assert len(selection_rows) == 4
+
+    dashboard_payload = services.get_dashboard_payload()
+    member_card_payload = services.get_member_card_payload()
+    performance_payload = services.get_performance_payload()
+    reports_payload = services.get_reports_payload()
+
+    assert dashboard_payload["today_summary"]["suggested_bets"] == 3
+    assert dashboard_payload["today_summary"]["matches"] == 1
+    assert dashboard_payload["today_summary"]["open_portfolio_exposure"] == pytest.approx(3.0)
+    assert dashboard_payload["best_picks_summary"]["count"] == 3
+    assert dashboard_payload["best_picks_summary"]["source"] == "Current deterministic portfolio selection."
+    assert {
+        str(row["paper_trade_id"])
+        for row in dashboard_payload["published_paper_rows"]
+    } == {goals_trade_id, one_x_two_trade_id, btts_trade_id}
+
+    assert member_card_payload["publish_state"] == "CURRENT PORTFOLIO"
+    assert member_card_payload["portfolio_policy"] == {
+        "policy_id": PORTFOLIO_POLICY_ID_V1,
+        "policy_version": PORTFOLIO_POLICY_VERSION_V1,
+        "effective_from": "2026-08-01T00:00:00+00:00",
+    }
+    assert len(member_card_payload["rows"]) == 3
+    assert {row["portfolio_state"] for row in member_card_payload["rows"]} == {"SELECTED"}
+
+    assert performance_payload["current_paper_summary"]["positions"] == 4
+    assert performance_payload["current_paper_summary"]["open_positions"] == 4
+    assert performance_payload["current_portfolio_summary"]["positions"] == 3
+    assert performance_payload["current_portfolio_summary"]["open_positions"] == 3
+    assert len(performance_payload["portfolio_positions"]) == 3
+    assert len(performance_payload["open_portfolio_positions"]) == 3
+    assert performance_payload["portfolio_publish_state"] == "CURRENT PORTFOLIO"
+
+    assert reports_payload["portfolio_publish_state"] == "CURRENT PORTFOLIO"
+    assert reports_payload["portfolio_policy"] == {
+        "policy_id": PORTFOLIO_POLICY_ID_V1,
+        "policy_version": PORTFOLIO_POLICY_VERSION_V1,
+        "effective_from": "2026-08-01T00:00:00+00:00",
+    }
+
+    asyncio.run(services.shutdown())
 
 
 def test_sync_once_runs_blocking_body_off_event_loop_and_today_request_stays_responsive(

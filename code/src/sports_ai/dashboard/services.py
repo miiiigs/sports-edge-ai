@@ -20,7 +20,7 @@ from ..market_data.api_football import ApiFootballOddsProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
 from ..market_data.the_odds_api import TheOddsApiProvider
-from ..storage import football_canonical_fixture, football_edge_desk, football_paper_trading
+from ..storage import football_canonical_fixture, football_edge_desk, football_paper_trading, football_portfolio_selection
 from . import storage
 from .current_market import build_fixture_market_evaluation
 from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
@@ -48,6 +48,18 @@ from .models import (
 )
 from .prediction_service import PredictionContext, attach_edge_desk_shadow_bundle, build_prediction_for_fixture
 from .provider_budget import QUOTA_EXHAUSTED, ProviderRequestBudget
+from .portfolio_selection import (
+    PORTFOLIO_LEGACY_PRE_POLICY,
+    PORTFOLIO_POLICY_ID_V1,
+    PORTFOLIO_POLICY_VERSION_V1,
+    PORTFOLIO_STATE_NOT_APPLICABLE,
+    PORTFOLIO_STATE_PENDING,
+    PORTFOLIO_STATE_POLICY_INACTIVE,
+    PORTFOLIO_STATE_SELECTED,
+    PortfolioCandidate,
+    PortfolioPolicy,
+    select_fixture_portfolio,
+)
 from .runtime_paths import ensure_operational_data_dir, resolve_dashboard_operational_paths
 from .snapshot_service import CurrentFootballModelSnapshot, CurrentSnapshotError, build_current_football_model_snapshot
 
@@ -66,6 +78,7 @@ DEFAULT_ALLOW_PAID_PROVIDER_CALLS_ENV_VAR = "SPORTS_AI_ALLOW_PAID_PROVIDER_CALLS
 DEFAULT_API_FOOTBALL_DAILY_BUDGET_ENV_VAR = "SPORTS_AI_API_FOOTBALL_DAILY_BUDGET"
 DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR = "SPORTS_AI_API_FOOTBALL_QUOTA_RESET_HOUR_UTC"
 DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR = "SPORTS_AI_API_FOOTBALL_OPERATIONAL_DAILY_CAP"
+DEFAULT_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM_ENV_VAR = "SPORTS_AI_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM"
 
 PAID_PROVIDER_DISABLED_STATE = "PAID_PROVIDER_CALLS_DISABLED"
 
@@ -449,6 +462,9 @@ class DashboardConfig:
     api_football_daily_budget: int | None = None
     api_football_quota_reset_hour_utc: int = 0
     api_football_operational_daily_cap: int | None = None
+    portfolio_policy_id: str = PORTFOLIO_POLICY_ID_V1
+    portfolio_policy_version: str = PORTFOLIO_POLICY_VERSION_V1
+    portfolio_policy_effective_from: str = ""
 
     @classmethod
     def default(cls) -> "DashboardConfig":
@@ -478,6 +494,7 @@ class DashboardConfig:
             api_football_daily_budget=_env_int(DEFAULT_API_FOOTBALL_DAILY_BUDGET_ENV_VAR, None),
             api_football_quota_reset_hour_utc=_env_int(DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR, 0) or 0,
             api_football_operational_daily_cap=_env_int(DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR, None),
+            portfolio_policy_effective_from=_env_str(DEFAULT_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM_ENV_VAR, ""),
         )
 
 
@@ -616,6 +633,7 @@ class DashboardServices:
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             football_paper_trading.ensure_schema(conn)
             football_canonical_fixture.ensure_schema(conn)
+            football_portfolio_selection.ensure_schema(conn)
             self._schema_initialized = True
         self._record_storage_runtime_state(initialized_at=initialized_at)
         self._build_snapshot()
@@ -1481,9 +1499,352 @@ class DashboardServices:
             if row.get("paper_trade_id") is not None
         }
 
-    def _published_pick_rows(self, paper_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        display_rows = self._paper_position_display_rows(paper_rows)
-        fixture_lookup = self._paper_fixture_lookup(paper_rows)
+    def _portfolio_policy(self) -> PortfolioPolicy | None:
+        effective_from = str(self.config.portfolio_policy_effective_from or "").strip()
+        if not effective_from:
+            return None
+        try:
+            parse_iso_datetime(effective_from)
+        except Exception:
+            logger.warning("ignoring invalid portfolio policy effective_from: %s", effective_from)
+            return None
+        return PortfolioPolicy(
+            policy_id=str(self.config.portfolio_policy_id or PORTFOLIO_POLICY_ID_V1),
+            policy_version=str(self.config.portfolio_policy_version or PORTFOLIO_POLICY_VERSION_V1),
+            effective_from=effective_from,
+        )
+
+    @staticmethod
+    def _portfolio_policy_applies_to_timestamp(value: Any, policy: PortfolioPolicy | None) -> bool:
+        if policy is None or value in {None, ""}:
+            return False
+        try:
+            return parse_iso_datetime(str(value)) >= parse_iso_datetime(policy.effective_from)
+        except Exception:
+            return False
+
+    def _portfolio_selection_records(self) -> dict[str, Any]:
+        policy = self._portfolio_policy()
+        if policy is None:
+            return {
+                "policy": None,
+                "rows": [],
+                "by_trade_id": {},
+                "selected_trade_ids": set(),
+                "publish_state": "DISABLED",
+                "publish_note": "Portfolio selection is implemented but inactive until an explicit effective_from is configured.",
+                "mode": "legacy",
+            }
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            rows = football_portfolio_selection.fetch_current_portfolio_selections(
+                conn,
+                policy_id=policy.policy_id,
+                policy_version=policy.policy_version,
+                initialize_schema=self._read_requires_schema_init(),
+            )
+        by_trade_id = {
+            str(row["paper_trade_id"]): row
+            for row in rows
+            if row.get("paper_trade_id") is not None
+        }
+        selected_trade_ids = {
+            str(row["paper_trade_id"])
+            for row in rows
+            if str(row.get("selection_state") or "") == PORTFOLIO_STATE_SELECTED
+        }
+        return {
+            "policy": policy,
+            "rows": rows,
+            "by_trade_id": by_trade_id,
+            "selected_trade_ids": selected_trade_ids,
+            "publish_state": "CURRENT PORTFOLIO",
+            "publish_note": (
+                "Portfolio selection is a current deterministic client-card view. "
+                "A separate frozen publication lifecycle is not active yet."
+            ),
+            "mode": "current_portfolio_selection",
+        }
+
+    def _portfolio_selection_context(self, paper_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        records = self._portfolio_selection_records()
+        selected_rows = [
+            row
+            for row in paper_rows
+            if str(row.get("paper_trade_id") or "") in records["selected_trade_ids"]
+        ]
+        selected_performance = football_paper_trading.paper_trading_performance(selected_rows)
+        return {
+            **records,
+            "selected_rows": selected_rows,
+            "selected_count": len(selected_rows),
+            "selected_fixture_count": len(
+                {
+                    str(row.get("fixture_id") or "")
+                    for row in selected_rows
+                    if row.get("fixture_id") not in {None, ""}
+                }
+            ),
+            "open_exposure_units": sum(
+                1.0
+                for row in selected_rows
+                if str(row.get("trade_state") or "PENDING") in PAPER_ACTIVE_STATES
+            ),
+            "performance": selected_performance,
+        }
+
+    def _portfolio_metadata_for_row(
+        self,
+        row: dict[str, Any],
+        *,
+        records: dict[str, Any],
+        qualified_for_portfolio: bool,
+    ) -> dict[str, Any]:
+        policy = records.get("policy")
+        if not qualified_for_portfolio:
+            state = PORTFOLIO_STATE_NOT_APPLICABLE
+            reason = "Only BET-qualified paper opportunities enter the portfolio selector."
+            rank = None
+        elif policy is None:
+            state = PORTFOLIO_STATE_POLICY_INACTIVE
+            reason = records["publish_note"]
+            rank = None
+        elif not self._portfolio_policy_applies_to_timestamp(row.get("decision_timestamp"), policy):
+            state = PORTFOLIO_LEGACY_PRE_POLICY
+            reason = f"Qualified before policy effective_from {policy.effective_from}."
+            rank = None
+        else:
+            trade_id = str(row.get("paper_trade_id") or "")
+            selection_row = records["by_trade_id"].get(trade_id)
+            if selection_row is None:
+                state = PORTFOLIO_STATE_PENDING
+                reason = "Qualified opportunity is waiting for an auditable portfolio evaluation record."
+                rank = None
+            else:
+                state = str(selection_row.get("selection_state") or PORTFOLIO_STATE_PENDING)
+                reason = str(selection_row.get("selection_reason") or "")
+                rank = None if selection_row.get("selection_rank") is None else int(selection_row["selection_rank"])
+        return {
+            "portfolio_selection_state": state,
+            "portfolio_selection_state_label": state.replace("_", " "),
+            "portfolio_selection_reason": reason,
+            "portfolio_selection_rank": rank,
+            "portfolio_selected": state == PORTFOLIO_STATE_SELECTED,
+        }
+
+    def _annotate_rows_with_portfolio(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        records: dict[str, Any],
+        qualified_predicate: Any,
+    ) -> list[dict[str, Any]]:
+        annotated_rows: list[dict[str, Any]] = []
+        for row in rows:
+            annotated_rows.append(
+                {
+                    **row,
+                    **self._portfolio_metadata_for_row(
+                        row,
+                        records=records,
+                        qualified_for_portfolio=bool(qualified_predicate(row)),
+                    ),
+                }
+            )
+        return annotated_rows
+
+    def _paper_fixture_identity_map_from_rows(
+        self,
+        conn: sqlite3.Connection,
+        paper_rows: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        fixture_ids = sorted(
+            {
+                str(row["fixture_id"])
+                for row in paper_rows
+                if row.get("fixture_id") not in {None, ""}
+            }
+        )
+        identity: dict[str, dict[str, Any]] = {}
+        with storage.connect(self.config.dashboard_db_path) as dashboard_conn:
+            for fixture_id in fixture_ids:
+                fixture = storage.fetch_fixture(
+                    dashboard_conn,
+                    fixture_id,
+                    initialize_schema=self._read_requires_schema_init(),
+                )
+                if fixture is not None:
+                    provider, provider_fixture_id = football_canonical_fixture.split_provider_fixture_id(fixture_id)
+                    identity[fixture_id] = {
+                        "fixture_id": fixture_id,
+                        "provider": provider,
+                        "provider_fixture_id": provider_fixture_id,
+                        "competition_id": fixture.get("competition_id"),
+                        "home_team_name": fixture.get("home_team_name"),
+                        "away_team_name": fixture.get("away_team_name"),
+                        "kickoff_utc": fixture.get("kickoff_utc"),
+                        "season": fixture.get("season"),
+                    }
+        for fixture_id in fixture_ids:
+            if fixture_id in identity:
+                continue
+            provider, provider_fixture_id = football_canonical_fixture.split_provider_fixture_id(fixture_id)
+            snapshot_row = conn.execute(
+                """
+                SELECT provider, provider_fixture_id, competition_id, home_team_name, away_team_name, kickoff_utc
+                FROM market_snapshots
+                WHERE fixture_id = ?
+                ORDER BY captured_at, snapshot_id
+                LIMIT 1
+                """,
+                (fixture_id,),
+            ).fetchone()
+            identity[fixture_id] = {
+                "fixture_id": fixture_id,
+                "provider": str(snapshot_row["provider"]) if snapshot_row is not None and snapshot_row["provider"] is not None else provider,
+                "provider_fixture_id": (
+                    str(snapshot_row["provider_fixture_id"])
+                    if snapshot_row is not None and snapshot_row["provider_fixture_id"] is not None
+                    else provider_fixture_id
+                ),
+                "competition_id": None if snapshot_row is None else snapshot_row["competition_id"],
+                "home_team_name": None if snapshot_row is None else snapshot_row["home_team_name"],
+                "away_team_name": None if snapshot_row is None else snapshot_row["away_team_name"],
+                "kickoff_utc": None if snapshot_row is None else snapshot_row["kickoff_utc"],
+                "season": None,
+            }
+        return identity
+
+    def _canonical_fixture_for_identity(
+        self,
+        conn: sqlite3.Connection,
+        identity: dict[str, Any],
+    ) -> str | None:
+        provider = str(identity.get("provider") or "")
+        provider_fixture_id = str(identity.get("provider_fixture_id") or "")
+        competition_id = str(identity.get("competition_id") or "")
+        home_team_name = str(identity.get("home_team_name") or "")
+        away_team_name = str(identity.get("away_team_name") or "")
+        kickoff_utc = str(identity.get("kickoff_utc") or "")
+        if not (provider and provider_fixture_id and competition_id and home_team_name and away_team_name and kickoff_utc):
+            return None
+        try:
+            canonical_fixture_id, _ = football_canonical_fixture.resolve_or_create_canonical_fixture(
+                conn,
+                provider=provider,
+                provider_fixture_id=provider_fixture_id,
+                competition_id=competition_id,
+                home_team_name=home_team_name,
+                away_team_name=away_team_name,
+                kickoff_utc=kickoff_utc,
+                season=identity.get("season"),
+            )
+        except football_canonical_fixture.CanonicalFixtureError:
+            return None
+        return canonical_fixture_id
+
+    def _portfolio_candidates_for_canonical_fixture(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        canonical_fixture_id: str,
+        policy: PortfolioPolicy,
+    ) -> list[PortfolioCandidate]:
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(
+            conn,
+            initialize_schema=self._read_requires_schema_init(),
+        )
+        excluded = football_canonical_fixture.fetch_excluded_paper_trade_ids(
+            conn,
+            initialize_schema=self._read_requires_schema_init(),
+        )
+        counted_rows = [
+            row
+            for row in paper_rows
+            if str(row.get("paper_trade_id") or "") not in excluded
+            and self._portfolio_policy_applies_to_timestamp(row.get("decision_timestamp"), policy)
+        ]
+        identity_map = self._paper_fixture_identity_map_from_rows(conn, counted_rows)
+        candidates: list[PortfolioCandidate] = []
+        for row in counted_rows:
+            identity = identity_map.get(str(row.get("fixture_id") or ""))
+            if identity is None:
+                continue
+            row_canonical_fixture_id = self._canonical_fixture_for_identity(conn, identity)
+            if row_canonical_fixture_id != canonical_fixture_id:
+                continue
+            candidates.append(
+                PortfolioCandidate(
+                    paper_trade_id=str(row["paper_trade_id"]),
+                    canonical_fixture_id=canonical_fixture_id,
+                    market=str(row["market"]),
+                    selection=str(row["selection"]),
+                    line=None if row.get("line") is None else float(row["line"]),
+                    settlement_aware_edge=None if row.get("edge") is None else float(row["edge"]),
+                    decision_timestamp=str(row["decision_timestamp"]),
+                    created_at=str(row.get("created_at") or row["decision_timestamp"]),
+                    safeguard_state=str(row.get("safeguard_state") or ""),
+                    freshness_state="FRESH",
+                )
+            )
+        return candidates
+
+    def _sync_portfolio_selection_for_prediction(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        prediction: dict[str, Any],
+    ) -> None:
+        policy = self._portfolio_policy()
+        if policy is None:
+            return
+        canonical_fixture_id = self._canonical_fixture_for_prediction(conn, prediction)
+        if canonical_fixture_id is None:
+            return
+        candidates = self._portfolio_candidates_for_canonical_fixture(
+            conn,
+            canonical_fixture_id=canonical_fixture_id,
+            policy=policy,
+        )
+        if not candidates:
+            return
+        result = select_fixture_portfolio(candidates, policy=policy)
+        evaluation_signature = football_portfolio_selection.portfolio_evaluation_signature(
+            policy=policy,
+            canonical_fixture_id=canonical_fixture_id,
+            candidates=[
+                {
+                    "paper_trade_id": candidate.paper_trade_id,
+                    "market": candidate.market,
+                    "selection": candidate.selection,
+                    "line": candidate.line,
+                    "edge_at_selection": candidate.settlement_aware_edge,
+                    "decision_timestamp": candidate.decision_timestamp,
+                    "created_at": candidate.created_at,
+                    "safeguard_state": candidate.safeguard_state,
+                }
+                for candidate in candidates
+            ],
+        )
+        football_portfolio_selection.record_portfolio_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id=canonical_fixture_id,
+            evaluated_at=utc_now_iso(),
+            candidate_snapshot_at=max(candidate.created_at for candidate in candidates),
+            evaluation_signature=evaluation_signature,
+            dispositions=list(result.dispositions),
+        )
+
+    def _published_pick_rows(
+        self,
+        paper_rows: list[dict[str, Any]],
+        *,
+        selection_context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        context = self._portfolio_selection_context(paper_rows) if selection_context is None else selection_context
+        source_rows = context["selected_rows"] if context.get("policy") is not None else paper_rows
+        display_rows = self._paper_position_display_rows(source_rows)
+        fixture_lookup = self._paper_fixture_lookup(source_rows)
         published_rows: list[dict[str, Any]] = []
         for row in display_rows:
             if row.get("fixture_id") in {None, ""}:
@@ -1548,13 +1909,17 @@ class DashboardServices:
                     )),
                 }
             )
-        return sorted(
-            published_rows,
-            key=lambda row: (
-                str(row.get("kickoff_utc") or ""),
-                str(row.get("decision_timestamp") or ""),
-                str(row["paper_trade_id"]),
+        return self._annotate_rows_with_portfolio(
+            sorted(
+                published_rows,
+                key=lambda row: (
+                    str(row.get("kickoff_utc") or ""),
+                    str(row.get("decision_timestamp") or ""),
+                    str(row["paper_trade_id"]),
+                ),
             ),
+            records=context,
+            qualified_predicate=lambda row: True,
         )
 
     @staticmethod
@@ -1606,6 +1971,7 @@ class DashboardServices:
         approved_count: int,
         no_bet_count: int,
         paper_rows: list[dict[str, Any]],
+        portfolio_rows: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
         """Today KPI strip split into CURRENT DESK and PAPER TRACKING scopes."""
         desk = [
@@ -1625,7 +1991,27 @@ class DashboardServices:
             self._paper_metric_row(label="ROI", value=performance.get("roi"), note="settled stake only", formatter="rate"),
             self._paper_metric_row(label="Strike Rate", value=performance.get("strike_rate"), note="pushes excluded", formatter="rate"),
         ]
-        return desk + paper
+        portfolio_performance = self._paper_performance_for_rows(portfolio_rows)
+        portfolio = [
+            self._paper_metric_row(label="Published Bets", value=len(portfolio_rows), note="current portfolio-selected positions"),
+            self._paper_metric_row(
+                label="Matches",
+                value=len({str(row.get("fixture_id") or "") for row in portfolio_rows if row.get("fixture_id") not in {None, ""}}),
+                note="unique fixtures in current portfolio",
+            ),
+            self._paper_metric_row(
+                label="Open Portfolio",
+                value=sum(1 for row in portfolio_rows if str(row.get("trade_state") or "PENDING") in PAPER_ACTIVE_STATES),
+                note="open portfolio exposure in 1u positions",
+            ),
+            self._paper_metric_row(
+                label="Portfolio ROI",
+                value=portfolio_performance.get("roi"),
+                note="selected-only settled stake",
+                formatter="rate",
+            ),
+        ]
+        return desk + paper + portfolio
 
     @staticmethod
     def _settled_bet_sample_label(settled_count: int) -> str:
@@ -2112,6 +2498,9 @@ class DashboardServices:
         }
 
     def _reports_payload(self, *, paper_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"windows": self._report_window_rows(paper_rows)}
+
+    def _report_window_rows(self, paper_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         now_local = datetime.now(timezone.utc).astimezone(ZoneInfo(self.config.display_timezone))
         today_local = now_local.date()
         yesterday_local = today_local - timedelta(days=1)
@@ -2153,15 +2542,19 @@ class DashboardServices:
                     "roi": performance.get("roi"),
                 }
             )
-        return {"windows": report_rows}
+        return report_rows
 
     def _published_paper_entries_for_fixture(
         self,
         fixture_id: str,
         market_evaluation: dict[str, Any] | None,
         paper_rows: list[dict[str, Any]],
+        *,
+        selection_context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        fixture_paper_rows = [row for row in paper_rows if str(row["fixture_id"]) == fixture_id]
+        context = self._portfolio_selection_context(paper_rows) if selection_context is None else selection_context
+        source_rows = context["selected_rows"] if context.get("policy") is not None else paper_rows
+        fixture_paper_rows = [row for row in source_rows if str(row["fixture_id"]) == fixture_id]
         display_rows = self._paper_position_display_rows(fixture_paper_rows)
         current_rows = {
             _market_identity(row): row
@@ -2193,12 +2586,16 @@ class DashboardServices:
                     else _safeguard_label(current_row),
                 }
             )
-        return sorted(
-            published_rows,
-            key=lambda row: (
-                str(row.get("decision_timestamp") or ""),
-                str(row["paper_trade_id"]),
+        return self._annotate_rows_with_portfolio(
+            sorted(
+                published_rows,
+                key=lambda row: (
+                    str(row.get("decision_timestamp") or ""),
+                    str(row["paper_trade_id"]),
+                ),
             ),
+            records=context,
+            qualified_predicate=lambda row: True,
         )
 
     def _decision_gates_payload(
@@ -2783,6 +3180,7 @@ class DashboardServices:
                 continue
             row["paper_trade_id"] = entry.paper_trade_id
             created += 1
+        self._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
         return created
 
     def _settlement_fixture_provider(self, fixture_id: str) -> FixtureProvider | None:
@@ -4775,10 +5173,15 @@ class DashboardServices:
             if row.get("prediction") and row["prediction"].get("prediction_status") == PREDICTION_STATUS_READY
         ][:6]
         paper_rows, paper_status = self._paper_positions()
-        published_paper_rows = self._published_pick_rows(paper_rows)
+        portfolio_context = self._portfolio_selection_context(paper_rows)
+        published_paper_rows = self._published_pick_rows(paper_rows, selection_context=portfolio_context)
         today_published_rows = self._paper_rows_for_local_date(published_paper_rows)
         today_paper_rows = self._paper_rows_for_local_date(paper_rows)
-        current_best_picks = self._decorate_best_pick_rows(self._build_best_pick_rows(fixture_rows), paper_rows)
+        current_best_picks = self._annotate_rows_with_portfolio(
+            self._decorate_best_pick_rows(self._build_best_pick_rows(fixture_rows), paper_rows),
+            records=portfolio_context,
+            qualified_predicate=lambda row: True,
+        )
         today_published_trade_ids = {
             str(row["paper_trade_id"])
             for row in today_published_rows
@@ -4828,8 +5231,16 @@ class DashboardServices:
             "best_picks_pagination": best_picks_pagination,
             "best_picks_summary": {
                 "count": len(best_picks),
-                "empty_message": "No genuine published paper picks are currently attached to today's board.",
-                "source": "Immutable published paper picks only.",
+                "empty_message": (
+                    "No current portfolio-selected picks are attached to today's board."
+                    if portfolio_context.get("policy") is not None
+                    else "No genuine published paper picks are currently attached to today's board."
+                ),
+                "source": (
+                    "Current deterministic portfolio selection."
+                    if portfolio_context.get("policy") is not None
+                    else "Immutable published paper picks only."
+                ),
             },
             "published_paper_rows": published_paper_rows,
             "today_published_rows": today_published_rows,
@@ -4845,6 +5256,8 @@ class DashboardServices:
                 "approved": approved_count,
                 "suggested_bets": len(today_published_rows),
                 "today_suggested_bets": len(today_published_rows),
+                "matches": portfolio_context["selected_fixture_count"],
+                "open_portfolio_exposure": portfolio_context["open_exposure_units"],
                 "empty_message": "No current Route B desk rows are available for today's in-scope fixtures.",
             },
             "other_decision_summary": {
@@ -4860,6 +5273,7 @@ class DashboardServices:
                 approved_count=approved_count,
                 no_bet_count=no_bet_count,
                 paper_rows=today_paper_rows,
+                portfolio_rows=today_published_rows,
             ),
             "today_scopes": {
                 "desk": {
@@ -4962,6 +5376,7 @@ class DashboardServices:
         serialized_fixture = self.serialize_fixture_row({**fixture, "prediction": prediction})
         market_evaluation = serialized_fixture.get("market_evaluation")
         paper_positions, paper_status = self._paper_positions()
+        portfolio_context = self._portfolio_selection_context(paper_positions)
         system_status = self._build_system_status(
             paper_status=paper_status,
             storage_state=self._storage_status(),
@@ -4970,6 +5385,7 @@ class DashboardServices:
             fixture_id=str(fixture_id),
             market_evaluation=market_evaluation,
             paper_rows=paper_positions,
+            selection_context=portfolio_context,
         )
         decision_rows: list[dict[str, Any]] = []
         for row in (market_evaluation or {}).get("decision_rows") or []:
@@ -4993,6 +5409,11 @@ class DashboardServices:
                     "reason_label": _humanize_row_reason_codes(row) or _decision_state_detail(current_state),
                 }
             )
+        decision_rows = self._annotate_rows_with_portfolio(
+            decision_rows,
+            records=portfolio_context,
+            qualified_predicate=lambda row: str(row.get("current_decision_state") or "") == "BET",
+        )
         return {
             "fixture": serialized_fixture,
             "prediction": self._decorate_prediction_runtime(prediction),
@@ -5068,7 +5489,11 @@ class DashboardServices:
             str(row["fixture_id"]): self.serialize_fixture_row(row)
             for row in desk_fixture_rows
         }
-        desk_rows = self._build_betting_desk_rows_for_fixture_map(fixture_map)
+        desk_rows = self._annotate_rows_with_portfolio(
+            self._build_betting_desk_rows_for_fixture_map(fixture_map),
+            records=self._portfolio_selection_records(),
+            qualified_predicate=lambda row: str(row.get("desk_decision") or "") == "BET",
+        )
         preliminary = [row for row in desk_rows if row["desk_decision"] == "BET"]
         no_bets = [row for row in desk_rows if row["decision_group"] == "no_bet"]
         blocked = [row for row in desk_rows if row["decision_group"] in {"blocked", "unsupported"}]
@@ -5127,11 +5552,12 @@ class DashboardServices:
 
     def get_member_card_payload(self, *, page: int = 1) -> dict[str, Any]:
         paper_rows, paper_status = self._paper_positions()
+        portfolio_context = self._portfolio_selection_context(paper_rows)
         system_status = self._build_system_status(
             paper_status=paper_status,
             storage_state=self._storage_status(),
         )
-        published_rows = self._published_pick_rows(paper_rows)
+        published_rows = self._published_pick_rows(paper_rows, selection_context=portfolio_context)
         visible_rows = [
             row
             for row in published_rows
@@ -5147,6 +5573,8 @@ class DashboardServices:
                 "entry_odds": row.get("entry_odds"),
                 "confidence_label": row.get("confidence_label"),
                 "status": row.get("trade_state"),
+                "portfolio_state": row.get("portfolio_selection_state_label"),
+                "portfolio_note": row.get("portfolio_selection_reason"),
             }
             for row in visible_rows
         ]
@@ -5155,8 +5583,15 @@ class DashboardServices:
             "rows": member_rows,
             "visible_rows": pagination["items"],
             "pagination": pagination,
-            "publish_state": "DISABLED",
-            "publish_note": "Publishing remains read-only in this phase; historical published picks are shown truthfully.",
+            "publish_state": portfolio_context["publish_state"],
+            "publish_note": portfolio_context["publish_note"],
+            "portfolio_policy": None
+            if portfolio_context.get("policy") is None
+            else {
+                "policy_id": portfolio_context["policy"].policy_id,
+                "policy_version": portfolio_context["policy"].policy_version,
+                "effective_from": portfolio_context["policy"].effective_from,
+            },
             "system_status": system_status,
         }
 
@@ -5167,6 +5602,7 @@ class DashboardServices:
         season_rows = self._load_csv_rows(self._performance_csv_path("football_performance_by_season.csv"))
         calibration_rows = self._load_csv_rows(self._performance_csv_path("football_calibration.csv"))
         paper_positions, paper_status = self._paper_positions()
+        portfolio_context = self._portfolio_selection_context(paper_positions)
         status = self._performance_status(summary_payload, paper_status)
         system_status = self._build_system_status(
             paper_status=paper_status,
@@ -5174,8 +5610,18 @@ class DashboardServices:
             summary_payload=summary_payload,
         )
         current_paper = paper_status.get("performance", {})
-        paper_position_rows = self._paper_position_display_rows(paper_positions)
+        paper_position_rows = self._annotate_rows_with_portfolio(
+            self._paper_position_display_rows(paper_positions),
+            records=portfolio_context,
+            qualified_predicate=lambda row: True,
+        )
         open_paper_positions = [row for row in paper_position_rows if row["is_open"]]
+        portfolio_position_rows = self._annotate_rows_with_portfolio(
+            self._paper_position_display_rows(portfolio_context["selected_rows"]),
+            records=portfolio_context,
+            qualified_predicate=lambda row: True,
+        )
+        open_portfolio_positions = [row for row in portfolio_position_rows if row["is_open"]]
         recent_paper_bets = sorted(
             [row for row in paper_position_rows if row["is_settled"]],
             key=lambda row: (str(row.get("settled_at") or ""), str(row["paper_trade_id"])),
@@ -5229,23 +5675,35 @@ class DashboardServices:
             "kpis": kpis,
             "live_paper_kpis": self._live_paper_kpis(current_paper),
             "live_paper_sample": self._live_paper_sample_callout(paper_positions),
+            "portfolio_kpis": self._live_paper_kpis(portfolio_context["performance"]),
             "market_rows": market_rows,
             "competition_rows": competition_rows,
             "season_rows": season_rows,
             "calibration_series": calibration_series,
             "paper_positions": paper_position_rows,
             "open_paper_positions": open_paper_positions,
+            "portfolio_positions": portfolio_position_rows,
+            "open_portfolio_positions": open_portfolio_positions,
             "recent_paper_bets": recent_paper_bets,
             "recent_form": recent_form,
             "current_paper_summary": current_paper,
+            "current_portfolio_summary": portfolio_context["performance"],
             "current_paper_by_market": current_paper.get("by_market", {}),
+            "current_portfolio_by_market": portfolio_context["performance"].get("by_market", {}),
             "live_paper_market_rows": self._live_paper_market_rows(current_paper),
+            "live_portfolio_market_rows": self._live_paper_market_rows(portfolio_context["performance"]),
             "route_b_label": "Route B",
             "route_a_state": "REJECTED",
             "agent_3_state": "NOT IMPLEMENTED",
             "window_rows": self._performance_windows(paper_positions),
+            "portfolio_window_rows": self._performance_windows(portfolio_context["selected_rows"]),
             "market_breakdown": self._paper_breakdown_rows(
                 paper_rows=paper_positions,
+                kind="market",
+                allowed_keys=CLIENT_PRIMARY_MARKETS,
+            ),
+            "portfolio_market_breakdown": self._paper_breakdown_rows(
+                paper_rows=portfolio_context["selected_rows"],
                 kind="market",
                 allowed_keys=CLIENT_PRIMARY_MARKETS,
             ),
@@ -5254,6 +5712,15 @@ class DashboardServices:
                 kind="league",
                 allowed_keys=CLIENT_PRIMARY_LEAGUES,
             ),
+            "portfolio_policy": None
+            if portfolio_context.get("policy") is None
+            else {
+                "policy_id": portfolio_context["policy"].policy_id,
+                "policy_version": portfolio_context["policy"].policy_version,
+                "effective_from": portfolio_context["policy"].effective_from,
+            },
+            "portfolio_publish_state": portfolio_context["publish_state"],
+            "portfolio_publish_note": portfolio_context["publish_note"],
             "current_streak": self._current_streak(paper_positions),
             "clv_status_label": "NOT YET AVAILABLE"
             if current_paper.get("average_clv") is None
@@ -5316,8 +5783,19 @@ class DashboardServices:
 
     def get_reports_payload(self) -> dict[str, Any]:
         paper_rows, paper_status = self._paper_positions()
+        portfolio_context = self._portfolio_selection_context(paper_rows)
         return {
             **self._reports_payload(paper_rows=paper_rows),
+            "portfolio_windows": self._report_window_rows(portfolio_context["selected_rows"]),
+            "portfolio_policy": None
+            if portfolio_context.get("policy") is None
+            else {
+                "policy_id": portfolio_context["policy"].policy_id,
+                "policy_version": portfolio_context["policy"].policy_version,
+                "effective_from": portfolio_context["policy"].effective_from,
+            },
+            "portfolio_publish_state": portfolio_context["publish_state"],
+            "portfolio_publish_note": portfolio_context["publish_note"],
             "system_status": self._build_system_status(
                 paper_status=paper_status,
                 storage_state=self._storage_status(),

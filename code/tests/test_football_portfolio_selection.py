@@ -1,0 +1,269 @@
+from __future__ import annotations
+
+from sports_ai.dashboard.portfolio_selection import (
+    PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT,
+    PORTFOLIO_STATE_NOT_SELECTED_MARKET_FAMILY_LIMIT,
+    PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER,
+    PORTFOLIO_STATE_SELECTED,
+    PORTFOLIO_POLICY_ID_V1,
+    PORTFOLIO_POLICY_VERSION_V1,
+    PortfolioCandidate,
+    PortfolioPolicy,
+    select_fixture_portfolio,
+)
+from sports_ai.storage import football_portfolio_selection
+from sports_ai.storage.football_paper_trading import connect
+
+
+def _policy() -> PortfolioPolicy:
+    return PortfolioPolicy(
+        policy_id=PORTFOLIO_POLICY_ID_V1,
+        policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        effective_from="2026-08-01T00:00:00+00:00",
+    )
+
+
+def _candidate(
+    paper_trade_id: str,
+    *,
+    market: str,
+    selection: str,
+    line: float | None,
+    edge: float,
+    fixture_id: str = "cf_1",
+    decision_timestamp: str = "2026-08-20T10:00:00+00:00",
+) -> PortfolioCandidate:
+    return PortfolioCandidate(
+        paper_trade_id=paper_trade_id,
+        canonical_fixture_id=fixture_id,
+        market=market,
+        selection=selection,
+        line=line,
+        settlement_aware_edge=edge,
+        decision_timestamp=decision_timestamp,
+        created_at=decision_timestamp,
+        safeguard_state="PASSED",
+        freshness_state="FRESH",
+    )
+
+
+def test_adjacent_goals_lines_select_one_highest_edge() -> None:
+    result = select_fixture_portfolio(
+        [
+            _candidate("paper_goals_225", market="goals_total", selection="OVER", line=2.25, edge=0.09),
+            _candidate("paper_goals_250", market="goals_total", selection="OVER", line=2.5, edge=0.08),
+            _candidate("paper_goals_275", market="goals_total", selection="OVER", line=2.75, edge=0.05),
+        ],
+        policy=_policy(),
+    )
+
+    by_trade_id = {row.paper_trade_id: row for row in result.dispositions}
+    assert by_trade_id["paper_goals_225"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_goals_250"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER
+    assert by_trade_id["paper_goals_275"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER
+
+
+def test_adjacent_corner_lines_select_one_highest_edge() -> None:
+    result = select_fixture_portfolio(
+        [
+            _candidate("paper_corners_95", market="corner_total", selection="OVER", line=9.5, edge=0.04),
+            _candidate("paper_corners_105", market="corner_total", selection="OVER", line=10.5, edge=0.07),
+            _candidate("paper_corners_115", market="corner_total", selection="OVER", line=11.5, edge=0.03),
+        ],
+        policy=_policy(),
+    )
+
+    by_trade_id = {row.paper_trade_id: row for row in result.dispositions}
+    assert by_trade_id["paper_corners_105"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_corners_95"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER
+    assert by_trade_id["paper_corners_115"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER
+
+
+def test_adjacent_asian_handicap_lines_select_one_highest_edge() -> None:
+    result = select_fixture_portfolio(
+        [
+            _candidate("paper_ah_025", market="asian_handicap", selection="HOME", line=-0.25, edge=0.04),
+            _candidate("paper_ah_050", market="asian_handicap", selection="HOME", line=-0.5, edge=0.07),
+            _candidate("paper_ah_075", market="asian_handicap", selection="HOME", line=-0.75, edge=0.06),
+        ],
+        policy=_policy(),
+    )
+
+    by_trade_id = {row.paper_trade_id: row for row in result.dispositions}
+    assert by_trade_id["paper_ah_050"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_ah_025"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER
+    assert by_trade_id["paper_ah_075"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER
+
+
+def test_market_family_limit_selects_one_side_only() -> None:
+    result = select_fixture_portfolio(
+        [
+            _candidate("paper_over", market="goals_total", selection="OVER", line=2.5, edge=0.08),
+            _candidate("paper_under", market="goals_total", selection="UNDER", line=3.5, edge=0.10),
+        ],
+        policy=_policy(),
+    )
+
+    by_trade_id = {row.paper_trade_id: row for row in result.dispositions}
+    assert by_trade_id["paper_under"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_over"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_MARKET_FAMILY_LIMIT
+
+
+def test_fixture_limit_caps_selection_at_three() -> None:
+    result = select_fixture_portfolio(
+        [
+            _candidate("paper_goals", market="goals_total", selection="OVER", line=2.5, edge=0.09),
+            _candidate("paper_1x2", market="1x2", selection="HOME", line=None, edge=0.07),
+            _candidate("paper_btts", market="btts", selection="YES", line=None, edge=0.06),
+            _candidate("paper_corners", market="corner_total", selection="OVER", line=9.5, edge=0.04),
+        ],
+        policy=_policy(),
+    )
+
+    by_trade_id = {row.paper_trade_id: row for row in result.dispositions}
+    assert by_trade_id["paper_goals"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_1x2"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_btts"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_corners"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT
+    assert len(result.selected_positions) == 3
+
+
+def test_fixture_with_twenty_three_qualified_positions_still_selects_only_three() -> None:
+    candidates = [
+        _candidate(f"paper_goals_over_{index}", market="goals_total", selection="OVER", line=2.0 + (index * 0.25), edge=0.20 - (index * 0.01))
+        for index in range(5)
+    ]
+    candidates.extend(
+        _candidate(f"paper_goals_under_{index}", market="goals_total", selection="UNDER", line=3.0 + (index * 0.25), edge=0.14 - (index * 0.01))
+        for index in range(4)
+    )
+    candidates.extend(
+        _candidate(f"paper_corners_over_{index}", market="corner_total", selection="OVER", line=8.5 + index, edge=0.13 - (index * 0.01))
+        for index in range(5)
+    )
+    candidates.extend(
+        _candidate(f"paper_ah_home_{index}", market="asian_handicap", selection="HOME", line=-0.25 - (index * 0.25), edge=0.12 - (index * 0.01))
+        for index in range(4)
+    )
+    candidates.extend(
+        _candidate(f"paper_1x2_{selection}", market="1x2", selection=selection, line=None, edge=edge)
+        for selection, edge in (("HOME", 0.11), ("DRAW", 0.10), ("AWAY", 0.09))
+    )
+    candidates.extend(
+        _candidate(f"paper_btts_{selection}", market="btts", selection=selection, line=None, edge=edge)
+        for selection, edge in (("YES", 0.08), ("NO", 0.07))
+    )
+
+    result = select_fixture_portfolio(candidates, policy=_policy())
+
+    assert len(candidates) == 23
+    assert len(result.selected_positions) == 3
+    assert {row.selection_state for row in result.selected_positions} == {PORTFOLIO_STATE_SELECTED}
+
+
+def test_selection_is_deterministic_for_ties() -> None:
+    candidates = [
+        _candidate("paper_b", market="goals_total", selection="OVER", line=2.5, edge=0.05),
+        _candidate("paper_a", market="goals_total", selection="OVER", line=2.5, edge=0.05),
+    ]
+
+    first = select_fixture_portfolio(candidates, policy=_policy())
+    second = select_fixture_portfolio(list(reversed(candidates)), policy=_policy())
+
+    assert first.dispositions == second.dispositions
+
+
+def test_portfolio_evaluation_storage_is_idempotent_and_prefers_newer_snapshot(tmp_path) -> None:
+    db_path = tmp_path / "football_portfolio_selection.sqlite"
+    policy = _policy()
+    first_candidates = [
+        _candidate("paper_1", market="1x2", selection="HOME", line=None, edge=0.07),
+    ]
+    first_result = select_fixture_portfolio(first_candidates, policy=policy)
+    second_candidates = [
+        _candidate("paper_1", market="1x2", selection="HOME", line=None, edge=0.07),
+        _candidate(
+            "paper_2",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.09,
+            decision_timestamp="2026-08-20T10:05:00+00:00",
+        ),
+    ]
+    second_result = select_fixture_portfolio(second_candidates, policy=policy)
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        first_signature = football_portfolio_selection.portfolio_evaluation_signature(
+            policy=policy,
+            canonical_fixture_id="cf_1",
+            candidates=[
+                {
+                    "paper_trade_id": candidate.paper_trade_id,
+                    "market": candidate.market,
+                    "selection": candidate.selection,
+                    "line": candidate.line,
+                    "edge_at_selection": candidate.settlement_aware_edge,
+                    "decision_timestamp": candidate.decision_timestamp,
+                    "created_at": candidate.created_at,
+                    "safeguard_state": candidate.safeguard_state,
+                }
+                for candidate in first_candidates
+            ],
+        )
+        first_write = football_portfolio_selection.record_portfolio_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_1",
+            evaluated_at="2026-08-20T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-20T10:00:00+00:00",
+            evaluation_signature=first_signature,
+            dispositions=list(first_result.dispositions),
+        )
+        duplicate_write = football_portfolio_selection.record_portfolio_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_1",
+            evaluated_at="2026-08-20T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-20T10:00:00+00:00",
+            evaluation_signature=first_signature,
+            dispositions=list(first_result.dispositions),
+        )
+        second_signature = football_portfolio_selection.portfolio_evaluation_signature(
+            policy=policy,
+            canonical_fixture_id="cf_1",
+            candidates=[
+                {
+                    "paper_trade_id": candidate.paper_trade_id,
+                    "market": candidate.market,
+                    "selection": candidate.selection,
+                    "line": candidate.line,
+                    "edge_at_selection": candidate.settlement_aware_edge,
+                    "decision_timestamp": candidate.decision_timestamp,
+                    "created_at": candidate.created_at,
+                    "safeguard_state": candidate.safeguard_state,
+                }
+                for candidate in second_candidates
+            ],
+        )
+        second_write = football_portfolio_selection.record_portfolio_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_1",
+            evaluated_at="2026-08-20T10:06:00+00:00",
+            candidate_snapshot_at="2026-08-20T10:05:00+00:00",
+            evaluation_signature=second_signature,
+            dispositions=list(second_result.dispositions),
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+
+    assert first_write.inserted is True
+    assert duplicate_write.inserted is False
+    assert second_write.inserted is True
+    assert {row["paper_trade_id"] for row in current_rows} == {"paper_1", "paper_2"}
+    assert {row["selection_state"] for row in current_rows} == {PORTFOLIO_STATE_SELECTED}

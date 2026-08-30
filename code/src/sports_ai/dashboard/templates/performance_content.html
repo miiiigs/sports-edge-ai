@@ -34,6 +34,43 @@
   <section class="section-block desk-panel">
     <div class="desk-panel-head">
       <div>
+        <span class="desk-panel-title">Opportunity Performance</span>
+        <span class="desk-panel-note">Existing qualified paper-position truth remains unchanged.</span>
+      </div>
+      <span class="desk-panel-meta">{{ payload.current_paper_summary.positions or 0 }} POSITIONS</span>
+    </div>
+    <div class="desk-kpi-strip">
+      {% for label, value in payload.live_paper_kpis %}
+        <article class="desk-kpi"><div class="desk-kpi-label">{{ label }}</div><div class="desk-kpi-value">{{ value }}</div></article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <aside class="stack-column">
+    <section class="section-block desk-panel">
+      <div class="desk-panel-head">
+        <div>
+          <span class="desk-panel-title">Published Portfolio Performance</span>
+          <span class="desk-panel-note">{{ payload.portfolio_publish_note }}</span>
+        </div>
+        <span class="desk-panel-meta">{{ payload.portfolio_publish_state }}</span>
+      </div>
+      {% if payload.portfolio_policy %}
+        <p class="section-intro">{{ payload.portfolio_policy.policy_id }} · {{ payload.portfolio_policy.policy_version }} · effective from {{ payload.portfolio_policy.effective_from }}</p>
+      {% endif %}
+      <div class="desk-kpi-strip">
+        {% for label, value in payload.portfolio_kpis %}
+          <article class="desk-kpi"><div class="desk-kpi-label">{{ label }}</div><div class="desk-kpi-value">{{ value }}</div></article>
+        {% endfor %}
+      </div>
+    </section>
+  </aside>
+</section>
+
+<section class="surface-grid surface-grid--sidebar">
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head">
+      <div>
         <span class="desk-panel-title">Performance Windows</span>
         <span class="desk-panel-note">7D, 30D, 90D, and all time</span>
       </div>
@@ -114,12 +151,56 @@
         <div><span>Primary Model</span><strong>{{ payload.route_b_label }}</strong></div>
         <div><span>Current Streak</span><strong>{{ payload.current_streak }}</strong></div>
         <div><span>Open Positions</span><strong>{{ payload.open_paper_positions|length }}</strong></div>
+        <div><span>Open Portfolio</span><strong>{{ payload.open_portfolio_positions|length }}</strong></div>
         <div><span>CLV</span><strong>{{ payload.clv_status_label }}</strong></div>
         <div><span>Calibration</span><strong>{{ payload.calibration_status_label }}</strong></div>
         <div><span>Brier</span><strong>{{ payload.brier_status_label }}</strong></div>
       </div>
     </section>
   </aside>
+</section>
+
+<section class="section-block desk-panel">
+  <div class="desk-panel-head">
+    <div>
+      <span class="desk-panel-title">Published Portfolio Windows</span>
+      <span class="desk-panel-note">Selected-only windows after the policy effective_from.</span>
+    </div>
+  </div>
+  <div class="desktop-table">
+    <div class="desk-table-wrap">
+      <table class="desk-table">
+        <thead>
+          <tr>
+            <th>Window</th>
+            <th>Bets</th>
+            <th>Settled</th>
+            <th>W-L</th>
+            <th>Strike Rate</th>
+            <th>Average Odds</th>
+            <th>ROI</th>
+            <th>P/L</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payload.portfolio_window_rows %}
+            <tr>
+              <td><strong>{{ row.window }}</strong></td>
+              <td>{{ row.suggested_bets }}</td>
+              <td>{{ row.settled }}</td>
+              <td>{{ row.wins }}-{{ row.losses }}</td>
+              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:.2f}".format(row.average_odds|float) if row.average_odds is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8">No portfolio-selected positions are available yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </section>
 
 <section class="surface-grid surface-grid--sidebar">

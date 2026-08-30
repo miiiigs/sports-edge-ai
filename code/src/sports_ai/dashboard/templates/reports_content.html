@@ -9,6 +9,52 @@
 <section class="section-block desk-panel">
   <div class="desk-panel-head">
     <div>
+      <span class="desk-panel-title">Published Portfolio Windows</span>
+      <span class="desk-panel-note">{{ payload.portfolio_publish_note }}</span>
+    </div>
+    <span class="desk-panel-meta">{{ payload.portfolio_publish_state }}</span>
+  </div>
+  {% if payload.portfolio_policy %}
+    <p class="section-intro">{{ payload.portfolio_policy.policy_id }} · {{ payload.portfolio_policy.policy_version }} · effective from {{ payload.portfolio_policy.effective_from }}</p>
+  {% endif %}
+
+  <div class="desktop-table">
+    <div class="desk-table-wrap">
+      <table class="desk-table">
+        <thead>
+          <tr>
+            <th>Window</th>
+            <th>Bets</th>
+            <th>Settled</th>
+            <th>W-L</th>
+            <th>Strike Rate</th>
+            <th>Net Units</th>
+            <th>ROI</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payload.portfolio_windows %}
+            <tr>
+              <td><strong>{{ row.window }}</strong></td>
+              <td>{{ row.bets }}</td>
+              <td>{{ row.settled }}</td>
+              <td>{{ row.wins }}-{{ row.losses }}</td>
+              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7">No portfolio-selected positions are available yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="section-block desk-panel">
+  <div class="desk-panel-head">
+    <div>
       <span class="desk-panel-title">Performance Windows</span>
       <span class="desk-panel-note">Today, yesterday, 7D, 30D, 90D, this month, all time</span>
     </div>
