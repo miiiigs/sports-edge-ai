@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import threading
+import time as time_module
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -3312,3 +3315,162 @@ def test_betting_desk_and_no_bet_archive_paginate_without_provider_http_work(
     assert archive_payload["pagination"]["page"] == 2
     assert archive_payload["pagination"]["total_pages"] == 3
     assert visible_archive_keys == expected_archive_keys
+
+
+def test_route_reads_do_not_create_provider_requests(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, _, _ = _build_paginated_dashboard_services(tmp_path, monkeypatch, fixture_count=21)
+    app = create_app(services=services)
+
+    before = services.get_system_status()["provider_budget"]["metrics"]["provider_http_requests"]
+    with TestClient(app) as client:
+        today_response = client.get("/today?matches_page=2")
+        matches_response = client.get("/matches?page=2")
+        betting_response = client.get("/betting-desk?page=2")
+        performance_response = client.get("/model-performance")
+    after = services.get_system_status()["provider_budget"]["metrics"]["provider_http_requests"]
+
+    assert today_response.status_code == 200
+    assert matches_response.status_code == 200
+    assert betting_response.status_code == 200
+    assert performance_response.status_code == 200
+    assert before == 0
+    assert after == 0
+
+
+def test_sync_once_runs_blocking_body_off_event_loop_and_today_request_stays_responsive(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    app = create_app(services=services)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_sync_once_blocking(*, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, str]:
+        started.set()
+        release.wait(timeout=1)
+        return {"state": "ok", "kind": sync_kind, "include_schedule": str(include_schedule)}
+
+    monkeypatch.setattr(services, "_sync_once_blocking", fake_sync_once_blocking)
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            sync_task = asyncio.create_task(services.sync_once(sync_kind="manual_refresh", include_schedule=True))
+            started_in_time = await asyncio.to_thread(started.wait, 1)
+            assert started_in_time is True
+            asyncio.get_running_loop().call_later(1.0, release.set)
+
+            request_started = time_module.perf_counter()
+            response = await client.get("/today")
+            elapsed = time_module.perf_counter() - request_started
+
+            assert response.status_code == 200
+            assert elapsed < 0.8
+
+            await asyncio.wait_for(sync_task, timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_concurrent_read_routes_stay_responsive_during_slow_sync(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, _, _ = _build_paginated_dashboard_services(tmp_path, monkeypatch, fixture_count=60)
+    app = create_app(services=services)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_sync_once_blocking(*, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, str]:
+        started.set()
+        release.wait(timeout=1)
+        return {"state": "ok", "kind": sync_kind, "include_schedule": str(include_schedule)}
+
+    monkeypatch.setattr(services, "_sync_once_blocking", fake_sync_once_blocking)
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            before = services.get_system_status()["provider_budget"]["metrics"]["provider_http_requests"]
+            sync_task = asyncio.create_task(services.sync_once(sync_kind="scheduled_live", include_schedule=True))
+            started_in_time = await asyncio.to_thread(started.wait, 1)
+            assert started_in_time is True
+            asyncio.get_running_loop().call_later(1.0, release.set)
+
+            request_started = time_module.perf_counter()
+            responses = await asyncio.gather(
+                client.get("/today"),
+                client.get("/matches"),
+                client.get("/betting-desk"),
+                client.get("/model-performance"),
+            )
+            elapsed = time_module.perf_counter() - request_started
+            after = services.get_system_status()["provider_budget"]["metrics"]["provider_http_requests"]
+
+            assert all(response.status_code == 200 for response in responses)
+            assert elapsed < 1.0
+            assert before == 0
+            assert after == 0
+
+            await asyncio.wait_for(sync_task, timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_sync_once_remains_single_flight_when_called_concurrently(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    started = threading.Event()
+    release = threading.Event()
+    counter_lock = threading.Lock()
+    call_order: list[str] = []
+    active_calls = 0
+    max_active_calls = 0
+
+    def fake_sync_once_blocking(*, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, str]:
+        nonlocal active_calls, max_active_calls
+        with counter_lock:
+            active_calls += 1
+            max_active_calls = max(max_active_calls, active_calls)
+            call_order.append(sync_kind)
+        started.set()
+        release.wait(timeout=1)
+        with counter_lock:
+            active_calls -= 1
+        return {"state": "ok", "kind": sync_kind, "include_schedule": str(include_schedule)}
+
+    monkeypatch.setattr(services, "_sync_once_blocking", fake_sync_once_blocking)
+
+    async def scenario() -> None:
+        first = asyncio.create_task(services.sync_once(sync_kind="first", include_schedule=True))
+        started_in_time = await asyncio.to_thread(started.wait, 1)
+        assert started_in_time is True
+
+        second = asyncio.create_task(services.sync_once(sync_kind="second", include_schedule=False))
+        await asyncio.sleep(0.05)
+        assert second.done() is False
+
+        release.set()
+
+        first_result, second_result = await asyncio.gather(first, second)
+        assert first_result["kind"] == "first"
+        assert second_result["kind"] == "second"
+
+    asyncio.run(scenario())
+
+    assert call_order == ["first", "second"]
+    assert max_active_calls == 1

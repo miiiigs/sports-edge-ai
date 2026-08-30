@@ -83,7 +83,7 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     @app.get("/today", response_class=HTMLResponse)
-    async def dashboard_home(
+    def dashboard_home(
         request: Request,
         picks_page: int = Query(default=1, ge=1),
         matches_page: int = Query(default=1, ge=1),
@@ -102,7 +102,7 @@ def create_app(
         )
 
     @app.get("/matches", response_class=HTMLResponse)
-    async def matches_page(
+    def matches_page(
         request: Request,
         competition: str | None = Query(default=None),
         team: str | None = Query(default=None),
@@ -126,7 +126,7 @@ def create_app(
 
     @app.get("/matches/{fixture_id}", response_class=HTMLResponse)
     @app.get("/pick-detail/{fixture_id}", response_class=HTMLResponse)
-    async def match_detail_page(request: Request, fixture_id: str):
+    def match_detail_page(request: Request, fixture_id: str):
         payload = resolved_services.get_fixture_detail_payload(fixture_id)
         if payload is None:
             return HTMLResponse("Fixture not found", status_code=404)
@@ -138,7 +138,7 @@ def create_app(
         )
 
     @app.get("/predictions", response_class=HTMLResponse)
-    async def predictions_page(request: Request, page: int = Query(default=1, ge=1)):
+    def predictions_page(request: Request, page: int = Query(default=1, ge=1)):
         payload = resolved_services.get_predictions_payload(page=page)
         template_name = "predictions_table.html" if request.query_params.get("partial") == "1" else "predictions.html"
         return templates.TemplateResponse(
@@ -149,7 +149,7 @@ def create_app(
 
     @app.get("/candidates", response_class=HTMLResponse)
     @app.get("/betting-desk", response_class=HTMLResponse)
-    async def candidates_page(request: Request, page: int = Query(default=1, ge=1)):
+    def candidates_page(request: Request, page: int = Query(default=1, ge=1)):
         payload = resolved_services.get_betting_desk_payload(page=page)
         template_name = "betting_desk_content.html" if request.query_params.get("partial") == "1" else "betting_desk.html"
         return templates.TemplateResponse(
@@ -160,7 +160,7 @@ def create_app(
 
     @app.get("/performance", response_class=HTMLResponse)
     @app.get("/model-performance", response_class=HTMLResponse)
-    async def performance_page(request: Request):
+    def performance_page(request: Request):
         payload = resolved_services.get_performance_payload()
         template_name = "performance_content.html" if request.query_params.get("partial") == "1" else "performance.html"
         return templates.TemplateResponse(
@@ -170,7 +170,7 @@ def create_app(
         )
 
     @app.get("/member-card", response_class=HTMLResponse)
-    async def member_card_page(request: Request, page: int = Query(default=1, ge=1)):
+    def member_card_page(request: Request, page: int = Query(default=1, ge=1)):
         payload = resolved_services.get_member_card_payload(page=page)
         template_name = "member_card_content.html" if request.query_params.get("partial") == "1" else "member_card.html"
         return templates.TemplateResponse(
@@ -180,7 +180,7 @@ def create_app(
         )
 
     @app.get("/segment-explorer", response_class=HTMLResponse)
-    async def segment_explorer_page(request: Request):
+    def segment_explorer_page(request: Request):
         payload = resolved_services.get_segment_explorer_payload()
         template_name = "segment_explorer_content.html" if request.query_params.get("partial") == "1" else "segment_explorer.html"
         return templates.TemplateResponse(
@@ -190,7 +190,7 @@ def create_app(
         )
 
     @app.get("/error-centre", response_class=HTMLResponse)
-    async def error_centre_page(request: Request):
+    def error_centre_page(request: Request):
         payload = resolved_services.get_error_centre_payload()
         template_name = "error_centre_content.html" if request.query_params.get("partial") == "1" else "error_centre.html"
         return templates.TemplateResponse(
@@ -200,7 +200,7 @@ def create_app(
         )
 
     @app.get("/no-bet-archive", response_class=HTMLResponse)
-    async def no_bet_archive_page(request: Request, page: int = Query(default=1, ge=1)):
+    def no_bet_archive_page(request: Request, page: int = Query(default=1, ge=1)):
         payload = resolved_services.get_no_bet_archive_payload(page=page)
         template_name = "no_bet_archive_content.html" if request.query_params.get("partial") == "1" else "no_bet_archive.html"
         return templates.TemplateResponse(
@@ -210,7 +210,7 @@ def create_app(
         )
 
     @app.get("/reports", response_class=HTMLResponse)
-    async def reports_page(request: Request):
+    def reports_page(request: Request):
         payload = resolved_services.get_reports_payload()
         template_name = "reports_content.html" if request.query_params.get("partial") == "1" else "reports.html"
         return templates.TemplateResponse(
@@ -221,7 +221,7 @@ def create_app(
 
     @app.get("/status", response_class=HTMLResponse)
     @app.get("/system-status", response_class=HTMLResponse)
-    async def status_page(request: Request):
+    def status_page(request: Request):
         payload = {"system_status": resolved_services.get_system_status()}
         template_name = "status_content.html" if request.query_params.get("partial") == "1" else "status.html"
         return templates.TemplateResponse(
@@ -231,61 +231,61 @@ def create_app(
         )
 
     @app.get("/api/fixtures/live")
-    async def api_live_fixtures():
+    def api_live_fixtures():
         payload = resolved_services.get_dashboard_payload()
         return JSONResponse({"fixtures": payload["live"], "count": len(payload["live"])})
 
     @app.get("/api/fixtures/today")
-    async def api_today_fixtures():
+    def api_today_fixtures():
         payload = resolved_services.get_dashboard_payload()
         return JSONResponse({"fixtures": payload["today"], "count": len(payload["today"])})
 
     @app.get("/api/fixtures/upcoming")
-    async def api_upcoming_fixtures():
+    def api_upcoming_fixtures():
         payload = resolved_services.get_dashboard_payload()
         return JSONResponse({"fixtures": payload["upcoming"], "count": len(payload["upcoming"])})
 
     @app.get("/api/fixtures/next")
-    async def api_next_fixtures():
+    def api_next_fixtures():
         return JSONResponse(resolved_services.get_next_fixtures_payload())
 
     @app.get("/api/fixtures/{fixture_id}")
-    async def api_fixture_detail(fixture_id: str):
+    def api_fixture_detail(fixture_id: str):
         payload = resolved_services.get_fixture_detail_payload(fixture_id)
         if payload is None:
             return JSONResponse({"detail": "Fixture not found"}, status_code=404)
         return JSONResponse(payload)
 
     @app.get("/api/predictions")
-    async def api_predictions():
+    def api_predictions():
         return JSONResponse(resolved_services.get_predictions_payload())
 
     @app.get("/api/predictions/{fixture_id}")
-    async def api_prediction_detail(fixture_id: str):
+    def api_prediction_detail(fixture_id: str):
         prediction = resolved_services.get_prediction_payload(fixture_id)
         if prediction is None:
             return JSONResponse({"detail": "Prediction not found"}, status_code=404)
         return JSONResponse(prediction)
 
     @app.get("/api/candidates")
-    async def api_candidates():
+    def api_candidates():
         return JSONResponse(resolved_services.get_candidates_payload())
 
     @app.get("/api/performance")
-    async def api_performance():
+    def api_performance():
         return JSONResponse(resolved_services.get_performance_payload())
 
     @app.get("/api/system/status")
-    async def api_system_status():
+    def api_system_status():
         return JSONResponse(resolved_services.get_system_status())
 
     @app.get("/api/reconciliation/report")
-    async def api_reconciliation_report():
+    def api_reconciliation_report():
         """Deterministic DRY-RUN report (read-only, non-mutating)."""
         return JSONResponse(resolved_services.get_reconciliation_report())
 
     @app.get("/health")
-    async def api_health():
+    def api_health():
         return JSONResponse(resolved_services.get_health_payload())
 
     @app.post("/api/fixtures/refresh")

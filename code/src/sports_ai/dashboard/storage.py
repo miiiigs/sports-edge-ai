@@ -100,13 +100,23 @@ SCHEMA_STATEMENTS = (
     """,
 )
 
+SQLITE_BUSY_TIMEOUT_MS = 5_000
+
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.OperationalError:
+        # Another first-use connection may be initializing the database mode.
+        # Keeping the connection open is still safe; the next write path can
+        # finalize WAL once the lock clears.
+        pass
     return conn
 
 
