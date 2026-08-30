@@ -2,7 +2,7 @@
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Reports</p>
     <h1>Reports</h1>
-    <p class="subhead desk-page-subhead">Windowed paper performance derived from the live paper ledger.</p>
+    <p class="subhead desk-page-subhead">Windowed paper performance views for quick client check-ins across recent and long-run periods.</p>
   </div>
 </section>
 
@@ -13,32 +13,56 @@
       <span class="desk-panel-note">Today, yesterday, 7D, 30D, 90D, this month, all time</span>
     </div>
   </div>
-  <div class="desk-table-wrap">
-    <table class="desk-table">
-      <thead>
-        <tr>
-          <th>Window</th>
-          <th>Bets</th>
-          <th>Settled</th>
-          <th>W-L</th>
-          <th>Strike Rate</th>
-          <th>Net Units</th>
-          <th>ROI</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in payload.windows %}
+
+  <div class="desktop-table">
+    <div class="desk-table-wrap">
+      <table class="desk-table">
+        <thead>
           <tr>
-            <td><strong>{{ row.window }}</strong></td>
-            <td>{{ row.bets }}</td>
-            <td>{{ row.settled }}</td>
-            <td>{{ row.wins }}-{{ row.losses }}</td>
-            <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
-            <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
-            <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+            <th>Window</th>
+            <th>Bets</th>
+            <th>Settled</th>
+            <th>W-L</th>
+            <th>Strike Rate</th>
+            <th>Net Units</th>
+            <th>ROI</th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for row in payload.windows %}
+            <tr>
+              <td><strong>{{ row.window }}</strong></td>
+              <td>{{ row.bets }}</td>
+              <td>{{ row.settled }}</td>
+              <td>{{ row.wins }}-{{ row.losses }}</td>
+              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="mobile-card-list">
+    {% for row in payload.windows %}
+      <article class="mobile-data-card">
+        <div class="mobile-data-card__header">
+          <div>
+            <p class="mobile-data-card__kicker">Report Window</p>
+            <div class="mobile-data-card__title">{{ row.window }}</div>
+          </div>
+          <span class="page-stat">{{ row.wins }}-{{ row.losses }}</span>
+        </div>
+        <div class="mobile-data-card__grid">
+          <div><span>Bets</span><strong>{{ row.bets }}</strong></div>
+          <div><span>Settled</span><strong>{{ row.settled }}</strong></div>
+          <div><span>Strike Rate</span><strong>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "N/A" }}</strong></div>
+          <div><span>Net Units</span><strong>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "N/A" }}</strong></div>
+          <div><span>ROI</span><strong>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "N/A" }}</strong></div>
+        </div>
+      </article>
+    {% endfor %}
   </div>
 </section>

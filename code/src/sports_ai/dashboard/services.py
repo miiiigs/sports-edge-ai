@@ -2798,7 +2798,16 @@ class DashboardServices:
             snapshot_rows_by_fixture: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for snapshot_row in football_paper_trading.fetch_market_snapshots(conn):
                 snapshot_rows_by_fixture[str(snapshot_row["fixture_id"])].append(snapshot_row)
-            paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+            # Settle corners-dependent rows first so mixed-market update ordering stays deterministic
+            # when one market can still remain unresolved after a finished fixture.
+            paper_rows = sorted(
+                football_paper_trading.fetch_paper_trade_rows(conn),
+                key=lambda row: (
+                    0 if str(row.get("market") or "") == "corner_total" else 1,
+                    str(row.get("decision_timestamp") or ""),
+                    str(row.get("paper_trade_id") or ""),
+                ),
+            )
             for row in paper_rows:
                 fixture = self._resolve_fixture_for_paper_settlement(row=row, fixture_rows=fixture_rows)
                 if fixture is None:
@@ -4149,6 +4158,9 @@ class DashboardServices:
                         if row.get("model_fair_decimal_price") is None
                         else float(row["model_fair_decimal_price"]),
                         "market_odds": None if row.get("best_available_price") is None else float(row["best_available_price"]),
+                        "implied_probability": None
+                        if row.get("best_available_price") in {None, 0}
+                        else (1.0 / float(row["best_available_price"])),
                         "edge": None if row.get("settlement_aware_edge") is None else float(row["settlement_aware_edge"]),
                         "bookmaker": None if row.get("best_available_bookmaker") is None else str(row["best_available_bookmaker"]),
                         "market_timestamp": row.get("best_available_source_timestamp"),
@@ -4444,6 +4456,7 @@ class DashboardServices:
                         "decision": str(row.get("decision") or ""),
                         "desk_decision": current_state,
                         "current_decision_state": current_state,
+                        "paper_entry_eligible": bool(row.get("paper_entry_eligible")),
                         "decision_group": decision_group,
                         "reason": _humanize_row_reason_codes(row) or _decision_state_detail(current_state),
                         "paper_trade_id": row.get("paper_trade_id"),
@@ -4634,15 +4647,22 @@ class DashboardServices:
         published_paper_rows = self._published_pick_rows(paper_rows)
         today_published_rows = self._paper_rows_for_local_date(published_paper_rows)
         today_paper_rows = self._paper_rows_for_local_date(paper_rows)
-        best_picks = sorted(
-            today_published_rows,
-            key=lambda row: (
-                0 if str(row.get("trade_state") or "") in PAPER_ACTIVE_STATES else 1,
-                -float(row.get("edge") or 0.0),
-                str(row.get("kickoff_utc") or ""),
-                str(row["paper_trade_id"]),
-            ),
-        )
+        current_best_picks = self._decorate_best_pick_rows(self._build_best_pick_rows(fixture_rows), paper_rows)
+        today_published_trade_ids = {
+            str(row["paper_trade_id"])
+            for row in today_published_rows
+            if row.get("paper_trade_id") is not None
+        }
+        if today_published_trade_ids:
+            best_picks = [
+                row
+                for row in current_best_picks
+                if str(row.get("paper_trade_id") or "") in today_published_trade_ids
+            ]
+            if not best_picks:
+                best_picks = list(today_published_rows)
+        else:
+            best_picks = current_best_picks
         current_slate_rows = self._build_current_slate_working_rows(fixture_rows)
         today_working_rows = self._build_today_working_rows(fixture_rows)
         other_decision_rows = [row for row in current_slate_rows if not row["is_actionable"]]

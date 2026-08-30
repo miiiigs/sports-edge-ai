@@ -1,7 +1,55 @@
 (() => {
+  const body = document.body;
+  const sidebarToggle = document.querySelector("[data-sidebar-toggle]");
+  const sidebarClose = document.querySelector("[data-sidebar-close]");
+  const sidebarLinks = document.querySelectorAll(".sidebar .nav-item");
   const container = document.querySelector("[data-partial-refresh]");
   const refreshButton = document.querySelector("[data-manual-refresh]");
   let filterSubmitTimer = null;
+
+  const closeSidebar = () => {
+    if (!sidebarToggle) {
+      return;
+    }
+    body.classList.remove("nav-open");
+    sidebarToggle.setAttribute("aria-expanded", "false");
+  };
+
+  const openSidebar = () => {
+    if (!sidebarToggle) {
+      return;
+    }
+    body.classList.add("nav-open");
+    sidebarToggle.setAttribute("aria-expanded", "true");
+  };
+
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener("click", () => {
+      if (body.classList.contains("nav-open")) {
+        closeSidebar();
+        return;
+      }
+      openSidebar();
+    });
+  }
+
+  if (sidebarClose) {
+    sidebarClose.addEventListener("click", closeSidebar);
+  }
+
+  sidebarLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      if (window.matchMedia("(max-width: 980px)").matches) {
+        closeSidebar();
+      }
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeSidebar();
+    }
+  });
 
   const submitFilterForm = (form) => {
     if (!(form instanceof HTMLFormElement) || form.dataset.submitting === "true") {

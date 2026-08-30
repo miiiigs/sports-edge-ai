@@ -1,20 +1,26 @@
+{% from "_ui.html" import status_badge %}
+{% set all_time = payload.window_rows[-1] if payload.window_rows else None %}
 <section class="page-heading edge-desk-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Model Performance</p>
     <h1>Model Performance</h1>
-    <p class="subhead desk-page-subhead">Route B live-paper evidence, separated from inactive Route A and unsupported agent concepts.</p>
+    <p class="subhead desk-page-subhead">Tracked bets, settled results, strike rate, P/L, ROI, and the breakdowns clients actually use.</p>
+  </div>
+  <div class="page-actions">
+    <a class="refresh-button" href="/reports">Open reports</a>
   </div>
 </section>
 
-<section class="desk-kpi-strip">
-  {% for label, value in payload.live_paper_kpis %}
-    <article class="desk-kpi">
-      <div class="desk-kpi-label">{{ label }}</div>
-      <div class="desk-kpi-value">{{ value }}</div>
-      <div class="desk-kpi-note">tracked paper</div>
-    </article>
-  {% endfor %}
-</section>
+{% if all_time %}
+  <section class="desk-kpi-strip">
+    <article class="desk-kpi"><div class="desk-kpi-label">Tracked</div><div class="desk-kpi-value">{{ all_time.suggested_bets }}</div><div class="desk-kpi-note">all-time suggested bets</div></article>
+    <article class="desk-kpi"><div class="desk-kpi-label">Settled</div><div class="desk-kpi-value">{{ all_time.settled }}</div><div class="desk-kpi-note">graded paper positions</div></article>
+    <article class="desk-kpi"><div class="desk-kpi-label">W-L</div><div class="desk-kpi-value">{{ all_time.wins }}-{{ all_time.losses }}</div><div class="desk-kpi-note">all-time outcomes</div></article>
+    <article class="desk-kpi"><div class="desk-kpi-label">Strike Rate</div><div class="desk-kpi-value">{{ "{:.2%}".format(all_time.strike_rate|float) if all_time.strike_rate is not none else "N/A" }}</div><div class="desk-kpi-note">settled only</div></article>
+    <article class="desk-kpi"><div class="desk-kpi-label">P/L</div><div class="desk-kpi-value">{{ "{:+.2f}".format(all_time.net_units|float) if all_time.net_units is not none else "N/A" }}</div><div class="desk-kpi-note">net units</div></article>
+    <article class="desk-kpi"><div class="desk-kpi-label">ROI</div><div class="desk-kpi-value">{{ "{:+.2%}".format(all_time.roi|float) if all_time.roi is not none else "N/A" }}</div><div class="desk-kpi-note">all-time settled ROI</div></article>
+  </section>
+{% endif %}
 
 {% if payload.live_paper_sample %}
   <section class="desk-sample-banner" aria-label="Live paper sample warning">
@@ -24,83 +30,173 @@
   </section>
 {% endif %}
 
-{% if payload.current_paper_summary.settled_positions == 0 or payload.open_paper_positions|length == 0 %}
+<section class="surface-grid surface-grid--sidebar">
   <section class="section-block desk-panel">
-    <div class="desk-context-list">
-      {% if payload.current_paper_summary.settled_positions == 0 %}
-        <div><span>Settled Paper</span><b>No settled paper bets yet.</b></div>
-      {% endif %}
-      {% if payload.open_paper_positions|length == 0 %}
-        <div><span>Open Paper</span><b>No open paper positions right now.</b></div>
-      {% endif %}
-    </div>
-  </section>
-{% endif %}
-
-<section class="desk-main-grid">
-  <section class="desk-panel desk-panel-primary">
     <div class="desk-panel-head">
       <div>
-        <span class="desk-panel-title">Route B Window Summary</span>
+        <span class="desk-panel-title">Performance Windows</span>
         <span class="desk-panel-note">7D, 30D, 90D, and all time</span>
       </div>
       <span class="desk-panel-meta">{{ payload.current_streak }}</span>
     </div>
-    <div class="desk-table-wrap">
-      <table class="desk-table">
-        <thead>
-          <tr>
-            <th>Window</th>
-            <th>Suggested Bets</th>
-            <th>Settled</th>
-            <th>W-L</th>
-            <th>Strike Rate</th>
-            <th>Average Odds</th>
-            <th>ROI</th>
-            <th>P/L</th>
-            <th>CLV</th>
-            <th>Calibration</th>
-            <th>Brier</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in payload.window_rows %}
+
+    <div class="desktop-table">
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead>
             <tr>
-              <td><strong>{{ row.window }}</strong></td>
-              <td>{{ row.suggested_bets }}</td>
-              <td>{{ row.settled }}</td>
-              <td>{{ row.wins }}-{{ row.losses }}</td>
-              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
-              <td>{{ "{:.2f}".format(row.average_odds|float) if row.average_odds is not none else "NOT AVAILABLE" }}</td>
-              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
-              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
-              <td>{% if row.clv is not none %}{{ "{:+.2%}".format(row.clv|float) }}{% else %}NOT YET AVAILABLE{% endif %}</td>
-              <td>{{ row.calibration }}</td>
-              <td>{{ row.brier }}</td>
+              <th>Window</th>
+              <th>Bets</th>
+              <th>Settled</th>
+              <th>W-L</th>
+              <th>Strike Rate</th>
+              <th>Average Odds</th>
+              <th>ROI</th>
+              <th>P/L</th>
+              <th>CLV</th>
+              <th>Calibration</th>
+              <th>Brier</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in payload.window_rows %}
+              <tr>
+                <td><strong>{{ row.window }}</strong></td>
+                <td>{{ row.suggested_bets }}</td>
+                <td>{{ row.settled }}</td>
+                <td>{{ row.wins }}-{{ row.losses }}</td>
+                <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+                <td>{{ "{:.2f}".format(row.average_odds|float) if row.average_odds is not none else "NOT AVAILABLE" }}</td>
+                <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+                <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+                <td>{% if row.clv is not none %}{{ "{:+.2%}".format(row.clv|float) }}{% else %}NOT YET AVAILABLE{% endif %}</td>
+                <td>{{ row.calibration }}</td>
+                <td>{{ row.brier }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mobile-card-list">
+      {% for row in payload.window_rows %}
+        <article class="mobile-data-card">
+          <div class="mobile-data-card__header">
+            <div>
+              <p class="mobile-data-card__kicker">Performance Window</p>
+              <div class="mobile-data-card__title">{{ row.window }}</div>
+            </div>
+            <span class="page-stat">{{ row.wins }}-{{ row.losses }}</span>
+          </div>
+          <div class="mobile-data-card__grid">
+            <div><span>Bets</span><strong>{{ row.suggested_bets }}</strong></div>
+            <div><span>Settled</span><strong>{{ row.settled }}</strong></div>
+            <div><span>Strike Rate</span><strong>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "N/A" }}</strong></div>
+            <div><span>Average Odds</span><strong>{{ "{:.2f}".format(row.average_odds|float) if row.average_odds is not none else "N/A" }}</strong></div>
+            <div><span>ROI</span><strong>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "N/A" }}</strong></div>
+            <div><span>P/L</span><strong>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "N/A" }}</strong></div>
+          </div>
+        </article>
+      {% endfor %}
     </div>
   </section>
 
-  <aside class="desk-rail">
-    <section class="desk-panel">
+  <aside class="stack-column">
+    <section class="section-block desk-panel">
       <div class="desk-panel-head">
         <div>
-          <span class="desk-panel-title">Model Truth</span>
-          <span class="desk-panel-note">No fake analysts</span>
+          <span class="desk-panel-title">Model Context</span>
+          <span class="desk-panel-note">Keep the truth, drop the clutter</span>
         </div>
       </div>
-      <div class="desk-context-list">
-        <div><span>Primary Model</span><b>{{ payload.route_b_label }}</b></div>
-        <div><span>Route A</span><b>{{ payload.route_a_state }}</b></div>
-        <div><span>Agent 3</span><b>{{ payload.agent_3_state }}</b></div>
-        <div><span>Current Streak</span><b>{{ payload.current_streak }}</b></div>
-        <div><span>CLV</span><b>{{ payload.clv_status_label }}</b></div>
-        <div><span>Calibration</span><b>{{ payload.calibration_status_label }}</b></div>
-        <div><span>Brier</span><b>{{ payload.brier_status_label }}</b></div>
+      <div class="data-list">
+        <div><span>Primary Model</span><strong>{{ payload.route_b_label }}</strong></div>
+        <div><span>Current Streak</span><strong>{{ payload.current_streak }}</strong></div>
+        <div><span>Open Positions</span><strong>{{ payload.open_paper_positions|length }}</strong></div>
+        <div><span>CLV</span><strong>{{ payload.clv_status_label }}</strong></div>
+        <div><span>Calibration</span><strong>{{ payload.calibration_status_label }}</strong></div>
+        <div><span>Brier</span><strong>{{ payload.brier_status_label }}</strong></div>
       </div>
+    </section>
+  </aside>
+</section>
+
+<section class="surface-grid surface-grid--sidebar">
+  <section class="section-block desk-panel">
+    <div class="desk-panel-head">
+      <div>
+        <span class="desk-panel-title">Recent Settled Paper Bets</span>
+        <span class="desk-panel-note">Most recent graded results, with final scores and settlement source</span>
+      </div>
+      <span class="desk-panel-meta">{{ payload.recent_paper_bets|length }} SETTLED</span>
+    </div>
+
+    {% if payload.recent_paper_bets %}
+      <div class="mobile-card-list mobile-card-list--always">
+        {% for row in payload.recent_paper_bets[:8] %}
+          <article class="mobile-data-card">
+            <div class="mobile-data-card__header">
+              <div>
+                <p class="mobile-data-card__kicker">{{ row.kickoff_local }}</p>
+                <div class="mobile-data-card__title">{{ row.fixture_label }}</div>
+              </div>
+              <span class="desk-pill {% if row.result_tone == 'bet' %}desk-pill-bet{% elif row.result_tone == 'lost' %}desk-pill-lost{% elif row.result_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">{{ row.trade_state }}</span>
+            </div>
+            <div class="mobile-data-card__grid">
+              <div><span>Bet</span><strong>{{ row.bet_label }}</strong></div>
+              <div><span>Market</span><strong>{{ row.market_label }}</strong></div>
+              <div><span>Entry Odds</span><strong>{{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else "N/A" }}</strong></div>
+              <div><span>Result</span><strong>{{ row.result_summary or "Result pending" }}</strong></div>
+            </div>
+            <div class="mobile-data-card__footer">
+              <span>{{ row.result_provider or "Result provider unavailable" }}</span>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <article class="empty-state desk-empty-state">
+        <strong>No settled paper bets yet.</strong>
+      </article>
+    {% endif %}
+  </section>
+
+  <aside class="stack-column">
+    <section class="section-block desk-panel">
+      <div class="desk-panel-head">
+        <div>
+          <span class="desk-panel-title">Open Paper Positions</span>
+          <span class="desk-panel-note">Active tracked positions that still need a result</span>
+        </div>
+        <span class="desk-panel-meta">{{ payload.open_paper_positions|length }} OPEN</span>
+      </div>
+
+      {% if payload.open_paper_positions %}
+        <div class="mobile-card-list mobile-card-list--always">
+          {% for row in payload.open_paper_positions[:8] %}
+            <article class="mobile-data-card mobile-data-card--bet">
+              <div class="mobile-data-card__header">
+                <div>
+                  <p class="mobile-data-card__kicker">{{ row.kickoff_local }}</p>
+                  <div class="mobile-data-card__title">{{ row.fixture_label }}</div>
+                </div>
+                <span class="desk-pill desk-pill-pending">{{ row.trade_state }}</span>
+              </div>
+              <div class="mobile-data-card__grid">
+                <div><span>Bet</span><strong>{{ row.bet_label }}</strong></div>
+                <div><span>Market</span><strong>{{ row.market_label }}</strong></div>
+                <div><span>Entry Odds</span><strong>{{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else "N/A" }}</strong></div>
+                <div><span>Bookmaker</span><strong>{{ row.bookmaker or "N/A" }}</strong></div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <article class="empty-state desk-empty-state">
+          <strong>No open paper positions right now.</strong>
+        </article>
+      {% endif %}
     </section>
   </aside>
 </section>
@@ -110,38 +206,61 @@
     <div class="desk-panel-head">
       <div>
         <span class="desk-panel-title">Market Breakdown</span>
-        <span class="desk-panel-note">Live paper results only</span>
+        <span class="desk-panel-note">How performance changes by market</span>
       </div>
     </div>
-    <div class="desk-table-wrap">
-      <table class="desk-table">
-        <thead>
-          <tr>
-            <th>Market</th>
-            <th>Bets</th>
-            <th>Settled</th>
-            <th>W-L</th>
-            <th>Strike Rate</th>
-            <th>Net Units</th>
-            <th>ROI</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in payload.market_breakdown %}
+    <div class="desktop-table">
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead>
             <tr>
-              <td><strong>{{ row.label }}</strong>{% if row.low_sample %}<div class="row-sub">LOW SAMPLE</div>{% endif %}</td>
-              <td>{{ row.bets }}</td>
-              <td>{{ row.settled }}</td>
-              <td>{{ row.wins }}-{{ row.losses }}</td>
-              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
-              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
-              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+              <th>Market</th>
+              <th>Bets</th>
+              <th>Settled</th>
+              <th>W-L</th>
+              <th>Strike Rate</th>
+              <th>Net Units</th>
+              <th>ROI</th>
             </tr>
-          {% else %}
-            <tr><td colspan="7">No live paper market breakdown is available yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in payload.market_breakdown %}
+              <tr>
+                <td><strong>{{ row.label }}</strong>{% if row.low_sample %}<div class="row-sub">LOW SAMPLE</div>{% endif %}</td>
+                <td>{{ row.bets }}</td>
+                <td>{{ row.settled }}</td>
+                <td>{{ row.wins }}-{{ row.losses }}</td>
+                <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+                <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+                <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="7">No live paper market breakdown is available yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mobile-card-list">
+      {% for row in payload.market_breakdown %}
+        <article class="mobile-data-card">
+          <div class="mobile-data-card__header">
+            <div>
+              <p class="mobile-data-card__kicker">Market</p>
+              <div class="mobile-data-card__title">{{ row.label }}</div>
+            </div>
+            {% if row.low_sample %}<span class="desk-pill desk-pill-pending">LOW SAMPLE</span>{% endif %}
+          </div>
+          <div class="mobile-data-card__grid">
+            <div><span>Bets</span><strong>{{ row.bets }}</strong></div>
+            <div><span>Settled</span><strong>{{ row.settled }}</strong></div>
+            <div><span>W-L</span><strong>{{ row.wins }}-{{ row.losses }}</strong></div>
+            <div><span>Strike Rate</span><strong>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "N/A" }}</strong></div>
+            <div><span>Net Units</span><strong>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "N/A" }}</strong></div>
+            <div><span>ROI</span><strong>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "N/A" }}</strong></div>
+          </div>
+        </article>
+      {% endfor %}
     </div>
   </section>
 
@@ -149,38 +268,61 @@
     <div class="desk-panel-head">
       <div>
         <span class="desk-panel-title">League Breakdown</span>
-        <span class="desk-panel-note">Requested client league cuts</span>
+        <span class="desk-panel-note">How performance changes by league</span>
       </div>
     </div>
-    <div class="desk-table-wrap">
-      <table class="desk-table">
-        <thead>
-          <tr>
-            <th>League</th>
-            <th>Bets</th>
-            <th>Settled</th>
-            <th>W-L</th>
-            <th>Strike Rate</th>
-            <th>Net Units</th>
-            <th>ROI</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in payload.league_breakdown %}
+    <div class="desktop-table">
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead>
             <tr>
-              <td><strong>{{ row.label }}</strong>{% if row.low_sample %}<div class="row-sub">LOW SAMPLE</div>{% endif %}</td>
-              <td>{{ row.bets }}</td>
-              <td>{{ row.settled }}</td>
-              <td>{{ row.wins }}-{{ row.losses }}</td>
-              <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
-              <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
-              <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+              <th>League</th>
+              <th>Bets</th>
+              <th>Settled</th>
+              <th>W-L</th>
+              <th>Strike Rate</th>
+              <th>Net Units</th>
+              <th>ROI</th>
             </tr>
-          {% else %}
-            <tr><td colspan="7">No live paper league breakdown is available yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in payload.league_breakdown %}
+              <tr>
+                <td><strong>{{ row.label }}</strong>{% if row.low_sample %}<div class="row-sub">LOW SAMPLE</div>{% endif %}</td>
+                <td>{{ row.bets }}</td>
+                <td>{{ row.settled }}</td>
+                <td>{{ row.wins }}-{{ row.losses }}</td>
+                <td>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "NOT AVAILABLE" }}</td>
+                <td>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "NOT AVAILABLE" }}</td>
+                <td>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "NOT AVAILABLE" }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="7">No live paper league breakdown is available yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mobile-card-list">
+      {% for row in payload.league_breakdown %}
+        <article class="mobile-data-card">
+          <div class="mobile-data-card__header">
+            <div>
+              <p class="mobile-data-card__kicker">League</p>
+              <div class="mobile-data-card__title">{{ row.label }}</div>
+            </div>
+            {% if row.low_sample %}<span class="desk-pill desk-pill-pending">LOW SAMPLE</span>{% endif %}
+          </div>
+          <div class="mobile-data-card__grid">
+            <div><span>Bets</span><strong>{{ row.bets }}</strong></div>
+            <div><span>Settled</span><strong>{{ row.settled }}</strong></div>
+            <div><span>W-L</span><strong>{{ row.wins }}-{{ row.losses }}</strong></div>
+            <div><span>Strike Rate</span><strong>{{ "{:.2%}".format(row.strike_rate|float) if row.strike_rate is not none else "N/A" }}</strong></div>
+            <div><span>Net Units</span><strong>{{ "{:+.2f}".format(row.net_units|float) if row.net_units is not none else "N/A" }}</strong></div>
+            <div><span>ROI</span><strong>{{ "{:+.2%}".format(row.roi|float) if row.roi is not none else "N/A" }}</strong></div>
+          </div>
+        </article>
+      {% endfor %}
     </div>
   </section>
 </section>
