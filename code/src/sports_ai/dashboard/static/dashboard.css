@@ -1298,6 +1298,7 @@ code {
 
 .mobile-data-card {
   gap: 14px;
+  min-width: 0;
   padding: 16px;
   border-radius: 16px;
 }
@@ -1309,6 +1310,7 @@ code {
 
 .mobile-data-card__header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   align-items: start;
@@ -1326,6 +1328,8 @@ code {
 
 .mobile-data-card__title {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .mobile-data-card__grid {
