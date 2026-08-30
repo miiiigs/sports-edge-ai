@@ -126,6 +126,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             conn.execute(statement)
 
 
+def _ensure_schema_if_requested(conn: sqlite3.Connection, *, initialize_schema: bool) -> None:
+    if initialize_schema:
+        ensure_schema(conn)
+
+
 def _merge_fixture_result(payload: dict[str, Any], result_row: dict[str, Any] | None) -> dict[str, Any]:
     if result_row is None:
         return payload
@@ -208,9 +213,9 @@ def upsert_fixtures(
             )
 
 
-def fetch_all_fixtures(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    ensure_schema(conn)
-    result_rows = fetch_fixture_results(conn)
+def fetch_all_fixtures(conn: sqlite3.Connection, *, initialize_schema: bool = True) -> list[dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    result_rows = fetch_fixture_results(conn, initialize_schema=False)
     result_map = {str(row["fixture_id"]): row for row in result_rows}
     rows = conn.execute(
         """
@@ -226,8 +231,8 @@ def fetch_all_fixtures(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return merged_rows
 
 
-def fetch_fixture(conn: sqlite3.Connection, fixture_id: str) -> dict[str, Any] | None:
-    ensure_schema(conn)
+def fetch_fixture(conn: sqlite3.Connection, fixture_id: str, *, initialize_schema: bool = True) -> dict[str, Any] | None:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT payload_json
@@ -239,7 +244,7 @@ def fetch_fixture(conn: sqlite3.Connection, fixture_id: str) -> dict[str, Any] |
     if row is None:
         return None
     payload = json.loads(str(row["payload_json"]))
-    return _merge_fixture_result(payload, fetch_fixture_result(conn, fixture_id))
+    return _merge_fixture_result(payload, fetch_fixture_result(conn, fixture_id, initialize_schema=False))
 
 
 def upsert_fixture_result(
@@ -284,8 +289,8 @@ def upsert_fixture_result(
         )
 
 
-def fetch_fixture_result(conn: sqlite3.Connection, fixture_id: str) -> dict[str, Any] | None:
-    ensure_schema(conn)
+def fetch_fixture_result(conn: sqlite3.Connection, fixture_id: str, *, initialize_schema: bool = True) -> dict[str, Any] | None:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT fixture_id, statistics_provider, statistics_provider_fixture_id,
@@ -298,8 +303,8 @@ def fetch_fixture_result(conn: sqlite3.Connection, fixture_id: str) -> dict[str,
     return None if row is None else dict(row)
 
 
-def fetch_fixture_results(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    ensure_schema(conn)
+def fetch_fixture_results(conn: sqlite3.Connection, *, initialize_schema: bool = True) -> list[dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     rows = conn.execute(
         """
         SELECT fixture_id, statistics_provider, statistics_provider_fixture_id,
@@ -352,8 +357,10 @@ def save_prediction(
 def fetch_prediction_by_version_key(
     conn: sqlite3.Connection,
     version_key: str,
+    *,
+    initialize_schema: bool = True,
 ) -> dict[str, Any] | None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT payload_json
@@ -370,8 +377,10 @@ def fetch_prediction_by_version_key(
 def fetch_latest_prediction_for_fixture(
     conn: sqlite3.Connection,
     fixture_id: str,
+    *,
+    initialize_schema: bool = True,
 ) -> dict[str, Any] | None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT payload_json
@@ -387,8 +396,8 @@ def fetch_latest_prediction_for_fixture(
     return json.loads(str(row["payload_json"]))
 
 
-def fetch_all_predictions(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    ensure_schema(conn)
+def fetch_all_predictions(conn: sqlite3.Connection, *, initialize_schema: bool = True) -> list[dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     rows = conn.execute(
         """
         SELECT payload_json
@@ -474,8 +483,8 @@ def put_runtime_state(
         )
 
 
-def get_runtime_state(conn: sqlite3.Connection, state_key: str) -> dict[str, Any] | None:
-    ensure_schema(conn)
+def get_runtime_state(conn: sqlite3.Connection, state_key: str, *, initialize_schema: bool = True) -> dict[str, Any] | None:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT state_value_json
@@ -520,8 +529,13 @@ def claim_one_shot_market_sync_token(
         return False
 
 
-def get_one_shot_market_sync_claim(conn: sqlite3.Connection, token_hash: str) -> dict[str, Any] | None:
-    ensure_schema(conn)
+def get_one_shot_market_sync_claim(
+    conn: sqlite3.Connection,
+    token_hash: str,
+    *,
+    initialize_schema: bool = True,
+) -> dict[str, Any] | None:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT token_hash, token_id, state, claimed_at, completed_at,

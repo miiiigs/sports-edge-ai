@@ -351,9 +351,10 @@ def resolve_or_create_canonical_fixture(
     return canonical_fixture_id, status
 
 
-def fetch_excluded_paper_trade_ids(conn: sqlite3.Connection) -> set[str]:
+def fetch_excluded_paper_trade_ids(conn: sqlite3.Connection, *, initialize_schema: bool = True) -> set[str]:
     """Paper trade IDs marked as duplicate representations (excluded from counts)."""
-    ensure_schema(conn)
+    if initialize_schema:
+        ensure_schema(conn)
     rows = conn.execute("SELECT duplicate_paper_trade_id FROM paper_position_reconciliations").fetchall()
     return {str(row["duplicate_paper_trade_id"]) for row in rows}
 

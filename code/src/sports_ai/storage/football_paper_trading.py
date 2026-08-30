@@ -176,6 +176,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     _ensure_paper_trade_business_key_uniqueness(conn)
 
 
+def _ensure_schema_if_requested(conn: sqlite3.Connection, *, initialize_schema: bool) -> None:
+    if initialize_schema:
+        ensure_schema(conn)
+
+
 def _ensure_columns(conn: sqlite3.Connection, *, table_name: str, columns: dict[str, str]) -> None:
     existing_columns = {
         str(row["name"])
@@ -565,8 +570,8 @@ def append_trade_update(conn: sqlite3.Connection, update: PaperTradeUpdate) -> i
     return int(result.lastrowid)
 
 
-def fetch_paper_trade_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    ensure_schema(conn)
+def fetch_paper_trade_rows(conn: sqlite3.Connection, *, initialize_schema: bool = True) -> list[dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     entries = conn.execute(
         """
         SELECT *
@@ -574,24 +579,25 @@ def fetch_paper_trade_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         ORDER BY decision_timestamp, paper_trade_id
         """
     ).fetchall()
+    updates_by_trade_id: dict[str, list[sqlite3.Row]] = {}
+    updates = conn.execute(
+        """
+        SELECT paper_trade_id, updated_at, trade_state, gross_return, net_pnl, notes, payload_json, paper_trade_update_id
+        FROM paper_trade_updates
+        ORDER BY paper_trade_id, updated_at, paper_trade_update_id
+        """
+    ).fetchall()
+    for update in updates:
+        updates_by_trade_id.setdefault(str(update["paper_trade_id"]), []).append(update)
     merged_rows: list[dict[str, Any]] = []
     for entry in entries:
         merged = dict(entry)
-        updates = conn.execute(
-            """
-            SELECT updated_at, trade_state, gross_return, net_pnl, notes, payload_json
-            FROM paper_trade_updates
-            WHERE paper_trade_id = ?
-            ORDER BY updated_at, paper_trade_update_id
-            """,
-            (entry["paper_trade_id"],),
-        ).fetchall()
         merged["trade_state"] = "PENDING"
         merged["gross_return"] = None
         merged["net_pnl"] = None
         merged["update_notes"] = None
         merged["latest_update_payload"] = None
-        for update in updates:
+        for update in updates_by_trade_id.get(str(entry["paper_trade_id"]), []):
             merged["trade_state"] = update["trade_state"]
             merged["gross_return"] = update["gross_return"]
             merged["net_pnl"] = update["net_pnl"]

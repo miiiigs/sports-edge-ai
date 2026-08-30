@@ -513,6 +513,7 @@ class DashboardServices:
         self.snapshot_error: str | None = None
         self._background_task: asyncio.Task[None] | None = None
         self._startup_sync_task: asyncio.Task[Any] | None = None
+        self._schema_initialized = False
         self._shutdown = False
         self._sync_lock = asyncio.Lock()
         self._provider_state: dict[str, Any] = {
@@ -614,6 +615,8 @@ class DashboardServices:
             self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             football_paper_trading.ensure_schema(conn)
+            football_canonical_fixture.ensure_schema(conn)
+            self._schema_initialized = True
         self._record_storage_runtime_state(initialized_at=initialized_at)
         self._build_snapshot()
         if self.snapshot is not None and self._edge_desk_available:
@@ -688,11 +691,11 @@ class DashboardServices:
         )
 
     def _load_runtime_state(self, conn: Any) -> None:
-        provider_state = storage.get_runtime_state(conn, "provider_state")
-        prediction_state = storage.get_runtime_state(conn, "prediction_state")
-        market_runtime_state = storage.get_runtime_state(conn, "market_runtime_state")
-        storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state")
-        one_shot_sync_state = storage.get_runtime_state(conn, "one_shot_sync_state")
+        provider_state = storage.get_runtime_state(conn, "provider_state", initialize_schema=False)
+        prediction_state = storage.get_runtime_state(conn, "prediction_state", initialize_schema=False)
+        market_runtime_state = storage.get_runtime_state(conn, "market_runtime_state", initialize_schema=False)
+        storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state", initialize_schema=False)
+        one_shot_sync_state = storage.get_runtime_state(conn, "one_shot_sync_state", initialize_schema=False)
         if isinstance(provider_state, dict):
             merged_provider_state = dict(self._provider_state)
             merged_provider_state.update(provider_state)
@@ -857,7 +860,10 @@ class DashboardServices:
         diagnostics_state["last_attempt_at"] = utc_now_iso()
         fixture_rows = {str(row["fixture_id"]): row for row in rows_with_predictions}
         with football_paper_trading.connect(self.config.paper_trading_db_path) as paper_conn:
-            paper_rows = football_paper_trading.fetch_paper_trade_rows(paper_conn)
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(
+                paper_conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
 
         eligible_fixture_ids = sorted(
             {
@@ -1129,14 +1135,23 @@ class DashboardServices:
         with path.open("r", encoding="utf-8", newline="") as handle:
             return list(csv.DictReader(handle))
 
+    def _read_requires_schema_init(self) -> bool:
+        return not self._schema_initialized
+
     def _raw_paper_positions(self) -> list[dict[str, Any]]:
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            return football_paper_trading.fetch_paper_trade_rows(conn)
+            return football_paper_trading.fetch_paper_trade_rows(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
 
     def _paper_positions(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         rows = self._raw_paper_positions()
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            excluded = football_canonical_fixture.fetch_excluded_paper_trade_ids(conn)
+            excluded = football_canonical_fixture.fetch_excluded_paper_trade_ids(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
         counted_rows = [
             row
             for row in rows
@@ -1156,7 +1171,11 @@ class DashboardServices:
         if fixture_ids:
             with storage.connect(self.config.dashboard_db_path) as conn:
                 for fixture_id in fixture_ids:
-                    fixture = storage.fetch_fixture(conn, fixture_id)
+                    fixture = storage.fetch_fixture(
+                        conn,
+                        fixture_id,
+                        initialize_schema=self._read_requires_schema_init(),
+                    )
                     if fixture is not None:
                         identity[fixture_id] = {
                             "fixture_id": fixture_id,
@@ -1341,7 +1360,13 @@ class DashboardServices:
             fixture_lookup = {
                 fixture_id: fixture
                 for fixture_id in fixture_ids
-                if (fixture := storage.fetch_fixture(conn, fixture_id)) is not None
+                if (
+                    fixture := storage.fetch_fixture(
+                        conn,
+                        fixture_id,
+                        initialize_schema=self._read_requires_schema_init(),
+                    )
+                ) is not None
             }
         missing_fixture_ids = [fixture_id for fixture_id in fixture_ids if fixture_id not in fixture_lookup]
         if missing_fixture_ids:
@@ -2319,7 +2344,10 @@ class DashboardServices:
         refresh_dates: set[date] = {today_local}
         timezone_name = ZoneInfo(self.config.display_timezone)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
         for row in paper_rows:
             if str(row.get("trade_state") or "PENDING") not in PAPER_ACTIVE_STATES:
                 continue
@@ -2462,8 +2490,8 @@ class DashboardServices:
                     continue
                 self.ensure_prediction(conn, fixture)
 
-            fixture_rows = storage.fetch_all_fixtures(conn)
-            predictions = storage.fetch_all_predictions(conn)
+            fixture_rows = storage.fetch_all_fixtures(conn, initialize_schema=self._read_requires_schema_init())
+            predictions = storage.fetch_all_predictions(conn, initialize_schema=self._read_requires_schema_init())
             prediction_map = {
                 str(prediction["fixture_id"]): self._decorate_prediction_runtime(prediction)
                 for prediction in predictions
@@ -2771,8 +2799,12 @@ class DashboardServices:
 
     def _load_settlement_fixture(self, fixture_id: str) -> dict[str, Any] | None:
         with storage.connect(self.config.dashboard_db_path) as conn:
-            fixture = storage.fetch_fixture(conn, fixture_id)
-            result_row = storage.fetch_fixture_result(conn, fixture_id)
+            fixture = storage.fetch_fixture(conn, fixture_id, initialize_schema=self._read_requires_schema_init())
+            result_row = storage.fetch_fixture_result(
+                conn,
+                fixture_id,
+                initialize_schema=self._read_requires_schema_init(),
+            )
         if fixture is not None and result_row is not None:
             self._apply_corner_result_to_fixture(fixture, result_row)
         return fixture
@@ -2790,8 +2822,12 @@ class DashboardServices:
         updated_at = utc_now_iso()
         with storage.connect(self.config.dashboard_db_path) as conn:
             storage.upsert_fixtures(conn, [refreshed], updated_at=updated_at)
-            fixture = storage.fetch_fixture(conn, fixture_id)
-            result_row = storage.fetch_fixture_result(conn, fixture_id)
+            fixture = storage.fetch_fixture(conn, fixture_id, initialize_schema=self._read_requires_schema_init())
+            result_row = storage.fetch_fixture_result(
+                conn,
+                fixture_id,
+                initialize_schema=self._read_requires_schema_init(),
+            )
         if fixture is not None and result_row is not None:
             self._apply_corner_result_to_fixture(fixture, result_row)
         return fixture
@@ -2860,7 +2896,10 @@ class DashboardServices:
             # Settle corners-dependent rows first so mixed-market update ordering stays deterministic
             # when one market can still remain unresolved after a finished fixture.
             paper_rows = sorted(
-                football_paper_trading.fetch_paper_trade_rows(conn),
+                football_paper_trading.fetch_paper_trade_rows(
+                    conn,
+                    initialize_schema=self._read_requires_schema_init(),
+                ),
                 key=lambda row: (
                     0 if str(row.get("market") or "") == "corner_total" else 1,
                     str(row.get("decision_timestamp") or ""),
@@ -3375,7 +3414,10 @@ class DashboardServices:
         last_successful_snapshot_at: str | None = None
 
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
             paper_entry_count = len(paper_rows)
             settlement_queue_count = sum(
                 1
@@ -3568,7 +3610,10 @@ class DashboardServices:
 
             self._sync_authoritative_corner_results(rows_with_predictions)
             self._process_paper_trading_updates(rows_with_predictions)
-            paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+            paper_rows = football_paper_trading.fetch_paper_trade_rows(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
             paper_entry_count = len(paper_rows)
             settlement_queue_count = sum(
                 1
@@ -3630,7 +3675,11 @@ class DashboardServices:
 
         kickoff_utc = parse_iso_datetime(fixture.kickoff_utc)
         current_time_utc = datetime.now(timezone.utc)
-        latest = storage.fetch_latest_prediction_for_fixture(conn, fixture.fixture_id)
+        latest = storage.fetch_latest_prediction_for_fixture(
+            conn,
+            fixture.fixture_id,
+            initialize_schema=self._read_requires_schema_init(),
+        )
         if latest is not None and kickoff_utc <= current_time_utc:
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=latest)
             return latest
@@ -3731,7 +3780,7 @@ class DashboardServices:
 
     def _prediction_map(self) -> dict[str, dict[str, Any]]:
         with storage.connect(self.config.dashboard_db_path) as conn:
-            predictions = storage.fetch_all_predictions(conn)
+            predictions = storage.fetch_all_predictions(conn, initialize_schema=self._read_requires_schema_init())
         prediction_map: dict[str, dict[str, Any]] = {}
         for prediction in predictions:
             prediction_map.setdefault(str(prediction["fixture_id"]), self._decorate_prediction_runtime(prediction))
@@ -3739,7 +3788,7 @@ class DashboardServices:
 
     def _all_fixtures_with_predictions(self) -> list[dict[str, Any]]:
         with storage.connect(self.config.dashboard_db_path) as conn:
-            fixture_rows = storage.fetch_all_fixtures(conn)
+            fixture_rows = storage.fetch_all_fixtures(conn, initialize_schema=self._read_requires_schema_init())
         prediction_map = self._prediction_map()
         return [
             {
@@ -4025,8 +4074,10 @@ class DashboardServices:
                 with storage.connect(path) as conn:
                     storage.ensure_schema(conn)
             else:
-                with football_paper_trading.connect(path) as conn:
-                    football_paper_trading.ensure_schema(conn)
+                if not path.exists():
+                    return False
+                with sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True) as conn:
+                    conn.execute("SELECT 1").fetchone()
             return True
         except Exception:
             return False
@@ -4039,7 +4090,7 @@ class DashboardServices:
             return False
 
     def _storage_status(self) -> dict[str, Any]:
-        dashboard_db_reachable = self._database_reachable(self.config.dashboard_db_path, initialize_schema=True)
+        dashboard_db_reachable = self._database_reachable(self.config.dashboard_db_path, initialize_schema=False)
         paper_trading_db_reachable = self._database_reachable(self.config.paper_trading_db_path, initialize_schema=False)
         research_db_reachable = Path(self.config.research_db_path).exists()
         operational_paths = list(self._storage_runtime_state.get("operational_db_paths") or [])
@@ -4746,9 +4797,13 @@ class DashboardServices:
         current_slate_rows = self._build_current_slate_working_rows(fixture_rows)
         today_working_rows = self._build_today_working_rows(fixture_rows)
         other_decision_rows = [row for row in current_slate_rows if not row["is_actionable"]]
-        current_slate_summary = self._current_slate_summary(working_rows=current_slate_rows, paper_rows=paper_rows)
-        system_status = self.get_system_status()
         performance_summary_payload = self._load_json_file(self._performance_summary_path())
+        current_slate_summary = self._current_slate_summary(working_rows=current_slate_rows, paper_rows=paper_rows)
+        system_status = self._build_system_status(
+            paper_status=paper_status,
+            storage_state=self._storage_status(),
+            summary_payload=performance_summary_payload,
+        )
         paper_performance = paper_status.get("performance", {})
         analysed_count = len({str(row["fixture_id"]) for row in today_working_rows})
         approved_count = sum(1 for row in today_working_rows if str(row.get("current_decision_state") or "") == "BET")
@@ -4896,14 +4951,21 @@ class DashboardServices:
 
     def get_fixture_detail_payload(self, fixture_id: str) -> dict[str, Any] | None:
         with storage.connect(self.config.dashboard_db_path) as conn:
-            fixture = storage.fetch_fixture(conn, fixture_id)
-            prediction = storage.fetch_latest_prediction_for_fixture(conn, fixture_id)
+            fixture = storage.fetch_fixture(conn, fixture_id, initialize_schema=self._read_requires_schema_init())
+            prediction = storage.fetch_latest_prediction_for_fixture(
+                conn,
+                fixture_id,
+                initialize_schema=self._read_requires_schema_init(),
+            )
         if fixture is None:
             return None
         serialized_fixture = self.serialize_fixture_row({**fixture, "prediction": prediction})
         market_evaluation = serialized_fixture.get("market_evaluation")
-        system_status = self.get_system_status()
-        paper_positions, _ = self._paper_positions()
+        paper_positions, paper_status = self._paper_positions()
+        system_status = self._build_system_status(
+            paper_status=paper_status,
+            storage_state=self._storage_status(),
+        )
         published_entries = self._published_paper_entries_for_fixture(
             fixture_id=str(fixture_id),
             market_evaluation=market_evaluation,
@@ -4959,14 +5021,21 @@ class DashboardServices:
 
     def get_prediction_payload(self, fixture_id: str) -> dict[str, Any] | None:
         with storage.connect(self.config.dashboard_db_path) as conn:
-            prediction = storage.fetch_latest_prediction_for_fixture(conn, fixture_id)
+            prediction = storage.fetch_latest_prediction_for_fixture(
+                conn,
+                fixture_id,
+                initialize_schema=self._read_requires_schema_init(),
+            )
         return self._decorate_prediction_runtime(prediction)
 
     def get_predictions_payload(self, *, page: int = 1) -> dict[str, Any]:
         now_utc = datetime.now(timezone.utc)
         with storage.connect(self.config.dashboard_db_path) as conn:
-            predictions = storage.fetch_all_predictions(conn)
-            fixture_rows = {row["fixture_id"]: row for row in storage.fetch_all_fixtures(conn)}
+            predictions = storage.fetch_all_predictions(conn, initialize_schema=self._read_requires_schema_init())
+            fixture_rows = {
+                row["fixture_id"]: row
+                for row in storage.fetch_all_fixtures(conn, initialize_schema=self._read_requires_schema_init())
+            }
         rows = []
         for prediction in predictions:
             fixture = fixture_rows.get(str(prediction["fixture_id"]))
@@ -5057,7 +5126,11 @@ class DashboardServices:
         return self.get_betting_desk_payload()
 
     def get_member_card_payload(self, *, page: int = 1) -> dict[str, Any]:
-        paper_rows, _ = self._paper_positions()
+        paper_rows, paper_status = self._paper_positions()
+        system_status = self._build_system_status(
+            paper_status=paper_status,
+            storage_state=self._storage_status(),
+        )
         published_rows = self._published_pick_rows(paper_rows)
         visible_rows = [
             row
@@ -5084,7 +5157,7 @@ class DashboardServices:
             "pagination": pagination,
             "publish_state": "DISABLED",
             "publish_note": "Publishing remains read-only in this phase; historical published picks are shown truthfully.",
-            "system_status": self.get_system_status(),
+            "system_status": system_status,
         }
 
     def get_performance_payload(self) -> dict[str, Any]:
@@ -5095,6 +5168,11 @@ class DashboardServices:
         calibration_rows = self._load_csv_rows(self._performance_csv_path("football_calibration.csv"))
         paper_positions, paper_status = self._paper_positions()
         status = self._performance_status(summary_payload, paper_status)
+        system_status = self._build_system_status(
+            paper_status=paper_status,
+            storage_state=self._storage_status(),
+            summary_payload=summary_payload,
+        )
         current_paper = paper_status.get("performance", {})
         paper_position_rows = self._paper_position_display_rows(paper_positions)
         open_paper_positions = [row for row in paper_position_rows if row["is_open"]]
@@ -5183,14 +5261,17 @@ class DashboardServices:
             "calibration_status_label": "NOT YET AVAILABLE",
             "brier_status_label": "NOT YET AVAILABLE",
             "performance_status": status,
-            "system_status": self.get_system_status(),
+            "system_status": system_status,
         }
 
     def get_segment_explorer_payload(self) -> dict[str, Any]:
-        paper_rows, _ = self._paper_positions()
+        paper_rows, paper_status = self._paper_positions()
         return {
             **self._segment_explorer_payload(paper_rows=paper_rows),
-            "system_status": self.get_system_status(),
+            "system_status": self._build_system_status(
+                paper_status=paper_status,
+                storage_state=self._storage_status(),
+            ),
         }
 
     def get_error_centre_payload(self) -> dict[str, Any]:
@@ -5234,10 +5315,13 @@ class DashboardServices:
         }
 
     def get_reports_payload(self) -> dict[str, Any]:
-        paper_rows, _ = self._paper_positions()
+        paper_rows, paper_status = self._paper_positions()
         return {
             **self._reports_payload(paper_rows=paper_rows),
-            "system_status": self.get_system_status(),
+            "system_status": self._build_system_status(
+                paper_status=paper_status,
+                storage_state=self._storage_status(),
+            ),
         }
 
     def get_next_fixtures_payload(self) -> dict[str, Any]:
@@ -5249,16 +5333,24 @@ class DashboardServices:
             "system_status": payload["system_status"],
         }
 
-    def get_system_status(self) -> dict[str, Any]:
+    def _build_system_status(
+        self,
+        *,
+        paper_status: dict[str, Any] | None = None,
+        storage_state: dict[str, Any] | None = None,
+        summary_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         snapshot_state = "READY" if self.snapshot is not None else "BLOCKED"
         market_state = self._market_provider_state()
         fixture_requirements = self._fixture_feed_runtime_requirements()
         odds_requirements = self._odds_feed_runtime_requirements()
         xg_status = self._xg_runtime_status()
-        summary_payload = self._load_json_file(self._performance_summary_path())
-        _, paper_status = self._paper_positions()
-        performance_status = self._performance_status(summary_payload, paper_status)
-        storage_state = self._storage_status()
+        resolved_summary_payload = summary_payload if summary_payload is not None else self._load_json_file(self._performance_summary_path())
+        resolved_paper_status = paper_status
+        if resolved_paper_status is None:
+            _, resolved_paper_status = self._paper_positions()
+        performance_status = self._performance_status(resolved_summary_payload, resolved_paper_status)
+        resolved_storage_state = storage_state if storage_state is not None else self._storage_status()
         team_resolution_state = dict(
             self._provider_state.get(
                 "team_resolution_counts",
@@ -5342,7 +5434,7 @@ class DashboardServices:
                 "reason": market_state["reason"],
                 "requirements": odds_requirements,
             },
-            "storage": storage_state,
+            "storage": resolved_storage_state,
             "market_sync": dict(self._market_runtime_state),
             "one_shot_sync": dict(self._one_shot_sync_state),
             "xg": xg_status,
@@ -5388,6 +5480,9 @@ class DashboardServices:
             )
             else "NO",
         }
+
+    def get_system_status(self) -> dict[str, Any]:
+        return self._build_system_status()
 
     def get_health_payload(self) -> dict[str, Any]:
         storage_state = self._storage_status()
