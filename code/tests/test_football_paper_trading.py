@@ -320,6 +320,89 @@ def test_ensure_schema_requires_reconciliation_when_legacy_business_key_duplicat
         with pytest.raises(sqlite3.IntegrityError, match="PAPER_TRADE_BUSINESS_KEY_DUPLICATES_PRESENT"):
             ensure_schema(conn)
 
+
+def test_fetch_paper_trade_rows_batches_update_queries_and_preserves_latest_update_semantics(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    expected_latest_states: dict[str, str] = {}
+    sample_paper_trade_id: str | None = None
+
+    with connect(db_path) as conn:
+        ensure_schema(conn)
+        for index in range(25):
+            paper_trade_id = record_paper_trade_entry(
+                conn,
+                PaperTradeEntry(
+                    prediction_id=f"pred_batch_{index}",
+                    fixture_id=f"evt_batch_{index}",
+                    model_snapshot_id=f"snapshot_batch_{index}",
+                    model_version="football_day11_manager_core_v1",
+                    market="1x2" if index % 2 == 0 else "goals_total",
+                    selection="HOME" if index % 2 == 0 else "OVER",
+                    line=None if index % 2 == 0 else 2.5,
+                    model_probability=0.57,
+                    model_fair_price=1.78,
+                    available_market_price=2.12,
+                    edge=0.09,
+                    decision="PAPER_CANDIDATE",
+                    decision_timestamp=f"2026-08-20T10:{index:02d}:00+00:00",
+                    kickoff=f"2026-08-20T12:{index:02d}:00+00:00",
+                    safeguard_state="READY",
+                    entry_eligibility="ELIGIBLE",
+                    bookmaker="Book A",
+                    provider="mock-provider",
+                    entry_odds=2.12,
+                    entry_captured_at=f"2026-08-20T10:{index:02d}:00+00:00",
+                ),
+            )
+            append_trade_update(
+                conn,
+                build_trade_update_payload(
+                    paper_trade_id=paper_trade_id,
+                    trade_state="OPEN",
+                    settlement_context={"phase": "open", "index": index},
+                    odds=2.12,
+                    notes=f"open-{index}",
+                ),
+            )
+            final_state = "WON" if index % 3 == 0 else "LOST" if index % 3 == 1 else "PUSH"
+            append_trade_update(
+                conn,
+                build_trade_update_payload(
+                    paper_trade_id=paper_trade_id,
+                    trade_state=final_state,
+                    settlement_context={"phase": "final", "index": index},
+                    odds=2.12,
+                    notes=f"final-{index}",
+                ),
+            )
+            expected_latest_states[paper_trade_id] = final_state
+            if index == 1:
+                sample_paper_trade_id = paper_trade_id
+
+        traced_sql: list[str] = []
+        conn.set_trace_callback(traced_sql.append)
+        rows = fetch_paper_trade_rows(conn, initialize_schema=False)
+        conn.set_trace_callback(None)
+
+    updates_selects = [
+        sql for sql in traced_sql if "from paper_trade_updates" in " ".join(sql.strip().split()).lower()
+    ]
+    row_by_id = {row["paper_trade_id"]: row for row in rows}
+    status = paper_trading_status(rows)
+
+    assert len(rows) == 25
+    assert len(updates_selects) == 1
+    assert sample_paper_trade_id is not None
+    assert row_by_id[sample_paper_trade_id]["trade_state"] == expected_latest_states[sample_paper_trade_id]
+    assert row_by_id[sample_paper_trade_id]["update_notes"] == "final-1"
+    assert row_by_id[sample_paper_trade_id]["latest_update_payload"]["settlement_context"] == {"phase": "final", "index": 1}
+    assert status["paper_bets"] == 25
+    assert status["settled_positions"] == 25
+    assert status["open_positions"] == 0
+    assert status["performance"]["wins"] == sum(1 for state in expected_latest_states.values() if state == "WON")
+    assert status["performance"]["losses"] == sum(1 for state in expected_latest_states.values() if state == "LOST")
+    assert status["performance"]["pushes"] == sum(1 for state in expected_latest_states.values() if state == "PUSH")
+
 @pytest.mark.parametrize(
     ("market", "selection", "line", "home_goals", "away_goals", "actual_total_corners", "expected_state"),
     [

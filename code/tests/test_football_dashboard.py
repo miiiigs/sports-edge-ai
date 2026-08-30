@@ -28,7 +28,7 @@ from sports_ai.dashboard.models import (
 )
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _default_market_provider, _humanize_market_selection
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
-from sports_ai.storage import football_edge_desk, football_paper_trading
+from sports_ai.storage import football_canonical_fixture, football_edge_desk, football_paper_trading
 
 
 class FakeFixtureProvider:
@@ -520,8 +520,8 @@ def _record_test_paper_trade(
     entry_odds: float,
     model_fair_price: float,
     line: float | None = None,
-) -> None:
-    football_paper_trading.record_paper_trade_entry(
+) -> str:
+    return football_paper_trading.record_paper_trade_entry(
         conn,
         football_paper_trading.PaperTradeEntry(
             prediction_id=prediction_id,
@@ -547,6 +547,152 @@ def _record_test_paper_trade(
             entry_captured_at=(datetime.now(timezone.utc) - timedelta(hours=4)).replace(microsecond=0).isoformat(),
         ),
     )
+
+
+def _build_today_read_path_services(tmp_path: Path) -> tuple[DashboardServices, list[NormalizedFixture]]:
+    target_date = datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Manila")).date()
+    today_primary = replace(
+        _fixture(
+            fixture_id="fake:today_primary",
+            home_team_name="Primary FC",
+            away_team_name="Visitors FC",
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date, hour=20),
+    )
+    today_secondary = replace(
+        _fixture(
+            fixture_id="fake:today_secondary",
+            home_team_name="Secondary FC",
+            away_team_name="Rivals FC",
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date, hour=22),
+    )
+    tomorrow_fixture = replace(
+        _fixture(
+            fixture_id="fake:tomorrow_future",
+            home_team_name="Tomorrow FC",
+            away_team_name="Future Opponent",
+        ),
+        kickoff_utc=_kickoff_utc_for_local_date(target_date + timedelta(days=1), hour=18),
+    )
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([today_primary, today_secondary, tomorrow_fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    services._market_evaluation_map = lambda: {
+        today_primary.fixture_id: {
+            "state": "READY",
+            "reason": None,
+            "decision_rows": [
+                {
+                    "fixture_id": today_primary.fixture_id,
+                    "competition_id": "ENG1",
+                    "competition_name": "Premier League",
+                    "decision": "PRELIMINARY_CANDIDATE",
+                    "current_decision_state": "BET",
+                    "market_family": "1x2",
+                    "selection": "HOME",
+                    "line": None,
+                    "model_probability": 0.61,
+                    "model_fair_decimal_price": 1.64,
+                    "best_available_price": 2.18,
+                    "best_available_bookmaker": "Pinnacle",
+                    "best_available_source_timestamp": "2026-08-30T09:00:00Z",
+                    "settlement_aware_edge": 0.33,
+                    "paper_entry_eligible": True,
+                    "paper_trade_id": "paper_today_primary",
+                    "market_freshness": "FRESH",
+                    "day12_state": "PASSED",
+                    "reason_codes": [],
+                },
+                {
+                    "fixture_id": today_primary.fixture_id,
+                    "competition_id": "ENG1",
+                    "competition_name": "Premier League",
+                    "decision": "NO_BET",
+                    "current_decision_state": "NO_BET_VALUE",
+                    "market_family": "btts",
+                    "selection": "YES",
+                    "line": None,
+                    "model_probability": 0.52,
+                    "model_fair_decimal_price": 1.90,
+                    "best_available_price": 1.70,
+                    "best_available_bookmaker": "bet365",
+                    "best_available_source_timestamp": "2026-08-30T09:00:00Z",
+                    "settlement_aware_edge": -0.07,
+                    "paper_entry_eligible": False,
+                    "paper_trade_id": None,
+                    "market_freshness": "FRESH",
+                    "day12_state": "PASSED",
+                    "reason_codes": ["PRICE_NO_VALUE"],
+                },
+            ],
+            "display_rows": [],
+        },
+        today_secondary.fixture_id: {
+            "state": "READY",
+            "reason": None,
+            "decision_rows": [
+                {
+                    "fixture_id": today_secondary.fixture_id,
+                    "competition_id": "ENG1",
+                    "competition_name": "Premier League",
+                    "decision": "PRELIMINARY_CANDIDATE",
+                    "current_decision_state": "BET",
+                    "market_family": "goals_total",
+                    "selection": "OVER",
+                    "line": 2.5,
+                    "model_probability": 0.58,
+                    "model_fair_decimal_price": 1.72,
+                    "best_available_price": 2.04,
+                    "best_available_bookmaker": "Pinnacle",
+                    "best_available_source_timestamp": "2026-08-30T09:00:00Z",
+                    "settlement_aware_edge": 0.19,
+                    "paper_entry_eligible": True,
+                    "paper_trade_id": "paper_today_secondary",
+                    "market_freshness": "FRESH",
+                    "day12_state": "PASSED",
+                    "reason_codes": [],
+                }
+            ],
+            "display_rows": [],
+        },
+    }
+    return services, [today_primary, today_secondary, tomorrow_fixture]
+
+
+def _seed_today_read_path_paper_rows(config: DashboardConfig, fixtures: list[NormalizedFixture]) -> None:
+    with football_paper_trading.connect(config.paper_trading_db_path) as conn:
+        primary_trade_id = _record_test_paper_trade(
+            conn,
+            fixture=fixtures[0],
+            prediction_id="today_primary",
+            market="1x2",
+            selection="HOME",
+            entry_odds=2.18,
+            model_fair_price=1.64,
+        )
+        football_paper_trading.append_trade_update(
+            conn,
+            football_paper_trading.build_trade_update_payload(
+                paper_trade_id=primary_trade_id,
+                trade_state="WON",
+                settlement_context={"actual_home_goals": 2, "actual_away_goals": 0},
+                odds=2.18,
+                notes="settled-primary",
+            ),
+        )
+        _record_test_paper_trade(
+            conn,
+            fixture=fixtures[1],
+            prediction_id="today_secondary",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            entry_odds=2.04,
+            model_fair_price=1.72,
+        )
 
 
 def test_api_football_normalization_maps_status_and_score():
@@ -3338,6 +3484,87 @@ def test_route_reads_do_not_create_provider_requests(
     assert performance_response.status_code == 200
     assert before == 0
     assert after == 0
+
+
+def test_today_route_reuses_single_paper_positions_read(tmp_path: Path, monkeypatch) -> None:
+    services, fixtures = _build_today_read_path_services(tmp_path)
+    _seed_today_read_path_paper_rows(services.config, fixtures)
+    app = create_app(services=services)
+    paper_position_calls = {"count": 0}
+    original_paper_positions = services._paper_positions
+
+    def counted_paper_positions():
+        paper_position_calls["count"] += 1
+        return original_paper_positions()
+
+    monkeypatch.setattr(services, "_paper_positions", counted_paper_positions)
+
+    with TestClient(app) as client:
+        paper_position_calls["count"] = 0
+        response = client.get("/today")
+
+    assert response.status_code == 200
+    assert paper_position_calls["count"] == 1
+
+
+def test_dashboard_payload_system_status_matches_standalone_status(tmp_path: Path) -> None:
+    services, fixtures = _build_today_read_path_services(tmp_path)
+    _seed_today_read_path_paper_rows(services.config, fixtures)
+
+    asyncio.run(services.initialize())
+    payload = services.get_dashboard_payload()
+    standalone_status = services.get_system_status()
+    asyncio.run(services.shutdown())
+
+    payload_status = dict(payload["system_status"])
+    payload_status["current_time_utc"] = None
+    payload_status["current_time_local"] = None
+    standalone_status["current_time_utc"] = None
+    standalone_status["current_time_local"] = None
+
+    assert payload_status == standalone_status
+
+
+def test_dashboard_get_routes_do_not_run_schema_initialization_after_startup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, fixtures = _build_today_read_path_services(tmp_path)
+    _seed_today_read_path_paper_rows(services.config, fixtures)
+    schema_calls = {"dashboard": 0, "paper": 0, "canonical": 0}
+    original_dashboard_ensure = dashboard_storage.ensure_schema
+    original_paper_ensure = football_paper_trading.ensure_schema
+    original_canonical_ensure = football_canonical_fixture.ensure_schema
+
+    def counted_dashboard_ensure(conn):
+        schema_calls["dashboard"] += 1
+        return original_dashboard_ensure(conn)
+
+    def counted_paper_ensure(conn):
+        schema_calls["paper"] += 1
+        return original_paper_ensure(conn)
+
+    def counted_canonical_ensure(conn):
+        schema_calls["canonical"] += 1
+        return original_canonical_ensure(conn)
+
+    monkeypatch.setattr(dashboard_storage, "ensure_schema", counted_dashboard_ensure)
+    monkeypatch.setattr(football_paper_trading, "ensure_schema", counted_paper_ensure)
+    monkeypatch.setattr(football_canonical_fixture, "ensure_schema", counted_canonical_ensure)
+
+    app = create_app(services=services)
+    with TestClient(app) as client:
+        schema_calls.update({"dashboard": 0, "paper": 0, "canonical": 0})
+        responses = [
+            client.get("/today"),
+            client.get("/status"),
+            client.get("/matches"),
+            client.get("/betting-desk"),
+            client.get("/model-performance"),
+        ]
+
+    assert all(response.status_code == 200 for response in responses)
+    assert schema_calls == {"dashboard": 0, "paper": 0, "canonical": 0}
 
 
 def test_sync_once_runs_blocking_body_off_event_loop_and_today_request_stays_responsive(
