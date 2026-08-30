@@ -78,7 +78,7 @@
     <span class="status-label">Current Recommendation</span>
     {% if headline_bet and headline_bet.trade_state is defined %}
       <strong>{{ headline_bet.bet_label }}</strong>
-      <p class="hero-meta">Published pick · {{ headline_bet.selection_label }}{% if headline_bet.line is not none %} {{ headline_bet.line }}{% endif %}</p>
+      <p class="hero-meta">Paper entry · {{ headline_bet.selection_label }}{% if headline_bet.line is not none %} {{ headline_bet.line }}{% endif %}</p>
       <div class="data-list">
         <div><span>Desk</span><strong>{{ headline_bet.trade_state }}</strong></div>
         <div><span>Entry Odds</span><strong>{{ "{:.2f}".format(headline_bet.entry_odds|float) if headline_bet.entry_odds is not none else 'N/A' }}</strong></div>
@@ -379,7 +379,7 @@
             <span class="desk-panel-title">Paper Entry</span>
             <span class="desk-panel-note">Frozen entry truth for this fixture</span>
           </div>
-          <span class="desk-panel-meta">{{ payload.published_entry_count }} PICKS</span>
+          <span class="desk-panel-meta">{{ payload.published_entry_count }} ENTRIES</span>
         </div>
         {% if payload.paper_entries %}
           <div class="mobile-card-list mobile-card-list--always">
@@ -409,7 +409,7 @@
           </div>
         {% else %}
           <article class="empty-state desk-empty-state">
-            <strong>No published paper entry has been recorded for this match.</strong>
+            <strong>No paper entry is currently attached to this match.</strong>
           </article>
         {% endif %}
       </section>

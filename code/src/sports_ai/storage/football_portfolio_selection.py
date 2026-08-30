@@ -268,3 +268,49 @@ def fetch_current_portfolio_selections(
         (policy_id, policy_version),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def fetch_current_portfolio_evaluations(
+    conn: sqlite3.Connection,
+    *,
+    policy_id: str,
+    policy_version: str,
+    initialize_schema: bool = True,
+) -> list[dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    rows = conn.execute(
+        """
+        SELECT e.*
+        FROM football_portfolio_evaluations e
+        WHERE e.policy_id = ?
+          AND e.policy_version = ?
+          AND NOT EXISTS (
+              SELECT 1
+              FROM football_portfolio_evaluations newer
+              WHERE newer.canonical_fixture_id = e.canonical_fixture_id
+                AND newer.policy_id = e.policy_id
+                AND newer.policy_version = e.policy_version
+                AND (
+                    newer.candidate_snapshot_at > e.candidate_snapshot_at
+                    OR (
+                        newer.candidate_snapshot_at = e.candidate_snapshot_at
+                        AND newer.candidate_count > e.candidate_count
+                    )
+                    OR (
+                        newer.candidate_snapshot_at = e.candidate_snapshot_at
+                        AND newer.candidate_count = e.candidate_count
+                        AND newer.created_at > e.created_at
+                    )
+                    OR (
+                        newer.candidate_snapshot_at = e.candidate_snapshot_at
+                        AND newer.candidate_count = e.candidate_count
+                        AND newer.created_at = e.created_at
+                        AND newer.evaluation_id > e.evaluation_id
+                    )
+                )
+          )
+        ORDER BY e.canonical_fixture_id
+        """,
+        (policy_id, policy_version),
+    ).fetchall()
+    return [dict(row) for row in rows]

@@ -164,7 +164,7 @@
   {% else %}
     <article class="empty-state desk-empty-state">
       <strong>{{ payload.best_picks_summary.empty_message }}</strong>
-      <p>Use Today's Desk below to inspect current BET and NO BET decisions even when nothing is on the published card yet.</p>
+      <p>Use Today's Desk below to inspect current BET and NO BET decisions even when nothing is on the current portfolio card yet.</p>
     </article>
   {% endif %}
 </section>
@@ -237,7 +237,7 @@
         <div><span>Scheduled Today</span><strong>{{ payload.today|length }}</strong></div>
         <div><span>Current BET Rows</span><strong>{{ payload.today_summary.approved }}</strong></div>
         <div><span>Current Desk Rows</span><strong>{{ payload.today_summary.predictions }}</strong></div>
-        <div><span>Published Picks</span><strong>{{ payload.best_picks_summary.count }}</strong></div>
+        <div><span>Portfolio Bets</span><strong>{{ payload.best_picks_summary.count }}</strong></div>
         <div><span>Upcoming Matches</span><strong>{{ payload.upcoming_count }}</strong></div>
       </div>
       <div class="inline-actions">

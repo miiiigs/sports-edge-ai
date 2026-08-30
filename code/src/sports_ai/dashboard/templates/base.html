@@ -6,7 +6,7 @@
 {% elif page == 'betting_desk' or page == 'candidates' %}
   {% set page_label = 'Betting Desk' %}
 {% elif page == 'member_card' %}
-  {% set page_label = 'Published Picks' %}
+  {% set page_label = 'Current Portfolio' %}
 {% elif page == 'performance' %}
   {% set page_label = 'Model Performance' %}
 {% elif page == 'segment_explorer' %}
@@ -109,8 +109,8 @@
           <p class="eyebrow">Analysis</p>
           <a href="/member-card" class="nav-item {% if page == 'member_card' %}nav-active{% endif %}">
             <span class="nav-copy">
-              <span class="nav-label">Published Picks</span>
-              <small class="nav-caption">Simplified published pick view</small>
+              <span class="nav-label">Current Portfolio</span>
+              <small class="nav-caption">Simplified current portfolio view</small>
             </span>
           </a>
           <a href="/segment-explorer" class="nav-item {% if page == 'segment_explorer' %}nav-active{% endif %}">
