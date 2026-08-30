@@ -89,6 +89,26 @@ def _record_evaluation(
     )
 
 
+def _evaluation_history(conn) -> list[dict[str, object]]:
+    return [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT
+                evaluation_id,
+                predecessor_evaluation_id,
+                evaluated_at,
+                candidate_snapshot_at,
+                candidate_count,
+                selected_count,
+                evaluation_signature
+            FROM football_portfolio_evaluations
+            ORDER BY evaluated_at, created_at, evaluation_id
+            """
+        ).fetchall()
+    ]
+
+
 def test_adjacent_goals_lines_select_one_highest_edge() -> None:
     result = select_fixture_portfolio(
         [
@@ -278,6 +298,281 @@ def test_portfolio_evaluation_storage_is_idempotent_and_prefers_newer_snapshot(t
     assert second_write.inserted is True
     assert {row["paper_trade_id"] for row in current_rows} == {"paper_1", "paper_2"}
     assert {row["selection_state"] for row in current_rows} == {PORTFOLIO_STATE_SELECTED}
+
+
+def test_consecutive_identical_state_is_idempotent(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_consecutive_identical.sqlite"
+    policy = _policy()
+    candidates = [
+        _candidate("paper_a", market="1x2", selection="HOME", line=None, edge=0.07, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        first_write = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_consecutive",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=candidates,
+        )
+        second_write = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_consecutive",
+            evaluated_at="2026-08-31T10:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=candidates,
+        )
+        history = _evaluation_history(conn)
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+
+    assert first_write.inserted is True
+    assert second_write.inserted is False
+    assert second_write.evaluation_id == first_write.evaluation_id
+    assert len(history) == 1
+    assert history[0]["predecessor_evaluation_id"] is None
+    assert {row["paper_trade_id"] for row in current_rows} == {"paper_a"}
+
+
+def test_state_recurrence_appends_new_lifecycle_event_and_preserves_history(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_state_recurrence.sqlite"
+    policy = _policy()
+    recurring_candidates = [
+        _candidate("paper_a", market="goals_total", selection="OVER", line=2.5, edge=0.08, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        first_write = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_recurrence",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=recurring_candidates,
+        )
+        empty_write = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_recurrence",
+            evaluated_at="2026-08-31T10:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T10:30:00+00:00",
+            candidates=[],
+        )
+        recurring_write = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_recurrence",
+            evaluated_at="2026-08-31T11:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=recurring_candidates,
+        )
+        history = _evaluation_history(conn)
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+        selection_rows = conn.execute(
+            """
+            SELECT evaluation_id, paper_trade_id, selection_state
+            FROM football_portfolio_selections
+            WHERE paper_trade_id = ?
+            ORDER BY evaluated_at, created_at, portfolio_selection_id
+            """,
+            ("paper_a",),
+        ).fetchall()
+
+    assert first_write.inserted is True
+    assert empty_write.inserted is True
+    assert recurring_write.inserted is True
+    assert len(history) == 3
+    assert history[0]["evaluation_signature"] == history[2]["evaluation_signature"]
+    assert history[0]["evaluation_id"] != history[2]["evaluation_id"]
+    assert history[0]["predecessor_evaluation_id"] is None
+    assert history[1]["predecessor_evaluation_id"] == history[0]["evaluation_id"]
+    assert history[2]["predecessor_evaluation_id"] == history[1]["evaluation_id"]
+    assert current_evaluations[0]["evaluation_id"] == history[2]["evaluation_id"]
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T11:00:00+00:00"
+    assert {row["paper_trade_id"] for row in current_rows} == {"paper_a"}
+    assert [dict(row) for row in selection_rows] == [
+        {
+            "evaluation_id": history[0]["evaluation_id"],
+            "paper_trade_id": "paper_a",
+            "selection_state": PORTFOLIO_STATE_SELECTED,
+        },
+        {
+            "evaluation_id": history[2]["evaluation_id"],
+            "paper_trade_id": "paper_a",
+            "selection_state": PORTFOLIO_STATE_SELECTED,
+        },
+    ]
+
+
+def test_alternating_state_reuses_content_signature_but_appends_new_event(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_alternating.sqlite"
+    policy = _policy()
+    candidates_a = [
+        _candidate("paper_a", market="1x2", selection="HOME", line=None, edge=0.08, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+    candidates_b = [
+        _candidate("paper_b", market="btts", selection="YES", line=None, edge=0.07, decision_timestamp="2026-08-31T10:15:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_alternating",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=candidates_a,
+        )
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_alternating",
+            evaluated_at="2026-08-31T10:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T10:15:00+00:00",
+            candidates=candidates_b,
+        )
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_alternating",
+            evaluated_at="2026-08-31T11:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=candidates_a,
+        )
+        history = _evaluation_history(conn)
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+
+    assert len(history) == 3
+    assert history[0]["evaluation_signature"] == history[2]["evaluation_signature"]
+    assert history[0]["evaluation_id"] != history[2]["evaluation_id"]
+    assert {row["paper_trade_id"] for row in current_rows} == {"paper_a"}
+
+
+def test_consecutive_empty_state_is_idempotent(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_consecutive_empty.sqlite"
+    policy = _policy()
+    first_candidates = [
+        _candidate("paper_a", market="goals_total", selection="OVER", line=2.5, edge=0.08, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_empty",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=first_candidates,
+        )
+        first_empty = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_empty",
+            evaluated_at="2026-08-31T10:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T10:30:00+00:00",
+            candidates=[],
+        )
+        second_empty = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_empty",
+            evaluated_at="2026-08-31T11:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T11:00:00+00:00",
+            candidates=[],
+        )
+        history = _evaluation_history(conn)
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+        )
+
+    assert first_empty.inserted is True
+    assert second_empty.inserted is False
+    assert second_empty.evaluation_id == first_empty.evaluation_id
+    assert len(history) == 2
+    assert current_rows == []
+
+
+def test_retry_same_transition_is_idempotent_after_intervening_state(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_retry_transition.sqlite"
+    policy = _policy()
+    recurring_candidates = [
+        _candidate("paper_a", market="1x2", selection="HOME", line=None, edge=0.07, decision_timestamp="2026-08-31T09:55:00+00:00"),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_retry",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=recurring_candidates,
+        )
+        empty_write = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_retry",
+            evaluated_at="2026-08-31T10:30:00+00:00",
+            candidate_snapshot_at="2026-08-31T10:30:00+00:00",
+            candidates=[],
+        )
+        first_retry = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_retry",
+            evaluated_at="2026-08-31T11:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=recurring_candidates,
+        )
+        second_retry = _record_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_retry",
+            evaluated_at="2026-08-31T11:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            candidates=recurring_candidates,
+        )
+        history = _evaluation_history(conn)
+        matching_rows = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM football_portfolio_evaluations
+            WHERE predecessor_evaluation_id = ?
+              AND evaluation_signature = ?
+            """,
+            (empty_write.evaluation_id, history[2]["evaluation_signature"]),
+        ).fetchone()[0]
+
+    assert first_retry.inserted is True
+    assert second_retry.inserted is False
+    assert second_retry.evaluation_id == first_retry.evaluation_id
+    assert len(history) == 3
+    assert matching_rows == 1
 
 
 def test_current_evaluation_prefers_later_evaluated_at_when_same_snapshot_becomes_empty(tmp_path) -> None:

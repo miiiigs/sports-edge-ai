@@ -4225,6 +4225,147 @@ def test_current_portfolio_same_source_timestamp_fresh_to_stale_uses_newer_evalu
     asyncio.run(services.shutdown())
 
 
+def test_current_portfolio_same_source_timestamp_fresh_to_stale_to_fresh_appends_recurrence(tmp_path: Path, monkeypatch) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    prediction = _portfolio_prediction(fixture)
+    evaluation_times = iter(
+        [
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+            "2026-08-31T13:00:00+00:00",
+            "2026-08-31T13:00:00+00:00",
+        ]
+    )
+
+    asyncio.run(services.initialize())
+    monkeypatch.setattr("sports_ai.dashboard.services.utc_now_iso", lambda: next(evaluation_times))
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
+        paper_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=fixture,
+            prediction_id="portfolio_same_source_timestamp_recurrence",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.08,
+            fair_price=1.76,
+            entry_odds=2.01,
+            decision_timestamp="2026-08-31T09:55:00+00:00",
+        )
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.08,
+                        model_probability=0.57,
+                        fair_price=1.76,
+                        best_price=2.01,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.02,
+                        model_probability=0.55,
+                        fair_price=1.82,
+                        best_price=1.88,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                        current_decision_state="NO_BET_STALE_MARKET",
+                        decision="STALE_MARKET",
+                        paper_entry_eligible=False,
+                        market_freshness="STALE",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.08,
+                        model_probability=0.57,
+                        fair_price=1.76,
+                        best_price=2.01,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        evaluation_history = conn.execute(
+            """
+            SELECT evaluation_id, predecessor_evaluation_id, evaluated_at, evaluation_signature, candidate_count
+            FROM football_portfolio_evaluations
+            ORDER BY evaluated_at, created_at, evaluation_id
+            """
+        ).fetchall()
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+            initialize_schema=False,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+
+    history = [dict(row) for row in evaluation_history]
+    assert len(history) == 3
+    assert history[0]["evaluation_signature"] == history[2]["evaluation_signature"]
+    assert history[0]["evaluation_id"] != history[2]["evaluation_id"]
+    assert history[2]["predecessor_evaluation_id"] == history[1]["evaluation_id"]
+    assert current_evaluations[0]["evaluation_id"] == history[2]["evaluation_id"]
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T13:00:00+00:00"
+    assert current_rows[0]["paper_trade_id"] == paper_trade_id
+    assert current_rows[0]["selection_state"] == PORTFOLIO_STATE_SELECTED
+
+    asyncio.run(services.shutdown())
+
+
 def test_dashboard_policy_active_without_selection_keeps_best_picks_empty(tmp_path: Path, monkeypatch) -> None:
     fixture = _fixture()
     services = DashboardServices(

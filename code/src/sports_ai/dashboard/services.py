@@ -1930,6 +1930,15 @@ class DashboardServices:
         )
         if not tracked_canonical_fixture_ids:
             return
+        latest_evaluation_by_canonical_fixture_id = {
+            str(row["canonical_fixture_id"]): row
+            for row in football_portfolio_selection.fetch_current_portfolio_evaluations(
+                conn,
+                policy_id=policy.policy_id,
+                policy_version=policy.policy_version,
+                initialize_schema=self._read_requires_schema_init(),
+            )
+        }
         evaluated_at = utc_now_iso()
         for canonical_fixture_id in sorted(tracked_canonical_fixture_ids):
             candidates = candidates_by_canonical_fixture_id.get(canonical_fixture_id, [])
@@ -1951,6 +1960,7 @@ class DashboardServices:
                 ],
             )
             dispositions = [] if not candidates else list(select_fixture_portfolio(candidates, policy=policy).dispositions)
+            latest_row = latest_evaluation_by_canonical_fixture_id.get(canonical_fixture_id)
             football_portfolio_selection.record_portfolio_evaluation(
                 conn,
                 policy=policy,
@@ -1960,6 +1970,8 @@ class DashboardServices:
                 evaluation_signature=evaluation_signature,
                 dispositions=dispositions,
                 initialize_schema=self._read_requires_schema_init(),
+                latest_evaluation_id=None if latest_row is None else str(latest_row["evaluation_id"]),
+                latest_evaluation_signature=None if latest_row is None else str(latest_row["evaluation_signature"]),
             )
 
     def _sync_portfolio_selection_for_prediction(
