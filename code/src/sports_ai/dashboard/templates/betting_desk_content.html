@@ -1,16 +1,20 @@
+{% from "_ui.html" import status_badge %}
 <section class="page-heading edge-desk-heading">
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · Betting Desk</p>
     <h1>Betting Desk</h1>
-    <p class="subhead desk-page-subhead">Current modeled markets with a clear split between model view and desk decision.</p>
+    <p class="subhead desk-page-subhead">Current modeled markets with the decision path kept clear: market, price, model edge, then BET or NO BET.</p>
   </div>
-  <a class="refresh-button" href="/">Back to today</a>
+  <div class="page-actions">
+    <a class="refresh-button" href="/">Back to today</a>
+    <a class="filter-button" href="/matches?status_bucket=upcoming">Upcoming matches</a>
+  </div>
 </section>
 
 <section class="desk-kpi-strip">
   <article class="desk-kpi"><div class="desk-kpi-label">Rows</div><div class="desk-kpi-value">{{ payload.summary.rows }}</div><div class="desk-kpi-note">current pre-match desk</div></article>
-  <article class="desk-kpi"><div class="desk-kpi-label">BET</div><div class="desk-kpi-value">{{ payload.summary.bets }}</div><div class="desk-kpi-note">actionable picks</div></article>
-  <article class="desk-kpi"><div class="desk-kpi-label">NO BET</div><div class="desk-kpi-value">{{ payload.summary.no_bets }}</div><div class="desk-kpi-note">retained rejections</div></article>
+  <article class="desk-kpi"><div class="desk-kpi-label">BET</div><div class="desk-kpi-value">{{ payload.summary.bets }}</div><div class="desk-kpi-note">actionable now</div></article>
+  <article class="desk-kpi"><div class="desk-kpi-label">NO BET</div><div class="desk-kpi-value">{{ payload.summary.no_bets }}</div><div class="desk-kpi-note">tracked rejections</div></article>
   <article class="desk-kpi"><div class="desk-kpi-label">Blocked</div><div class="desk-kpi-value">{{ payload.summary.blocked }}</div><div class="desk-kpi-note">provider or rule issues</div></article>
 </section>
 
@@ -18,59 +22,98 @@
   <div class="desk-panel-head">
     <div>
       <span class="desk-panel-title">Current Desk</span>
-      <span class="desk-panel-note">Prediction does not equal bet</span>
+      <span class="desk-panel-note">Desktop keeps analyst density; mobile reduces rows into readable cards</span>
     </div>
     <span class="desk-panel-meta">{{ payload.system_status.odds_feed.provider }}</span>
   </div>
+
   {% if payload.rows %}
-    <div class="desk-table-wrap">
-      <table class="desk-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Fixture</th>
-            <th>Market</th>
-            <th class="num">Model %</th>
-            <th class="num">Fair Odds</th>
-            <th>Reference</th>
-            <th class="num">Min Odds</th>
-            <th>Best Offer</th>
-            <th class="num">Implied %</th>
-            <th class="num">EV / 1u</th>
-            <th>Freshness</th>
-            <th>Safeguard</th>
-            <th>Desk Decision</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in payload.rows %}
-            <tr class="{% if row.decision_group == 'bet' %}desk-row-featured{% else %}desk-row-dim{% endif %}">
-              <td class="desk-time">{{ row.kickoff_time_local }}</td>
-              <td class="desk-match-cell">
-                <a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
-                <span class="desk-cell-sub">{{ row.competition_name }}</span>
-              </td>
-              <td class="desk-market-cell">
-                <b>{{ row.bet_label }}</b>
-                <span class="desk-cell-sub">{{ row.market_label }}</span>
-              </td>
-              <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
-              <td class="num">{{ "{:.2f}".format(row.fair_odds|float) if row.fair_odds is not none else "N/A" }}</td>
-              <td>{{ row.reference_bookmaker or "N/A" }}<div class="row-sub">{{ row.reference_source or "reference book" }}</div></td>
-              <td class="num">{{ "{:.2f}".format(row.minimum_acceptable_odds|float) if row.minimum_acceptable_odds is not none else "N/A" }}</td>
-              <td>{{ row.best_offer_bookmaker or "N/A" }}{% if row.best_offer_odds is not none %}<div class="row-sub">@ {{ "{:.2f}".format(row.best_offer_odds|float) }}</div>{% endif %}</td>
-              <td class="num">{{ "{:.1%}".format(row.implied_probability|float) if row.implied_probability is not none else "N/A" }}</td>
-              <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">{{ "{:+.2%}".format(row.edge|float) if row.edge is not none else "N/A" }}</td>
-              <td>{{ row.freshness }}</td>
-              <td>{{ row.safeguard }}</td>
-              <td class="desk-decision-cell">
-                <span class="desk-pill {% if row.decision_group == 'bet' %}desk-pill-bet{% elif row.decision_group == 'no_bet' %}desk-pill-nobet{% else %}desk-pill-final{% endif %}">{{ row.desk_decision }}</span>
-                <small>{{ row.reason }}</small>
-              </td>
+    <div class="desktop-table">
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Fixture</th>
+              <th>Market / Pick</th>
+              <th>Best Offer</th>
+              <th class="num">Model %</th>
+              <th class="num">Implied %</th>
+              <th class="num">EV / 1u</th>
+              <th class="num">Fair Odds</th>
+              <th class="num">Min Odds</th>
+              <th>Reference</th>
+              <th>Freshness</th>
+              <th>Safeguard</th>
+              <th>Desk Decision</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in payload.rows %}
+              <tr class="{% if row.decision_group == 'bet' %}desk-row-featured{% else %}desk-row-dim{% endif %}">
+                <td class="desk-time">{{ row.kickoff_time_local }}</td>
+                <td class="desk-match-cell">
+                  <a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+                  <span class="desk-cell-sub">{{ row.competition_name }}</span>
+                </td>
+                <td class="desk-market-cell">
+                  <b>{{ row.bet_label }}</b>
+                  <span class="desk-cell-sub">{{ row.market_label }}</span>
+                </td>
+                <td>
+                  <strong>{{ row.best_offer_bookmaker or "N/A" }}</strong>
+                  <div class="row-sub">{% if row.best_offer_odds is not none %}@ {{ "{:.2f}".format(row.best_offer_odds|float) }}{% else %}Price unavailable{% endif %}</div>
+                </td>
+                <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
+                <td class="num">{{ "{:.1%}".format(row.implied_probability|float) if row.implied_probability is not none else "N/A" }}</td>
+                <td class="num {% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">{{ "{:+.2%}".format(row.edge|float) if row.edge is not none else "N/A" }}</td>
+                <td class="num">{{ "{:.2f}".format(row.fair_odds|float) if row.fair_odds is not none else "N/A" }}</td>
+                <td class="num">{{ "{:.2f}".format(row.minimum_acceptable_odds|float) if row.minimum_acceptable_odds is not none else "N/A" }}</td>
+                <td>{{ row.reference_bookmaker or "N/A" }}<div class="row-sub">{{ row.reference_source or "Reference book" }}</div></td>
+                <td>{{ row.freshness }}</td>
+                <td>{{ row.safeguard }}</td>
+                <td class="desk-decision-cell">
+                  <span class="desk-pill {% if row.decision_group == 'bet' %}desk-pill-bet{% elif row.decision_group == 'no_bet' %}desk-pill-nobet{% else %}desk-pill-final{% endif %}">{{ row.desk_decision }}</span>
+                  <small>{{ row.reason }}</small>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mobile-card-list">
+      {% for row in payload.rows %}
+        <article class="mobile-data-card {% if row.decision_group == 'bet' %}mobile-data-card--bet{% endif %}">
+          <div class="mobile-data-card__header">
+            <div>
+              <p class="mobile-data-card__kicker">{{ row.kickoff_time_local }} · {{ row.competition_name }}</p>
+              <a class="mobile-data-card__title" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+            </div>
+            <span class="desk-pill {% if row.decision_group == 'bet' %}desk-pill-bet{% elif row.decision_group == 'no_bet' %}desk-pill-nobet{% else %}desk-pill-final{% endif %}">{{ row.desk_decision }}</span>
+          </div>
+          <div class="mobile-data-card__grid">
+            <div><span>Pick</span><strong>{{ row.bet_label }}</strong></div>
+            <div><span>Market</span><strong>{{ row.market_label }}</strong></div>
+            <div><span>Best Odds</span><strong>{% if row.best_offer_odds is not none %}{{ "{:.2f}".format(row.best_offer_odds|float) }}{% else %}N/A{% endif %}</strong></div>
+            <div><span>Bookmaker</span><strong>{{ row.best_offer_bookmaker or "N/A" }}</strong></div>
+            <div><span>Model %</span><strong>{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</strong></div>
+            <div><span>Implied %</span><strong>{{ "{:.1%}".format(row.implied_probability|float) if row.implied_probability is not none else "N/A" }}</strong></div>
+            <div><span>EV / 1u</span><strong class="{% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">{{ "{:+.2%}".format(row.edge|float) if row.edge is not none else "N/A" }}</strong></div>
+            <div><span>Fair Odds</span><strong>{{ "{:.2f}".format(row.fair_odds|float) if row.fair_odds is not none else "N/A" }}</strong></div>
+            <div><span>Min Odds</span><strong>{{ "{:.2f}".format(row.minimum_acceptable_odds|float) if row.minimum_acceptable_odds is not none else "N/A" }}</strong></div>
+            <div><span>Freshness</span><strong>{{ row.freshness }}</strong></div>
+            <div><span>Safeguard</span><strong>{{ row.safeguard }}</strong></div>
+            <div><span>Reference</span><strong>{{ row.reference_bookmaker or "N/A" }}</strong></div>
+          </div>
+          <p class="mobile-data-card__note">{{ row.reason }}</p>
+          <div class="mobile-data-card__footer">
+            <span>{{ row.reference_source or "Reference book" }}</span>
+            <a class="table-link" href="/pick-detail/{{ row.fixture_id }}">Open match</a>
+          </div>
+        </article>
+      {% endfor %}
     </div>
   {% else %}
     <article class="empty-state desk-empty-state">

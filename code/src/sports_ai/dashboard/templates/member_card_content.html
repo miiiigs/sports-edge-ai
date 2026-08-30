@@ -1,45 +1,66 @@
 <section class="page-heading edge-desk-heading">
   <div>
-    <p class="eyebrow desk-page-kicker">Edge Desk · Member Card</p>
-    <h1>Member Card</h1>
-    <p class="subhead desk-page-subhead">Simplified published-pick preview without provider diagnostics or desk mechanics.</p>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Published Picks</p>
+    <h1>Published Picks</h1>
+    <p class="subhead desk-page-subhead">A simplified client view of the published card without the full desk mechanics.</p>
   </div>
 </section>
 
 <section class="section-block desk-panel">
   <div class="desk-panel-head">
     <div>
-      <span class="desk-panel-title">Published Picks</span>
+      <span class="desk-panel-title">Published Card</span>
       <span class="desk-panel-note">Read-only preview</span>
     </div>
     <span class="desk-panel-meta">{{ payload.publish_state }}</span>
   </div>
   {% if payload.rows %}
-    <div class="desk-table-wrap">
-      <table class="desk-table">
-        <thead>
-          <tr>
-            <th>Match</th>
-            <th>Pick</th>
-            <th class="num">Model %</th>
-            <th class="num">Entry Odds</th>
-            <th>Confidence</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in payload.rows %}
+    <div class="desktop-table">
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead>
             <tr>
-              <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.match }}</a></td>
-              <td>{{ row.pick }}</td>
-              <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
-              <td class="num">{{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else "N/A" }}</td>
-              <td>{{ row.confidence_label }}</td>
-              <td><span class="desk-pill desk-pill-pending">{{ row.status }}</span></td>
+              <th>Match</th>
+              <th>Pick</th>
+              <th class="num">Model %</th>
+              <th class="num">Entry Odds</th>
+              <th>Confidence</th>
+              <th>Status</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in payload.rows %}
+              <tr>
+                <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.match }}</a></td>
+                <td>{{ row.pick }}</td>
+                <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
+                <td class="num">{{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else "N/A" }}</td>
+                <td>{{ row.confidence_label }}</td>
+                <td><span class="desk-pill desk-pill-pending">{{ row.status }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mobile-card-list">
+      {% for row in payload.rows %}
+        <article class="mobile-data-card">
+          <div class="mobile-data-card__header">
+            <div>
+              <p class="mobile-data-card__kicker">Published Pick</p>
+              <a class="mobile-data-card__title" href="/pick-detail/{{ row.fixture_id }}">{{ row.match }}</a>
+            </div>
+            <span class="desk-pill desk-pill-pending">{{ row.status }}</span>
+          </div>
+          <div class="mobile-data-card__grid">
+            <div><span>Pick</span><strong>{{ row.pick }}</strong></div>
+            <div><span>Confidence</span><strong>{{ row.confidence_label }}</strong></div>
+            <div><span>Model %</span><strong>{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</strong></div>
+            <div><span>Entry Odds</span><strong>{{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else "N/A" }}</strong></div>
+          </div>
+        </article>
+      {% endfor %}
     </div>
   {% else %}
     <article class="empty-state desk-empty-state">

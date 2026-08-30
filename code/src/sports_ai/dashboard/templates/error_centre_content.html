@@ -20,9 +20,9 @@
     {% else %}
       <article class="empty-state desk-empty-state"><strong>No active provider warning signals.</strong></article>
     {% endif %}
-    <div class="desk-context-list">
+    <div class="data-list">
       {% for label, value in payload.blocking_reasons.items() %}
-        <div><span>{{ label }}</span><b>{{ value }}</b></div>
+        <div><span>{{ label }}</span><strong>{{ value }}</strong></div>
       {% endfor %}
     </div>
   </section>
@@ -51,21 +51,38 @@
     </div>
   </div>
   {% if payload.provider_issue_rows %}
-    <div class="desk-table-wrap">
-      <table class="desk-table">
-        <thead><tr><th>Fixture</th><th>Market</th><th class="num">Model %</th><th>Desk Decision</th><th>Reason</th></tr></thead>
-        <tbody>
-          {% for row in payload.provider_issue_rows %}
-            <tr class="desk-row-dim">
-              <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
-              <td>{{ row.bet_label }}</td>
-              <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
-              <td><span class="desk-pill desk-pill-final">{{ row.desk_decision }}</span></td>
-              <td>{{ row.reason }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="desktop-table">
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead><tr><th>Fixture</th><th>Market</th><th class="num">Model %</th><th>Desk Decision</th><th>Reason</th></tr></thead>
+          <tbody>
+            {% for row in payload.provider_issue_rows %}
+              <tr class="desk-row-dim">
+                <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
+                <td>{{ row.bet_label }}</td>
+                <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
+                <td><span class="desk-pill desk-pill-final">{{ row.desk_decision }}</span></td>
+                <td>{{ row.reason }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mobile-card-list">
+      {% for row in payload.provider_issue_rows %}
+        <article class="mobile-data-card">
+          <div class="mobile-data-card__header">
+            <div><p class="mobile-data-card__kicker">Provider Blocker</p><a class="mobile-data-card__title" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></div>
+            <span class="desk-pill desk-pill-final">{{ row.desk_decision }}</span>
+          </div>
+          <div class="mobile-data-card__grid">
+            <div><span>Market</span><strong>{{ row.bet_label }}</strong></div>
+            <div><span>Model %</span><strong>{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</strong></div>
+            <div><span>Reason</span><strong>{{ row.reason }}</strong></div>
+          </div>
+        </article>
+      {% endfor %}
     </div>
   {% else %}
     <article class="empty-state desk-empty-state"><strong>No provider-blocked rows are currently staged.</strong></article>

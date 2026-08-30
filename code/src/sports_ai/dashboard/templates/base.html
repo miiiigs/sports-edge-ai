@@ -6,7 +6,7 @@
 {% elif page == 'betting_desk' or page == 'candidates' %}
   {% set page_label = 'Betting Desk' %}
 {% elif page == 'member_card' %}
-  {% set page_label = 'Member Card' %}
+  {% set page_label = 'Published Picks' %}
 {% elif page == 'performance' %}
   {% set page_label = 'Model Performance' %}
 {% elif page == 'segment_explorer' %}
@@ -16,13 +16,13 @@
 {% elif page == 'no_bet_archive' %}
   {% set page_label = 'No-Bet Archive' %}
 {% elif page == 'pick_detail' or page == 'match_detail' %}
-  {% set page_label = 'Pick Detail' %}
+  {% set page_label = 'Match Detail' %}
 {% elif page == 'reports' %}
   {% set page_label = 'Reports' %}
 {% elif page == 'status' %}
-  {% set page_label = 'Internal / System Status' %}
+  {% set page_label = 'System Status' %}
 {% elif page == 'matches' %}
-  {% set page_label = 'Fixture Board' %}
+  {% set page_label = 'Matches' %}
 {% elif page == 'predictions' %}
   {% set page_label = 'Predictions' %}
 {% else %}
@@ -33,116 +33,129 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sports Edge AI Football Dashboard</title>
+  <title>{{ page_label }} · Sports Edge AI Football</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Oswald:wght@400;500;600&family=Source+Sans+3:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Oswald:wght@400;500;600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='dashboard.css') }}">
 </head>
-<body>
+<body data-page="{{ page }}">
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand-block">
-        <div class="brand">
-          <span class="brand-mark">ED</span>
-          <span class="brand-lockup">
-            <strong>EDGE DESK</strong>
-            <small>Sports Edge Football</small>
-          </span>
+    <div class="sidebar-scrim" data-sidebar-close></div>
+    <aside class="sidebar" id="site-sidebar">
+      <div class="sidebar-header">
+        <div class="brand-block">
+          <a class="brand" href="/">
+            <span class="brand-mark">ED</span>
+            <span class="brand-lockup">
+              <strong>EDGE DESK</strong>
+              <small>Sports Edge AI Football</small>
+            </span>
+          </a>
+        </div>
+
+        <div class="workspace">
+          <div class="workspace-main">
+            <span class="avatar">FB</span>
+            <span>
+              <span class="workspace-kicker">Workspace</span>
+              <b>Football Analysis</b>
+              <small>Live model and market desk</small>
+            </span>
+          </div>
+          <span class="workspace-caret {% if fixture_feed_ready %}workspace-caret-live{% endif %}" aria-hidden="true"></span>
         </div>
       </div>
 
-      <div class="workspace">
-        <div class="workspace-main">
-          <span class="avatar">FB</span>
-          <span>
-            <span class="workspace-kicker">Workspace</span>
-            <b>Football analyst desk</b>
-            <small>Route B active · Route A rejected · Agent 3 pending</small>
-          </span>
+      <nav class="sidebar-nav" aria-label="Primary navigation">
+        <div class="nav-section">
+          <p class="eyebrow">Client Workspace</p>
+          <a href="/" class="nav-item {% if page == 'today' or page == 'dashboard' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Today</span>
+              <small class="nav-caption">Today's matches, live desk, and key bets</small>
+            </span>
+            {% if page == 'today' or page == 'dashboard' %}<i class="status-dot"></i>{% endif %}
+          </a>
+          <a href="/matches" class="nav-item {% if page == 'matches' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Matches</span>
+              <small class="nav-caption">Today's and upcoming fixtures</small>
+            </span>
+            {% if page == 'matches' %}<i class="status-dot"></i>{% endif %}
+          </a>
+          <a href="/betting-desk" class="nav-item {% if page == 'betting_desk' or page == 'candidates' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Betting Desk</span>
+              <small class="nav-caption">Current BET and NO BET decisions</small>
+            </span>
+            {% if payload.system_status.current_fixture_state.live_count > 0 %}<i class="status-dot status-dot-live"></i>{% endif %}
+          </a>
+          <a href="/model-performance" class="nav-item {% if page == 'performance' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Model Performance</span>
+              <small class="nav-caption">Settled results, ROI, and breakdowns</small>
+            </span>
+          </a>
+          <a href="/reports" class="nav-item {% if page == 'reports' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Reports</span>
+              <small class="nav-caption">Windowed paper performance summaries</small>
+            </span>
+          </a>
         </div>
-        <span class="workspace-caret {% if fixture_feed_ready %}workspace-caret-live{% endif %}"></span>
-      </div>
 
-      <nav aria-label="Primary navigation">
-        <p class="eyebrow">Board</p>
-        <a href="/" class="nav-item {% if page == 'today' or page == 'dashboard' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Today</span>
-            <small class="nav-caption">KPI strip, best picks, and health</small>
-          </span>
-          {% if page == 'today' or page == 'dashboard' %}<i class="status-dot"></i>{% endif %}
-        </a>
-        <a href="/betting-desk" class="nav-item {% if page == 'betting_desk' or page == 'candidates' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Betting Desk</span>
-            <small class="nav-caption">Model view and desk decision</small>
-          </span>
-          {% if payload.system_status.fixture_feed.counts.live > 0 %}<i class="status-dot status-dot-live"></i>{% endif %}
-        </a>
-        <a href="/member-card" class="nav-item {% if page == 'member_card' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Member Card</span>
-            <small class="nav-caption">Simplified published picks view</small>
-          </span>
-        </a>
-        <a href="/model-performance" class="nav-item {% if page == 'performance' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Model Performance</span>
-            <small class="nav-caption">Route B live paper evidence</small>
-          </span>
-        </a>
-        <a href="/segment-explorer" class="nav-item {% if page == 'segment_explorer' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Segment Explorer</span>
-            <small class="nav-caption">League, market, and model cuts</small>
-          </span>
-        </a>
-        <a href="/error-centre" class="nav-item {% if page == 'error_centre' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Error Centre</span>
-            <small class="nav-caption">Provider issues vs model outcomes</small>
-          </span>
-        </a>
-        <a href="/no-bet-archive" class="nav-item {% if page == 'no_bet_archive' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">No-Bet Archive</span>
-            <small class="nav-caption">Retained rejected predictions</small>
-          </span>
-        </a>
-        <a href="/reports" class="nav-item {% if page == 'reports' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Reports</span>
-            <small class="nav-caption">Windowed paper performance</small>
-          </span>
-        </a>
+        <div class="nav-section">
+          <p class="eyebrow">Analysis</p>
+          <a href="/member-card" class="nav-item {% if page == 'member_card' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Published Picks</span>
+              <small class="nav-caption">Simplified published pick view</small>
+            </span>
+          </a>
+          <a href="/segment-explorer" class="nav-item {% if page == 'segment_explorer' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Segment Explorer</span>
+              <small class="nav-caption">Market and league performance cuts</small>
+            </span>
+          </a>
+          <a href="/no-bet-archive" class="nav-item {% if page == 'no_bet_archive' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">No-Bet Archive</span>
+              <small class="nav-caption">Rejected and blocked desk history</small>
+            </span>
+          </a>
+        </div>
 
-        <p class="eyebrow nav-gap">Operations</p>
-        <a href="/status" class="nav-item {% if page == 'status' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Internal / System Status</span>
-            <small class="nav-caption">Runtime health and raw diagnostics</small>
-          </span>
-        </a>
-        <a href="/matches" class="nav-item {% if page == 'matches' %}nav-active{% endif %}">
-          <span class="nav-copy">
-            <span class="nav-label">Fixture Board</span>
-            <small class="nav-caption">Legacy fixture monitor and drill-down</small>
-          </span>
-        </a>
+        <div class="nav-section">
+          <p class="eyebrow">Internal</p>
+          <a href="/error-centre" class="nav-item {% if page == 'error_centre' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">Error Centre</span>
+              <small class="nav-caption">Provider blockers and operational warnings</small>
+            </span>
+          </a>
+          <a href="/status" class="nav-item {% if page == 'status' %}nav-active{% endif %}">
+            <span class="nav-copy">
+              <span class="nav-label">System Status</span>
+              <small class="nav-caption">Runtime, quota, and raw diagnostics</small>
+            </span>
+          </a>
+        </div>
       </nav>
 
       <div class="sidebar-bottom">
         <div class="pro-card">
-          <div>
+          <div class="pro-card-meta">
             <span class="pulse-line {% if fixture_feed_ready %}{% else %}pulse-line-warning{% endif %}"></span>
-            <small>Runtime Snapshot</small>
+            <small>Live Workspace</small>
           </div>
           <strong>{{ payload.system_status.prediction_engine.state }}</strong>
-          <span class="pro-version">
-            {{ payload.system_status.current_model_snapshot.snapshot_id or 'snapshot unavailable' }}
-          </span>
-          <p class="sidebar-note">Fixtures {{ payload.system_status.fixture_feed.state }} · Market {{ payload.system_status.odds_feed.state if market_feed_ready else 'LIMITED' }}</p>
+          <span class="pro-version">{{ payload.system_status.current_model_snapshot.snapshot_id or 'snapshot unavailable' }}</span>
+          <p class="sidebar-note">
+            Fixtures {{ payload.system_status.fixture_feed.state }} ·
+            Market {{ payload.system_status.odds_feed.state if market_feed_ready else 'LIMITED' }}
+          </p>
         </div>
       </div>
     </aside>
@@ -150,10 +163,24 @@
     <section class="content-shell">
       <header class="topbar">
         <div class="topbar-context">
-          <div class="crumb">
-            <span>Edge Desk</span>
-            <span>/</span>
-            <b>{{ page_label }}</b>
+          <div class="topbar-brandline">
+            <button
+              class="sidebar-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="site-sidebar"
+              data-sidebar-toggle
+            >
+              <span></span>
+              <span></span>
+              <span></span>
+              <b>Menu</b>
+            </button>
+            <div class="crumb">
+              <span>Edge Desk</span>
+              <span>/</span>
+              <b>{{ page_label }}</b>
+            </div>
           </div>
           <div class="topbar-meta">
             <span>{{ payload.system_status.current_time_local }}</span>
@@ -174,8 +201,8 @@
           <div class="profile-button">
             <span class="avatar avatar-small">SE</span>
             <span>
-              <b>Sports Edge</b>
-              <small>Football board</small>
+              <b>Sports Edge AI</b>
+              <small>Football desk</small>
             </span>
           </div>
         </div>

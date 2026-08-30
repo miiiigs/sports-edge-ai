@@ -2,7 +2,7 @@
   <div>
     <p class="eyebrow desk-page-kicker">Edge Desk · No-Bet Archive</p>
     <h1>No-Bet Archive</h1>
-    <p class="subhead desk-page-subhead">Rejected and blocked predictions remain visible instead of disappearing from the board.</p>
+    <p class="subhead desk-page-subhead">Rejected and blocked decisions remain visible with the reason kept readable.</p>
   </div>
 </section>
 
@@ -15,33 +15,54 @@
     <span class="desk-panel-meta">{{ payload.count }} ROWS</span>
   </div>
   {% if payload.rows %}
-    <div class="desk-table-wrap">
-      <table class="desk-table">
-        <thead>
-          <tr>
-            <th>Fixture</th>
-            <th>Market</th>
-            <th class="num">Model %</th>
-            <th class="num">Fair Odds</th>
-            <th class="num">Observed Price</th>
-            <th>Decision</th>
-            <th>Reason</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in payload.rows %}
-            <tr class="desk-row-dim">
-              <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
-              <td>{{ row.bet_label }}</td>
-              <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
-              <td class="num">{{ "{:.2f}".format(row.fair_odds|float) if row.fair_odds is not none else "N/A" }}</td>
-              <td class="num">{{ "{:.2f}".format(row.best_offer_odds|float) if row.best_offer_odds is not none else "N/A" }}</td>
-              <td><span class="desk-pill desk-pill-nobet">{{ row.desk_decision }}</span></td>
-              <td>{{ row.reason }}</td>
+    <div class="desktop-table">
+      <div class="desk-table-wrap">
+        <table class="desk-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Match</th>
+              <th>Market</th>
+              <th class="num">Model %</th>
+              <th class="num">Odds</th>
+              <th>Decision</th>
+              <th>Reason</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in payload.rows %}
+              <tr class="desk-row-dim">
+                <td class="desk-time">{{ row.kickoff_time_local }}</td>
+                <td><a class="desk-match-link" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a></td>
+                <td>{{ row.bet_label }}</td>
+                <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
+                <td class="num">{{ "{:.2f}".format(row.best_offer_odds|float) if row.best_offer_odds is not none else "N/A" }}</td>
+                <td><span class="desk-pill desk-pill-nobet">{{ row.desk_decision }}</span></td>
+                <td>{{ row.reason }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mobile-card-list">
+      {% for row in payload.rows %}
+        <article class="mobile-data-card">
+          <div class="mobile-data-card__header">
+            <div>
+              <p class="mobile-data-card__kicker">{{ row.kickoff_time_local }}</p>
+              <a class="mobile-data-card__title" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+            </div>
+            <span class="desk-pill desk-pill-nobet">{{ row.desk_decision }}</span>
+          </div>
+          <div class="mobile-data-card__grid">
+            <div><span>Market</span><strong>{{ row.bet_label }}</strong></div>
+            <div><span>Model %</span><strong>{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</strong></div>
+            <div><span>Odds</span><strong>{{ "{:.2f}".format(row.best_offer_odds|float) if row.best_offer_odds is not none else "N/A" }}</strong></div>
+            <div><span>Reason</span><strong>{{ row.reason }}</strong></div>
+          </div>
+        </article>
+      {% endfor %}
     </div>
   {% else %}
     <article class="empty-state desk-empty-state"><strong>No current no-bet rows are archived right now.</strong></article>
