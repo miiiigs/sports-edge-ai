@@ -101,6 +101,8 @@ SCHEMA_STATEMENTS = (
     """,
 )
 
+SQLITE_BUSY_TIMEOUT_MS = 5_000
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -133,8 +135,15 @@ def paper_trade_business_key_signature(
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.OperationalError:
+        # Brand-new concurrent connections can race while SQLite transitions
+        # the file into WAL mode. Falling back for that connection is safe.
+        pass
     return conn
 
 
