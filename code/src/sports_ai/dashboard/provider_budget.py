@@ -64,6 +64,7 @@ ACTION_BLOCKED_QUOTA = "QUOTA_GOVERNOR_BLOCKED"
 ACTION_BLOCKED_CIRCUIT = "CIRCUIT_BREAKER_BLOCKED"
 ACTION_BLOCKED_COALESCED = "COALESCED_MISS"
 ACTION_BLOCKED_RATE = "RATE_LIMIT_DEFERRED"
+ACTION_BLOCKED_RESET_PROBE = "RESET_PROBE_PENDING"
 
 # Quota governor thresholds (fraction of the daily allowance remaining)
 QUOTA_CONSERVE_THRESHOLD = 0.40
@@ -97,6 +98,12 @@ QUOTA_EXHAUSTED_FALLBACK_BLOCK_SECONDS = 24 * 60 * 60
 
 # How long an in-flight coalesced waiter waits before giving up.
 INFLIGHT_WAIT_TIMEOUT_SECONDS = 30.0
+
+# After the configured quota reset boundary, exactly one controlled request may
+# probe today's provider quota headers while every other application path is
+# deferred. This is the maximum age of an in-flight probe before another owner
+# is allowed to take over (guards against a probe that never completes).
+QUOTA_PROBE_TIMEOUT_SECONDS = 30.0
 
 # API-Football rate-limit response headers (verified against the live PRO
 # account on 2026-08-29): x-ratelimit-requests-limit/-remaining are the DAILY
@@ -395,6 +402,105 @@ class ProviderRequestBudget:
             reset_at += timedelta(days=1)
         return reset_at.isoformat(timespec="seconds")
 
+    # ------------------------------------------------------- quota-day transition
+    def _provider_allowance_known(self, snapshot: dict[str, Any]) -> bool:
+        """True when a provider-derived (or configured) daily allowance exists.
+
+        A snapshot with no captured ``daily_limit``/``daily_remaining`` and no
+        configured daily budget means the provider quota for the current day is
+        UNKNOWN: either the app just started with no state, or the previous
+        quota day's values were invalidated at the reset boundary. In both cases
+        one controlled request must probe today's headers.
+        """
+        return (
+            snapshot.get("daily_remaining") is not None
+            or snapshot.get("daily_limit") is not None
+            or self._daily_budget is not None
+        )
+
+    def _reopen_quota_exhausted_circuit(self) -> None:
+        """Reopen a QUOTA_EXHAUSTED circuit whose quota day has ended."""
+        row = self._circuit_row()
+        if row is None or row["current_state"] != CIRCUIT_QUOTA_EXHAUSTED:
+            return
+        now_iso = utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE provider_circuit_state
+                SET current_state = ?, failure_count = 0, blocked_until = NULL,
+                    last_error = NULL, updated_at = ?
+                WHERE provider = ?
+                """,
+                (CIRCUIT_CLOSED, now_iso, PROVIDER_API_FOOTBALL),
+            )
+
+    def _quota_day_reset_if_needed(self, snapshot: dict[str, Any]) -> None:
+        """Invalidate provider quota captured for a previous quota day.
+
+        When the configured UTC reset boundary has passed, the captured
+        provider daily/minute allowance values belong to the previous quota day
+        and must no longer govern today's requests. Clearing them transitions
+        the governor to UNKNOWN so one controlled request can probe today's
+        fresh provider headers. A QUOTA_EXHAUSTED circuit from the previous
+        quota day is reopened so the probe can reach the provider.
+
+        The operational counter resets at its own boundary independently, so a
+        past ``operational_reset_at`` resets usage even while the provider quota
+        for the current day is already known.
+        """
+        now_utc = datetime.now(timezone.utc)
+        provider_day_passed = False
+        reset_at = snapshot.get("quota_reset_at")
+        if reset_at:
+            try:
+                provider_day_passed = parse_iso_datetime(str(reset_at)) <= now_utc
+            except ValueError:
+                provider_day_passed = False
+        # The operational counter resets at the same UTC boundary.
+        self._operational_reset_if_needed(snapshot)
+        if not provider_day_passed:
+            return
+        for field in ("daily_limit", "daily_remaining", "minute_limit", "minute_remaining", "captured_at"):
+            snapshot.pop(field, None)
+        snapshot.pop("probe_started_at", None)
+        snapshot["quota_reset_at"] = self._compute_quota_reset_at(now_utc)
+        snapshot["reset_transition_at"] = utc_now_iso()
+        self._persist_quota(snapshot)
+        self._reopen_quota_exhausted_circuit()
+
+    def _needs_quota_probe(self) -> bool:
+        """True while the current day's provider allowance is UNKNOWN."""
+        return not self._provider_allowance_known(self._quota_snapshot())
+
+    def _probe_acquire(self, now_iso: str) -> bool:
+        """Claim the single in-flight post-reset quota probe slot.
+
+        Returns False when another request already owns the probe slot (and it
+        has not gone stale), so concurrent scheduler paths are deferred instead
+        of producing a post-reset request burst.
+        """
+        with self._lock:
+            snapshot = self._quota_snapshot()
+            started = snapshot.get("probe_started_at")
+            if started:
+                try:
+                    started_at = parse_iso_datetime(str(started))
+                except ValueError:
+                    started_at = None
+                if started_at and (datetime.now(timezone.utc) - started_at).total_seconds() < QUOTA_PROBE_TIMEOUT_SECONDS:
+                    return False
+            snapshot["probe_started_at"] = now_iso
+            self._persist_quota(snapshot)
+            return True
+
+    def _probe_release(self) -> None:
+        with self._lock:
+            snapshot = self._quota_snapshot()
+            if "probe_started_at" in snapshot:
+                snapshot.pop("probe_started_at", None)
+                self._persist_quota(snapshot)
+
     # ------------------------------------------------------- operational cap
     def _operational_reset_if_needed(self, snapshot: dict[str, Any]) -> None:
         """Reset the persistent operational counter at the configured UTC boundary.
@@ -422,7 +528,7 @@ class ProviderRequestBudget:
     def effective_remaining(self) -> int | None:
         """Effective usable daily quota = min(provider remaining, operational cap remaining)."""
         snapshot = self._quota_snapshot()
-        self._operational_reset_if_needed(snapshot)
+        self._quota_day_reset_if_needed(snapshot)
         provider_remaining = snapshot.get("daily_remaining")
         provider_limit = snapshot.get("daily_limit")
         if provider_remaining is None and provider_limit is None and self._daily_budget:
@@ -450,13 +556,18 @@ class ProviderRequestBudget:
     def quota_snapshot(self) -> dict[str, Any]:
         """Return a read-only snapshot of persisted quota + governor state."""
         snapshot = dict(self._quota_snapshot())
-        self._operational_reset_if_needed(snapshot)
+        self._quota_day_reset_if_needed(snapshot)
         snapshot["state"] = self.quota_state()
         return snapshot
 
     def quota_state(self) -> str:
         snapshot = self._quota_snapshot()
-        self._operational_reset_if_needed(snapshot)
+        self._quota_day_reset_if_needed(snapshot)
+        if not self._provider_allowance_known(snapshot):
+            # The current quota day's provider allowance has not been captured
+            # yet (fresh start or just past the reset boundary). Do not let a
+            # previous day's remaining count govern today's requests.
+            return QUOTA_UNKNOWN
         effective_remaining = self.effective_remaining()
         effective_limit = self._effective_quota_limit()
         if effective_remaining is None:
@@ -513,6 +624,7 @@ class ProviderRequestBudget:
         snapshot["captured_at"] = utc_now_iso()
         snapshot["quota_reset_at"] = self._compute_quota_reset_at(now_utc)
         snapshot["last_request_at"] = utc_now_iso()
+        snapshot.pop("probe_started_at", None)
         self._persist_quota(snapshot)
 
     # --------------------------------------------------------------- circuit
@@ -536,6 +648,22 @@ class ProviderRequestBudget:
         row = self._circuit_row()
         if row is None or row["current_state"] == CIRCUIT_CLOSED:
             return None
+        if row["current_state"] == CIRCUIT_QUOTA_EXHAUSTED:
+            # The quota reset boundary may have passed since the exhaustion was
+            # recorded. Invalidate the previous quota day and reopen the
+            # circuit so a fresh probe can reach the provider.
+            snapshot = self._quota_snapshot()
+            self._quota_day_reset_if_needed(snapshot)
+            refreshed = self._circuit_row() or {}
+            if refreshed.get("current_state") == CIRCUIT_CLOSED:
+                return None
+            remaining = snapshot.get("daily_remaining")
+            if remaining is not None and int(remaining) > 0:
+                # The persisted snapshot reports an available daily allowance,
+                # so this exhaustion lock belongs to a previous quota day (or a
+                # spurious post-reset failure). Do not keep it open.
+                self._reopen_quota_exhausted_circuit()
+                return None
         blocked_until = row["blocked_until"]
         if blocked_until:
             try:
@@ -787,6 +915,19 @@ class ProviderRequestBudget:
             )
 
         if self._inflight_begin(key):
+            if self._needs_quota_probe() and not self._probe_acquire(now_iso):
+                # Another application path owns the single post-reset probe.
+                # Defer instead of creating a request burst.
+                self._inflight_finish(key)
+                self._bump("requests_blocked_reset_probe")
+                return BudgetDecision(
+                    allow=False,
+                    action=ACTION_BLOCKED_RESET_PROBE,
+                    reason="quota reset probe already in flight (deferring until fresh provider headers captured)",
+                    quota_state=quota_state,
+                    request_key=key,
+                    provider=provider,
+                )
             self._bump("requests_inflight_owner")
             self._rate_record()
             return BudgetDecision(
@@ -846,6 +987,7 @@ class ProviderRequestBudget:
         self._record_request_result(success=True)
         self._bump("http_requests")
         self._inflight_finish(key)
+        self._probe_release()
 
     def finish_failure(
         self,
@@ -865,10 +1007,11 @@ class ProviderRequestBudget:
         self._record_request_result(success=False)
         self._bump("http_requests")
         self._inflight_finish(key)
+        self._probe_release()
 
     def _record_request_result(self, *, success: bool) -> None:
         snapshot = self._quota_snapshot()
-        self._operational_reset_if_needed(snapshot)
+        self._quota_day_reset_if_needed(snapshot)
         snapshot["last_request_at"] = utc_now_iso()
         if success:
             snapshot["last_success_at"] = utc_now_iso()
@@ -939,6 +1082,7 @@ class ProviderRequestBudget:
                 "minute_remaining": quota.get("minute_remaining"),
                 "captured_at": quota.get("captured_at"),
                 "quota_reset_at": quota.get("quota_reset_at"),
+                "reset_transition_at": quota.get("reset_transition_at"),
                 "last_request_at": quota.get("last_request_at"),
                 "last_success_at": quota.get("last_success_at"),
                 "requests_used": quota.get("requests_used"),
@@ -962,6 +1106,7 @@ class ProviderRequestBudget:
                 "requests_blocked_circuit": int(metrics.get("requests_blocked_circuit") or 0),
                 "requests_blocked_rate": int(metrics.get("requests_blocked_rate") or 0),
                 "requests_blocked_coalesced": int(metrics.get("requests_blocked_coalesced") or 0),
+                "requests_blocked_reset_probe": int(metrics.get("requests_blocked_reset_probe") or 0),
                 "requests_inflight_owner": int(metrics.get("requests_inflight_owner") or 0),
                 "requests_inflight_waiter": int(metrics.get("requests_inflight_waiter") or 0),
             },
