@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from sports_ai.dashboard.portfolio_selection import (
     PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT,
     PORTFOLIO_STATE_NOT_SELECTED_MARKET_FAMILY_LIMIT,
@@ -702,3 +704,77 @@ def test_current_evaluation_prefers_later_evaluated_at_over_snapshot_metadata(tm
     assert current_evaluations[0]["evaluated_at"] == "2026-08-31T12:30:00+00:00"
     assert current_evaluations[0]["candidate_snapshot_at"] == "2026-08-31T10:00:00+00:00"
     assert current_rows == []
+
+
+def test_portfolio_storage_operates_after_explicit_boundary_init_without_reinitializing(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_boundary.sqlite"
+    policy = _policy()
+    candidates = [
+        _candidate("paper_boundary", market="1x2", selection="HOME", line=None, edge=0.08),
+    ]
+
+    with connect(db_path) as conn:
+        football_portfolio_selection.ensure_schema(conn)
+        result = select_fixture_portfolio(candidates, policy=policy)
+        signature = football_portfolio_selection.portfolio_evaluation_signature(
+            policy=policy,
+            canonical_fixture_id="cf_boundary",
+            candidates=_candidate_payloads(candidates),
+        )
+        write = football_portfolio_selection.record_portfolio_evaluation(
+            conn,
+            policy=policy,
+            canonical_fixture_id="cf_boundary",
+            evaluated_at="2026-08-31T10:00:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:55:00+00:00",
+            evaluation_signature=signature,
+            dispositions=list(result.dispositions),
+            initialize_schema=False,
+        )
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+            initialize_schema=False,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+            initialize_schema=False,
+        )
+
+    assert write.inserted is True
+    assert len(current_evaluations) == 1
+    assert len(current_rows) == 1
+    assert current_rows[0]["paper_trade_id"] == "paper_boundary"
+
+
+def test_portfolio_reads_fail_clearly_without_boundary_init(tmp_path) -> None:
+    db_path = tmp_path / "portfolio_uninitialized.sqlite"
+    policy = _policy()
+
+    with connect(db_path) as conn:
+        try:
+            football_portfolio_selection.fetch_current_portfolio_evaluations(
+                conn,
+                policy_id=policy.policy_id,
+                policy_version=policy.policy_version,
+                initialize_schema=False,
+            )
+        except sqlite3.OperationalError:
+            pass
+        else:
+            raise AssertionError("expected fetch_current_portfolio_evaluations to fail without explicit initialization")
+
+        try:
+            football_portfolio_selection.fetch_current_portfolio_selections(
+                conn,
+                policy_id=policy.policy_id,
+                policy_version=policy.policy_version,
+                initialize_schema=False,
+            )
+        except sqlite3.OperationalError:
+            pass
+        else:
+            raise AssertionError("expected fetch_current_portfolio_selections to fail without explicit initialization")

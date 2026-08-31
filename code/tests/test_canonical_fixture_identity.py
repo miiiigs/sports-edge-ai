@@ -812,3 +812,39 @@ def test_original_paper_facts_remain_unchanged_after_apply(tmp_path):
     assert by_id[e1.paper_trade_id]["trade_state"] == "LOST"
     assert by_id[e2.paper_trade_id]["bookmaker"] == "Bet365"
     assert by_id[e2.paper_trade_id]["provider"] == "api-football"
+
+
+def test_canonical_hot_path_operations_work_after_explicit_boundary_init(tmp_path):
+    _, conn = _paper_db(tmp_path)
+    identity = _identity(FD_SUNDERLAND)
+
+    canonical_fixture_id, status = cf.resolve_or_create_canonical_fixture(
+        conn,
+        provider="football-data.org",
+        provider_fixture_id="560554",
+        competition_id=identity["competition_id"],
+        home_team_name=identity["home_team_name"],
+        away_team_name=identity["away_team_name"],
+        kickoff_utc=identity["kickoff_utc"],
+        season=identity["season"],
+        initialize_schema=False,
+    )
+    by_fixture_id = cf.fetch_canonical_fixture_ids_for_fixture_ids(
+        conn,
+        [FD_SUNDERLAND],
+        initialize_schema=False,
+    )
+    excluded = cf.fetch_excluded_paper_trade_ids(conn, initialize_schema=False)
+
+    assert status in {"created", "matched", "aliased"}
+    assert by_fixture_id[FD_SUNDERLAND] == canonical_fixture_id
+    assert excluded == set()
+
+
+def test_canonical_hot_path_reads_fail_clearly_without_boundary_init(tmp_path):
+    db_path = tmp_path / "paper.sqlite"
+    with pt.connect(db_path) as conn:
+        with pytest.raises(sqlite3.OperationalError):
+            cf.fetch_excluded_paper_trade_ids(conn, initialize_schema=False)
+        with pytest.raises(sqlite3.OperationalError):
+            cf.fetch_canonical_fixture_ids_for_fixture_ids(conn, [FD_SUNDERLAND], initialize_schema=False)

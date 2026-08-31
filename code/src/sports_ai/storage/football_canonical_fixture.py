@@ -238,6 +238,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_schema_if_requested(conn: sqlite3.Connection, *, initialize_schema: bool) -> None:
+    if initialize_schema:
+        ensure_schema(conn)
+
+
 def split_provider_fixture_id(fixture_id: str) -> tuple[str, str]:
     provider, _, rest = str(fixture_id).partition(":")
     return provider or "", rest
@@ -289,6 +294,7 @@ def resolve_or_create_canonical_fixture(
     kickoff_utc: str,
     season: str | None = None,
     kickoff_tolerance_seconds: int = DEFAULT_KICKOFF_TOLERANCE_SECONDS,
+    initialize_schema: bool = True,
 ) -> tuple[str, str]:
     """Resolve a provider fixture to its canonical fixture, registering aliases.
 
@@ -297,7 +303,7 @@ def resolve_or_create_canonical_fixture(
     :class:`CanonicalFixtureAmbiguityError` when the identity matches more than
     one existing canonical fixture (fail closed; never auto-merge).
     """
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     now_iso = _utc_now()
     normalized_home = canonical_team_name(home_team_name)
     normalized_away = canonical_team_name(away_team_name)
@@ -388,14 +394,17 @@ def resolve_or_create_canonical_fixture(
 
 def fetch_excluded_paper_trade_ids(conn: sqlite3.Connection, *, initialize_schema: bool = True) -> set[str]:
     """Paper trade IDs marked as duplicate representations (excluded from counts)."""
-    if initialize_schema:
-        ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     rows = conn.execute("SELECT duplicate_paper_trade_id FROM paper_position_reconciliations").fetchall()
     return {str(row["duplicate_paper_trade_id"]) for row in rows}
 
 
-def fetch_reconciliation_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    ensure_schema(conn)
+def fetch_reconciliation_rows(
+    conn: sqlite3.Connection,
+    *,
+    initialize_schema: bool = True,
+) -> list[dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     rows = conn.execute(
         """
         SELECT reconciliation_id, duplicate_paper_trade_id, canonical_paper_trade_id, reason,
@@ -419,6 +428,7 @@ def record_reconciliation(
     canonical_fixture_id: str,
     reason: str = REASON_CROSS_PROVIDER_DUPLICATE,
     version: str = CANONICAL_RECONCILIATION_VERSION,
+    initialize_schema: bool = True,
 ) -> None:
     """Additively mark a duplicate representation.
 
@@ -431,7 +441,7 @@ def record_reconciliation(
 
     One canonical position may have any number of duplicate representations.
     """
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     existing = conn.execute(
         "SELECT canonical_paper_trade_id FROM paper_position_reconciliations WHERE duplicate_paper_trade_id = ?",
         (duplicate_paper_trade_id,),
@@ -458,12 +468,14 @@ def record_reconciliation(
 def find_counted_paper_trade_by_canonical_key(
     conn: sqlite3.Connection,
     canonical_business_key_signature: str,
+    *,
+    initialize_schema: bool = True,
 ) -> dict[str, Any] | None:
     """Find an existing COUNTED paper position for a canonical business key.
 
     Excluded (reconciled duplicate) positions never block a new capture.
     """
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT paper_trade_id

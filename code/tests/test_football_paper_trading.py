@@ -631,6 +631,82 @@ def test_market_snapshot_preserves_update_change(tmp_path):
     assert len(snapshots) == 2
 
 
+def test_explicit_schema_boundary_allows_hot_path_operations_without_reinitializing(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    with connect(db_path) as conn:
+        ensure_schema(conn)
+        snapshot_id = record_market_snapshot(
+            conn,
+            StoredMarketSnapshot(
+                fixture_id="evt_fixture_boundary",
+                provider="mock-provider",
+                bookmaker="Book A",
+                market="1x2",
+                selection="HOME",
+                odds=2.05,
+                ingestion_version="v1",
+                provider_market_id="mkt_boundary",
+                provider_timestamp="2026-08-20T09:00:00+00:00",
+            ),
+            initialize_schema=False,
+        )
+        paper_trade_id = record_paper_trade_entry(
+            conn,
+            PaperTradeEntry(
+                prediction_id="pred_boundary",
+                fixture_id="evt_fixture_boundary",
+                model_snapshot_id="snapshot_boundary",
+                model_version="football_day11_manager_core_v1",
+                market="1x2",
+                selection="HOME",
+                line=None,
+                model_probability=0.55,
+                model_fair_price=1.82,
+                available_market_price=2.05,
+                edge=0.06,
+                minimum_acceptable_price=1.95,
+                decision="PAPER_CANDIDATE",
+                decision_timestamp="2026-08-20T09:00:00+00:00",
+                kickoff="2026-08-20T12:00:00+00:00",
+                safeguard_state="PASSED",
+                entry_eligibility="ELIGIBLE",
+                bookmaker="Book A",
+                provider="mock-provider",
+                entry_odds=2.05,
+                entry_captured_at="2026-08-20T09:00:00+00:00",
+                entry_snapshot_id=snapshot_id,
+            ),
+            initialize_schema=False,
+        )
+        append_trade_update(
+            conn,
+            build_trade_update_payload(
+                paper_trade_id=paper_trade_id,
+                trade_state="OPEN",
+                settlement_context={"phase": "open"},
+                odds=2.05,
+                notes="opened",
+            ),
+            initialize_schema=False,
+        )
+        snapshots = fetch_market_snapshots(conn, fixture_id="evt_fixture_boundary", initialize_schema=False)
+        rows = fetch_paper_trade_rows(conn, initialize_schema=False)
+
+    assert len(snapshots) == 1
+    assert len(rows) == 1
+    assert rows[0]["paper_trade_id"] == paper_trade_id
+    assert rows[0]["trade_state"] == "OPEN"
+
+
+def test_uninitialized_hot_path_operations_fail_clearly_without_boundary_init(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    with connect(db_path) as conn:
+        with pytest.raises(sqlite3.OperationalError):
+            fetch_paper_trade_rows(conn, initialize_schema=False)
+        with pytest.raises(sqlite3.OperationalError):
+            fetch_market_snapshots(conn, initialize_schema=False)
+
+
 def test_paper_trading_performance_excludes_pending_from_roi_and_push_from_strike_rate():
     rows = [
         {

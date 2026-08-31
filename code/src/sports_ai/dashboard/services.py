@@ -779,6 +779,7 @@ class DashboardServices:
             state_key="storage_runtime_state",
             state_value=payload,
             updated_at=updated_at,
+            initialize_schema=self._read_requires_schema_init(),
         )
         self._storage_runtime_state = payload
 
@@ -901,7 +902,11 @@ class DashboardServices:
 
         with storage.connect(self.config.dashboard_db_path) as conn:
             for fixture_id in eligible_fixture_ids:
-                existing_result = storage.fetch_fixture_result(conn, fixture_id)
+                existing_result = storage.fetch_fixture_result(
+                    conn,
+                    fixture_id,
+                    initialize_schema=self._read_requires_schema_init(),
+                )
                 if existing_result is not None:
                     self._apply_corner_result_to_fixture(fixture_rows[fixture_id], existing_result)
                 fixture = fixture_rows[fixture_id]
@@ -937,8 +942,13 @@ class DashboardServices:
                     total_corners=result.total_corners,
                     source_timestamp=result.source_timestamp,
                     captured_at=result.captured_at,
+                    initialize_schema=self._read_requires_schema_init(),
                 )
-                stored_result = storage.fetch_fixture_result(conn, str(fixture["fixture_id"]))
+                stored_result = storage.fetch_fixture_result(
+                    conn,
+                    str(fixture["fixture_id"]),
+                    initialize_schema=self._read_requires_schema_init(),
+                )
                 if stored_result is not None:
                     self._apply_corner_result_to_fixture(fixture, stored_result)
                 diagnostics_state["fixtures_updated"] += 1
@@ -1804,6 +1814,7 @@ class DashboardServices:
                 away_team_name=away_team_name,
                 kickoff_utc=kickoff_utc,
                 season=identity.get("season"),
+                initialize_schema=self._read_requires_schema_init(),
             )
         except football_canonical_fixture.CanonicalFixtureError:
             return None
@@ -2967,6 +2978,7 @@ class DashboardServices:
                     state_key="provider_state",
                     state_value=self._provider_state,
                     updated_at=attempted_at,
+                    initialize_schema=self._read_requires_schema_init(),
                 )
                 logger.info("fixture sync skipped: fixture provider not configured")
                 return self._provider_state
@@ -3013,6 +3025,7 @@ class DashboardServices:
                     state_key="provider_state",
                     state_value=self._provider_state,
                     updated_at=attempted_at,
+                    initialize_schema=self._read_requires_schema_init(),
                 )
                 logger.warning("fixture sync not configured: %s", exc)
                 return self._provider_state
@@ -3035,6 +3048,7 @@ class DashboardServices:
                     state_key="provider_state",
                     state_value=self._provider_state,
                     updated_at=attempted_at,
+                    initialize_schema=self._read_requires_schema_init(),
                 )
                 logger.warning("fixture sync degraded: %s", exc)
                 return self._provider_state
@@ -3042,7 +3056,12 @@ class DashboardServices:
             fixture_map = {fixture.fixture_id: fixture for fixture in [*live, *today, *upcoming]}
             sync_fixtures = sorted(fixture_map.values(), key=lambda item: (item.kickoff_utc, item.fixture_id))
             if sync_fixtures:
-                storage.upsert_fixtures(conn, sync_fixtures, updated_at=attempted_at)
+                storage.upsert_fixtures(
+                    conn,
+                    sync_fixtures,
+                    updated_at=attempted_at,
+                    initialize_schema=self._read_requires_schema_init(),
+                )
 
             for fixture in sync_fixtures:
                 if fixture.status in FIXTURE_TERMINAL_STATUSES:
@@ -3125,24 +3144,28 @@ class DashboardServices:
                 state_key="provider_state",
                 state_value=self._provider_state,
                 updated_at=attempted_at,
+                initialize_schema=self._read_requires_schema_init(),
             )
             storage.put_runtime_state(
                 conn,
                 state_key="prediction_state",
                 state_value=self._prediction_state,
                 updated_at=attempted_at,
+                initialize_schema=self._read_requires_schema_init(),
             )
             storage.put_runtime_state(
                 conn,
                 state_key="market_runtime_state",
                 state_value=self._market_runtime_state,
                 updated_at=attempted_at,
+                initialize_schema=self._read_requires_schema_init(),
             )
             storage.put_runtime_state(
                 conn,
                 state_key="one_shot_sync_state",
                 state_value=self._one_shot_sync_state,
                 updated_at=attempted_at,
+                initialize_schema=self._read_requires_schema_init(),
             )
         logger.info(
             "fixture sync completed: kind=%s state=%s discovered=%s live=%s today=%s upcoming=%s predictions_ready=%s blocked=%s",
@@ -3200,6 +3223,7 @@ class DashboardServices:
                 away_team_name=str(prediction.get("away_team_name")),
                 kickoff_utc=str(prediction.get("kickoff_utc")),
                 season=prediction.get("season"),
+                initialize_schema=self._read_requires_schema_init(),
             )
             return canonical_fixture_id
         except football_canonical_fixture.CanonicalFixtureError:
@@ -3242,7 +3266,11 @@ class DashboardServices:
         )
         if canonical_business_key is None:
             return None
-        return football_canonical_fixture.find_counted_paper_trade_by_canonical_key(conn, canonical_business_key)
+        return football_canonical_fixture.find_counted_paper_trade_by_canonical_key(
+            conn,
+            canonical_business_key,
+            initialize_schema=self._read_requires_schema_init(),
+        )
 
     def _maybe_create_paper_entries(
         self,
@@ -3265,6 +3293,7 @@ class DashboardServices:
                 market=str(row["market_family"]),
                 selection=str(row["selection"]),
                 line=None if row.get("line") is None else float(row["line"]),
+                initialize_schema=self._read_requires_schema_init(),
             )
             if existing is not None:
                 row["paper_trade_id"] = existing["paper_trade_id"]
@@ -3317,7 +3346,11 @@ class DashboardServices:
                 canonical_business_key_signature=canonical_business_key_signature,
             )
             try:
-                football_paper_trading.record_paper_trade_entry(conn, entry)
+                football_paper_trading.record_paper_trade_entry(
+                    conn,
+                    entry,
+                    initialize_schema=self._read_requires_schema_init(),
+                )
             except sqlite3.IntegrityError:
                 canonical_existing = self._find_canonical_existing_paper_entry(
                     conn,
@@ -3336,6 +3369,7 @@ class DashboardServices:
                     market=str(row["market_family"]),
                     selection=str(row["selection"]),
                     line=None if row.get("line") is None else float(row["line"]),
+                    initialize_schema=self._read_requires_schema_init(),
                 )
                 if existing is None:
                     raise
@@ -3383,7 +3417,12 @@ class DashboardServices:
             return None
         updated_at = utc_now_iso()
         with storage.connect(self.config.dashboard_db_path) as conn:
-            storage.upsert_fixtures(conn, [refreshed], updated_at=updated_at)
+            storage.upsert_fixtures(
+                conn,
+                [refreshed],
+                updated_at=updated_at,
+                initialize_schema=self._read_requires_schema_init(),
+            )
             fixture = storage.fetch_fixture(conn, fixture_id, initialize_schema=self._read_requires_schema_init())
             result_row = storage.fetch_fixture_result(
                 conn,
@@ -3416,8 +3455,13 @@ class DashboardServices:
                 total_corners=result.total_corners,
                 source_timestamp=result.source_timestamp,
                 captured_at=result.captured_at,
+                initialize_schema=self._read_requires_schema_init(),
             )
-            stored_result = storage.fetch_fixture_result(conn, str(fixture["fixture_id"]))
+            stored_result = storage.fetch_fixture_result(
+                conn,
+                str(fixture["fixture_id"]),
+                initialize_schema=self._read_requires_schema_init(),
+            )
         if stored_result is not None:
             self._apply_corner_result_to_fixture(fixture, stored_result)
         return fixture
@@ -3453,7 +3497,10 @@ class DashboardServices:
         now_utc = datetime.now(timezone.utc)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             snapshot_rows_by_fixture: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for snapshot_row in football_paper_trading.fetch_market_snapshots(conn):
+            for snapshot_row in football_paper_trading.fetch_market_snapshots(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            ):
                 snapshot_rows_by_fixture[str(snapshot_row["fixture_id"])].append(snapshot_row)
             # Settle corners-dependent rows first so mixed-market update ordering stays deterministic
             # when one market can still remain unresolved after a finished fixture.
@@ -3500,6 +3547,7 @@ class DashboardServices:
                             closing_odds=float(closing_snapshot["odds"]),
                             closing_captured_at=str(closing_snapshot["captured_at"]),
                             closing_snapshot_id=int(closing_snapshot["snapshot_id"]),
+                            initialize_schema=self._read_requires_schema_init(),
                         )
                 if row.get("trade_state") == "PENDING" and now_utc >= kickoff and str(fixture["status"]) in FIXTURE_LIVE_STATUSES:
                     football_paper_trading.append_trade_update(
@@ -3514,6 +3562,7 @@ class DashboardServices:
                             odds=float(row.get("entry_odds") or row["available_market_price"]),
                             notes="Fixture started; position is now open.",
                         ),
+                        initialize_schema=self._read_requires_schema_init(),
                     )
                 if str(fixture["status"]) != FIXTURE_STATUS_FINISHED:
                     continue
@@ -3546,23 +3595,25 @@ class DashboardServices:
                             odds=float(row.get("entry_odds") or row["available_market_price"]),
                             notes="Settlement pending because the required final market result is unavailable.",
                         ),
+                        initialize_schema=self._read_requires_schema_init(),
                     )
                     continue
                 football_paper_trading.append_trade_update(
                     conn,
-                        football_paper_trading.build_trade_update_payload(
-                            paper_trade_id=str(row["paper_trade_id"]),
-                            trade_state=state,
-                            settlement_context={
-                                **result_context,
-                                "actual_home_goals": int(fixture.get("home_score") or 0),
-                                "actual_away_goals": int(fixture.get("away_score") or 0),
-                                "actual_home_corners": fixture.get("home_corners"),
-                                "actual_away_corners": fixture.get("away_corners"),
-                                "actual_total_corners": actual_total_corners,
-                            },
-                            odds=float(row.get("entry_odds") or row["available_market_price"]),
+                    football_paper_trading.build_trade_update_payload(
+                        paper_trade_id=str(row["paper_trade_id"]),
+                        trade_state=state,
+                        settlement_context={
+                            **result_context,
+                            "actual_home_goals": int(fixture.get("home_score") or 0),
+                            "actual_away_goals": int(fixture.get("away_score") or 0),
+                            "actual_home_corners": fixture.get("home_corners"),
+                            "actual_away_corners": fixture.get("away_corners"),
+                            "actual_total_corners": actual_total_corners,
+                        },
+                        odds=float(row.get("entry_odds") or row["available_market_price"]),
                     ),
+                    initialize_schema=self._read_requires_schema_init(),
                 )
 
     def _xg_profile_provider(self, row: dict[str, Any], prediction: dict[str, Any], snapshots: list[Any]):
@@ -3676,9 +3727,14 @@ class DashboardServices:
                 token_hash=token_hash,
                 token_id=token_id,
                 claimed_at=claimed_at,
+                initialize_schema=self._read_requires_schema_init(),
             )
             if not claimed:
-                existing = storage.get_one_shot_market_sync_claim(conn, token_hash)
+                existing = storage.get_one_shot_market_sync_claim(
+                    conn,
+                    token_hash,
+                    initialize_schema=self._read_requires_schema_init(),
+                )
                 self._one_shot_sync_state = {
                     "configured": True,
                     "token_id": token_id,
@@ -3708,6 +3764,7 @@ class DashboardServices:
                     decisions=0,
                     paper_entries=0,
                     error=error_code,
+                    initialize_schema=self._read_requires_schema_init(),
                 )
                 self._one_shot_sync_state = {
                     "configured": True,
@@ -3741,6 +3798,7 @@ class DashboardServices:
                 decisions=decisions,
                 paper_entries=paper_entries,
                 error=error_code,
+                initialize_schema=self._read_requires_schema_init(),
             )
             self._one_shot_sync_state = {
                 "configured": True,
@@ -3822,6 +3880,7 @@ class DashboardServices:
                 state_key="market_runtime_state",
                 state_value=self._market_runtime_state,
                 updated_at=last_sync_at,
+                initialize_schema=self._read_requires_schema_init(),
             )
 
     def _sync_current_market_state(
@@ -4117,6 +4176,7 @@ class DashboardServices:
                             kickoff_utc=snapshot.kickoff_utc,
                             freshness_state=snapshot.freshness_state,
                         ),
+                        initialize_schema=self._read_requires_schema_init(),
                     )
                     if snapshot.provider_market_id:
                         entry_snapshot_ids[str(snapshot.provider_market_id)] = db_snapshot_id
@@ -4237,12 +4297,21 @@ class DashboardServices:
                 fixture=fixture,
                 snapshot=None,
             )
-            storage.save_prediction(conn, payload, updated_at=utc_now_iso())
+            storage.save_prediction(
+                conn,
+                payload,
+                updated_at=utc_now_iso(),
+                initialize_schema=self._read_requires_schema_init(),
+            )
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
         version_key = self._prediction_version_key(fixture, self.snapshot)
-        existing = storage.fetch_prediction_by_version_key(conn, version_key)
+        existing = storage.fetch_prediction_by_version_key(
+            conn,
+            version_key,
+            initialize_schema=self._read_requires_schema_init(),
+        )
         if existing is not None:
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=existing)
             return existing
@@ -4283,7 +4352,12 @@ class DashboardServices:
                 fixture=fixture,
                 snapshot=self.snapshot,
             )
-            storage.save_prediction(conn, payload, updated_at=utc_now_iso())
+            storage.save_prediction(
+                conn,
+                payload,
+                updated_at=utc_now_iso(),
+                initialize_schema=self._read_requires_schema_init(),
+            )
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
@@ -4293,8 +4367,18 @@ class DashboardServices:
         away_resolution = (prediction.get("team_resolution") or {}).get("away")
         for resolution in (home_resolution, away_resolution):
             if isinstance(resolution, dict):
-                storage.record_team_resolution(conn, resolution, updated_at=utc_now_iso())
-        storage.save_prediction(conn, prediction, updated_at=utc_now_iso())
+                storage.record_team_resolution(
+                    conn,
+                    resolution,
+                    updated_at=utc_now_iso(),
+                    initialize_schema=self._read_requires_schema_init(),
+                )
+        storage.save_prediction(
+            conn,
+            prediction,
+            updated_at=utc_now_iso(),
+            initialize_schema=self._read_requires_schema_init(),
+        )
         self._record_edge_desk_shadow(conn, fixture=fixture, prediction=prediction)
         return prediction
 

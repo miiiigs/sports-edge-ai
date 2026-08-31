@@ -154,8 +154,9 @@ def upsert_fixtures(
     fixtures: Iterable[NormalizedFixture],
     *,
     updated_at: str,
+    initialize_schema: bool = True,
 ) -> None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         for fixture in fixtures:
             payload_json = json.dumps(fixture.to_dict(timezone_name="UTC"), sort_keys=True)
@@ -289,8 +290,9 @@ def upsert_fixture_result(
     total_corners: int | None,
     source_timestamp: str | None,
     captured_at: str,
+    initialize_schema: bool = True,
 ) -> None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         conn.execute(
             """
@@ -352,8 +354,9 @@ def save_prediction(
     payload: dict[str, Any],
     *,
     updated_at: str,
+    initialize_schema: bool = True,
 ) -> None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         conn.execute(
             """
@@ -444,8 +447,9 @@ def record_team_resolution(
     resolution: dict[str, Any],
     *,
     updated_at: str,
+    initialize_schema: bool = True,
 ) -> None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     mapping_key = "|".join(
         [
             str(resolution["provider"]),
@@ -494,8 +498,9 @@ def put_runtime_state(
     state_key: str,
     state_value: dict[str, Any],
     updated_at: str,
+    initialize_schema: bool = True,
 ) -> None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         conn.execute(
             """
@@ -535,6 +540,7 @@ def claim_one_shot_market_sync_token(
     token_hash: str,
     token_id: str,
     claimed_at: str,
+    initialize_schema: bool = True,
 ) -> bool:
     """Atomically claim a one-shot market-sync token.
 
@@ -543,7 +549,7 @@ def claim_one_shot_market_sync_token(
     committed before any provider request, so a crash between claim and execution
     cannot cause the same token to run more than once.
     """
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     try:
         with conn:
             conn.execute(
@@ -590,8 +596,9 @@ def update_one_shot_market_sync_claim(
     decisions: int,
     paper_entries: int,
     error: str | None,
+    initialize_schema: bool = True,
 ) -> None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         conn.execute(
             """

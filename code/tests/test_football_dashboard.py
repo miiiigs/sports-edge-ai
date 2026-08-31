@@ -710,6 +710,66 @@ def _portfolio_enabled_config(tmp_path: Path) -> DashboardConfig:
     )
 
 
+def _normalize_traced_sql(sql: str) -> str:
+    return " ".join(sql.strip().split()).lower()
+
+
+def _sql_trace_counts(statements: list[str]) -> dict[str, int]:
+    counts = {
+        "select": 0,
+        "insert": 0,
+        "update": 0,
+        "delete": 0,
+        "ddl": 0,
+        "pragma_table_info": 0,
+        "sqlite_master": 0,
+        "schema_introspection": 0,
+        "writes": 0,
+    }
+    for statement in statements:
+        normalized = _normalize_traced_sql(statement)
+        if not normalized:
+            continue
+        if normalized.startswith("select"):
+            counts["select"] += 1
+        elif normalized.startswith("insert"):
+            counts["insert"] += 1
+            counts["writes"] += 1
+        elif normalized.startswith("update"):
+            counts["update"] += 1
+            counts["writes"] += 1
+        elif normalized.startswith("delete"):
+            counts["delete"] += 1
+            counts["writes"] += 1
+        if normalized.startswith(("create table", "create index", "alter table", "drop table", "drop index")):
+            counts["ddl"] += 1
+        if normalized.startswith("pragma table_info"):
+            counts["pragma_table_info"] += 1
+            counts["schema_introspection"] += 1
+        if "sqlite_master" in normalized:
+            counts["sqlite_master"] += 1
+            counts["schema_introspection"] += 1
+    return counts
+
+
+def _install_dashboard_sql_trace(monkeypatch, traced_sql: list[str]) -> None:
+    original_dashboard_connect = dashboard_storage.connect
+    original_paper_connect = football_paper_trading.connect
+
+    def traced_dashboard_connect(*args, **kwargs):
+        conn = original_dashboard_connect(*args, **kwargs)
+        conn.set_trace_callback(traced_sql.append)
+        return conn
+
+    def traced_paper_connect(*args, **kwargs):
+        conn = original_paper_connect(*args, **kwargs)
+        conn.set_trace_callback(traced_sql.append)
+        return conn
+
+    monkeypatch.setattr(dashboard_storage, "connect", traced_dashboard_connect)
+    monkeypatch.setattr(football_paper_trading, "connect", traced_paper_connect)
+
+
 def _portfolio_prediction(fixture: NormalizedFixture) -> dict[str, object]:
     return {
         "prediction_id": f"portfolio_prediction_{fixture.fixture_id}",
@@ -2049,6 +2109,140 @@ def test_market_runtime_state_checkpoints_decisions_before_late_sync_failure(tmp
     assert runtime_state["market_snapshots"] == 4
     assert runtime_state["decision_count"] >= 1
     assert fixture.fixture_id in runtime_state["evaluations"]
+
+
+def test_sync_current_market_state_does_not_run_schema_initialization_after_boundary_init(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _fixture()
+    config = replace(
+        _dashboard_config(tmp_path),
+        current_odds_connected=True,
+        current_xg_connected=True,
+        enable_odds_sync=True,
+    )
+
+    def xg_factory(row, prediction, snapshots):
+        expected_home = float(prediction["expected_home_goals"])
+        expected_away = float(prediction["expected_away_goals"])
+
+        def _row(role, recent):
+            return {
+                "fixture_id": fixture.fixture_id,
+                "team_role": role,
+                "recent_xg_for_per_match": recent,
+                "matches_in_window": 5,
+                "as_of": "2026-08-28T20:00:00+00:00",
+                "window_start_at": "2026-08-01T20:00:00+00:00",
+                "window_end_at": "2026-08-28T20:00:00+00:00",
+                "source": SOURCE_IDENTIFIER,
+                "competition_id": "ENG1",
+            }
+
+        rows = {
+            (fixture.fixture_id, "HOME"): _row("HOME", expected_home),
+            (fixture.fixture_id, "AWAY"): _row("AWAY", expected_away),
+        }
+        inspection = build_xg_inspection(rows)
+        return lambda: (rows, inspection)
+
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(
+            snapshots_by_fixture={
+                fixture.fixture_id: [
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="Pinnacle",
+                        market="1x2",
+                        selection="HOME",
+                        decimal_odds=2.05,
+                        reference_designation="reference",
+                        provider_market_id="pin-home",
+                    ),
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="Pinnacle",
+                        market="1x2",
+                        selection="DRAW",
+                        decimal_odds=3.35,
+                        reference_designation="reference",
+                        provider_market_id="pin-draw",
+                    ),
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="Pinnacle",
+                        market="1x2",
+                        selection="AWAY",
+                        decimal_odds=3.95,
+                        reference_designation="reference",
+                        provider_market_id="pin-away",
+                    ),
+                    _market_snapshot(
+                        fixture=fixture,
+                        bookmaker="bet365",
+                        market="1x2",
+                        selection="HOME",
+                        decimal_odds=10.0,
+                        reference_designation="available",
+                        provider_market_id="b365-home",
+                    ),
+                ]
+            },
+            configured=True,
+        ),
+        xg_profile_factory=xg_factory,
+    )
+    services._build_snapshot()
+
+    schema_calls = {"dashboard": 0, "paper": 0, "canonical": 0, "portfolio": 0}
+    original_dashboard_ensure = dashboard_storage.ensure_schema
+    original_paper_ensure = football_paper_trading.ensure_schema
+    original_canonical_ensure = football_canonical_fixture.ensure_schema
+    original_portfolio_ensure = football_portfolio_selection.ensure_schema
+
+    def counted_dashboard_ensure(conn):
+        schema_calls["dashboard"] += 1
+        return original_dashboard_ensure(conn)
+
+    def counted_paper_ensure(conn):
+        schema_calls["paper"] += 1
+        return original_paper_ensure(conn)
+
+    def counted_canonical_ensure(conn):
+        schema_calls["canonical"] += 1
+        return original_canonical_ensure(conn)
+
+    def counted_portfolio_ensure(conn):
+        schema_calls["portfolio"] += 1
+        return original_portfolio_ensure(conn)
+
+    with dashboard_storage.connect(config.dashboard_db_path) as dashboard_conn:
+        dashboard_storage.ensure_schema(dashboard_conn)
+        football_edge_desk.ensure_schema(dashboard_conn)
+        dashboard_storage.upsert_fixtures(
+            dashboard_conn,
+            [fixture],
+            updated_at="2026-08-29T00:00:00+00:00",
+        )
+        with football_paper_trading.connect(config.paper_trading_db_path) as paper_conn:
+            football_paper_trading.ensure_schema(paper_conn)
+            football_canonical_fixture.ensure_schema(paper_conn)
+            football_portfolio_selection.ensure_schema(paper_conn)
+        services._schema_initialized = True
+        prediction = services.ensure_prediction(dashboard_conn, fixture)
+        fixture_row = fixture.to_dict(timezone_name="UTC")
+        fixture_row["prediction"] = prediction
+
+        monkeypatch.setattr(dashboard_storage, "ensure_schema", counted_dashboard_ensure)
+        monkeypatch.setattr(football_paper_trading, "ensure_schema", counted_paper_ensure)
+        monkeypatch.setattr(football_canonical_fixture, "ensure_schema", counted_canonical_ensure)
+        monkeypatch.setattr(football_portfolio_selection, "ensure_schema", counted_portfolio_ensure)
+        services._sync_current_market_state([fixture_row], dashboard_conn=dashboard_conn)
+
+    assert schema_calls == {"dashboard": 0, "paper": 0, "canonical": 0, "portfolio": 0}
 
 
 def test_dashboard_services_settles_finished_asian_handicap_trade_idempotently_and_reports_live_results(
@@ -3681,6 +3875,60 @@ def test_dashboard_get_routes_do_not_run_schema_initialization_after_startup(
 
     assert all(response.status_code == 200 for response in responses)
     assert schema_calls == {"dashboard": 0, "paper": 0, "canonical": 0}
+
+
+@pytest.mark.parametrize("path", ["/today", "/today?partial=1"])
+def test_today_routes_do_not_issue_schema_ddl_or_writes_after_startup(
+    tmp_path: Path,
+    monkeypatch,
+    path: str,
+) -> None:
+    services, fixtures = _build_today_read_path_services(tmp_path)
+    _seed_today_read_path_paper_rows(services.config, fixtures)
+    traced_sql: list[str] = []
+    _install_dashboard_sql_trace(monkeypatch, traced_sql)
+
+    app = create_app(services=services)
+    with TestClient(app) as client:
+        traced_sql.clear()
+        response = client.get(path)
+
+    counts = _sql_trace_counts(traced_sql)
+
+    assert response.status_code == 200
+    assert counts["select"] > 0
+    assert counts["ddl"] == 0
+    assert counts["pragma_table_info"] == 0
+    assert counts["sqlite_master"] == 0
+    assert counts["schema_introspection"] == 0
+    assert counts["writes"] == 0
+
+
+def test_repeated_today_payload_builds_do_not_reintroduce_schema_work(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    services, fixtures = _build_today_read_path_services(tmp_path)
+    _seed_today_read_path_paper_rows(services.config, fixtures)
+
+    asyncio.run(services.initialize())
+    traced_sql: list[str] = []
+    try:
+        _install_dashboard_sql_trace(monkeypatch, traced_sql)
+        for _ in range(10):
+            payload = services.get_dashboard_payload()
+            assert "today" in payload
+    finally:
+        asyncio.run(services.shutdown())
+
+    counts = _sql_trace_counts(traced_sql)
+
+    assert counts["select"] > 0
+    assert counts["ddl"] == 0
+    assert counts["pragma_table_info"] == 0
+    assert counts["sqlite_master"] == 0
+    assert counts["schema_introspection"] == 0
+    assert counts["writes"] == 0
 
 
 def test_dashboard_portfolio_policy_separates_selected_subset_from_opportunity_truth(tmp_path: Path) -> None:

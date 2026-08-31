@@ -369,14 +369,19 @@ class PaperTradeUpdate:
         json.loads(self.payload_json)
 
 
-def find_identical_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnapshot) -> int | None:
+def find_identical_market_snapshot(
+    conn: sqlite3.Connection,
+    snapshot: StoredMarketSnapshot,
+    *,
+    initialize_schema: bool = True,
+) -> int | None:
     """Return the snapshot_id of an identical stored snapshot, or None.
 
     Identical means the same immutable price state for the same provider event
     and bookmaker selection: same fixture, provider, provider event id,
     bookmaker, market, selection, line, odds, and provider update timestamp.
     """
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT snapshot_id
@@ -410,9 +415,14 @@ def find_identical_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMar
     return None if row is None else int(row["snapshot_id"])
 
 
-def record_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnapshot) -> int:
-    ensure_schema(conn)
-    existing = find_identical_market_snapshot(conn, snapshot)
+def record_market_snapshot(
+    conn: sqlite3.Connection,
+    snapshot: StoredMarketSnapshot,
+    *,
+    initialize_schema: bool = True,
+) -> int:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    existing = find_identical_market_snapshot(conn, snapshot, initialize_schema=False)
     if existing is not None:
         return existing
     with conn:
@@ -450,8 +460,13 @@ def record_market_snapshot(conn: sqlite3.Connection, snapshot: StoredMarketSnaps
     return int(result.lastrowid)
 
 
-def fetch_market_snapshots(conn: sqlite3.Connection, *, fixture_id: str | None = None) -> list[dict[str, Any]]:
-    ensure_schema(conn)
+def fetch_market_snapshots(
+    conn: sqlite3.Connection,
+    *,
+    fixture_id: str | None = None,
+    initialize_schema: bool = True,
+) -> list[dict[str, Any]]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     sql = """
         SELECT snapshot_id, fixture_id, provider, bookmaker, market, selection, line, odds,
                provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
@@ -467,8 +482,13 @@ def fetch_market_snapshots(conn: sqlite3.Connection, *, fixture_id: str | None =
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
 
-def record_paper_trade_entry(conn: sqlite3.Connection, entry: PaperTradeEntry) -> str:
-    ensure_schema(conn)
+def record_paper_trade_entry(
+    conn: sqlite3.Connection,
+    entry: PaperTradeEntry,
+    *,
+    initialize_schema: bool = True,
+) -> str:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         conn.execute(
             """
@@ -525,8 +545,9 @@ def find_existing_paper_trade_entry(
     market: str,
     selection: str,
     line: float | None,
+    initialize_schema: bool = True,
 ) -> dict[str, Any] | None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     business_key_signature = paper_trade_business_key_signature(
         fixture_id=fixture_id,
         market=market,
@@ -553,8 +574,9 @@ def attach_closing_snapshot(
     closing_odds: float,
     closing_captured_at: str,
     closing_snapshot_id: int | None,
+    initialize_schema: bool = True,
 ) -> None:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         conn.execute(
             """
@@ -568,8 +590,13 @@ def attach_closing_snapshot(
         )
 
 
-def append_trade_update(conn: sqlite3.Connection, update: PaperTradeUpdate) -> int:
-    ensure_schema(conn)
+def append_trade_update(
+    conn: sqlite3.Connection,
+    update: PaperTradeUpdate,
+    *,
+    initialize_schema: bool = True,
+) -> int:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     with conn:
         result = conn.execute(
             """
