@@ -99,6 +99,26 @@ SCHEMA_STATEMENTS = (
         FOREIGN KEY(paper_trade_id) REFERENCES paper_trade_entries(paper_trade_id)
     )
     """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_market_snapshots_identity_lookup
+    ON market_snapshots(
+        fixture_id,
+        provider,
+        bookmaker,
+        market,
+        selection,
+        line,
+        odds,
+        provider_timestamp,
+        provider_fixture_id,
+        is_pre_match,
+        snapshot_id DESC
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_market_snapshots_fixture_captured
+    ON market_snapshots(fixture_id, captured_at, snapshot_id)
+    """,
 )
 
 SQLITE_BUSY_TIMEOUT_MS = 5_000
