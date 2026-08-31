@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,6 +17,27 @@ from sports_ai.dashboard.models import FIXTURE_STATUS_PRE_MATCH, NormalizedFixtu
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _hash_one_shot_token
 from sports_ai.market_data.providers import MarketProviderError, NormalizedMarketSnapshot
 from sports_ai.storage import football_paper_trading
+
+
+def _normalize_sql(sql: str) -> str:
+    return " ".join(str(sql).split()).lower()
+
+
+def _recording_connect(connect_fn, statements: list[str]):
+    class RecordingConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=(), /):
+            statements.append(_normalize_sql(str(sql)))
+            return super().execute(sql, parameters)
+
+    def _connect(*args, **kwargs):
+        kwargs["factory"] = RecordingConnection
+        return connect_fn(*args, **kwargs)
+
+    return _connect
+
+
+def _count_sql_with_prefixes(statements: list[str], *prefixes: str) -> int:
+    return sum(any(statement.startswith(prefix) for prefix in prefixes) for statement in statements)
 
 
 def _repo_root() -> Path:
@@ -485,6 +507,29 @@ def test_one_shot_runs_normal_pipeline_and_creates_paper_entry(tmp_path: Path, m
     assert status["one_shot_sync"]["state"] == "SUCCESS"
     assert status["one_shot_sync"]["provider_requests"] == 1
     asyncio.run(services.shutdown())
+
+
+def test_sync_once_after_startup_does_not_reinitialize_wal_or_schema(tmp_path: Path, monkeypatch):
+    provider = CountingMarketProvider(configured=False)
+    services = _services(tmp_path, token=None, provider=provider)
+    asyncio.run(services.initialize())
+
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", _recording_connect(original_connect, statements))
+
+    asyncio.run(services.sync_once(sync_kind="scheduled_live", include_schedule=True))
+    asyncio.run(services.shutdown())
+
+    assert sum("pragma journal_mode = wal" in statement for statement in statements) == 0
+    assert _count_sql_with_prefixes(
+        statements,
+        "create table",
+        "create index",
+        "create unique index",
+        "alter table",
+        "pragma table_info(",
+    ) == 0
 
 
 # ---------------------------------------------------------------------------

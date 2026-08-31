@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import math
 import threading
 import time as time_module
@@ -207,6 +208,31 @@ class PostEvaluationFailureDashboardServices(DashboardServices):
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _normalize_sql(sql: str) -> str:
+    return " ".join(str(sql).split()).lower()
+
+
+def _recording_connect(connect_fn, statements: list[str]):
+    class RecordingConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=(), /):
+            statements.append(_normalize_sql(str(sql)))
+            return super().execute(sql, parameters)
+
+    def _connect(*args, **kwargs):
+        kwargs["factory"] = RecordingConnection
+        return connect_fn(*args, **kwargs)
+
+    return _connect
+
+
+def _count_sql_with_prefixes(statements: list[str], *prefixes: str) -> int:
+    return sum(any(statement.startswith(prefix) for prefix in prefixes) for statement in statements)
+
+
+def _count_sql_containing(statements: list[str], fragment: str) -> int:
+    return sum(fragment in statement for statement in statements)
 
 
 def _dashboard_config(tmp_path: Path) -> DashboardConfig:
@@ -5038,6 +5064,75 @@ def test_dashboard_get_routes_do_not_create_portfolio_evaluations_when_policy_ac
 
     assert all(response.status_code == 200 for response in responses)
     assert record_calls["count"] == 0
+
+
+def test_dashboard_connect_skips_wal_reinitialization_while_writer_holds_transaction(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "dashboard.sqlite"
+    with dashboard_storage.connect(db_path) as conn:
+        dashboard_storage.initialize_database(conn)
+
+    with sqlite3.connect(db_path) as conn:
+        assert str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal"
+
+    writer = sqlite3.connect(db_path, timeout=dashboard_storage.SQLITE_BUSY_TIMEOUT_MS / 1000)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute(
+        """
+        INSERT INTO dashboard_runtime_state (state_key, state_value_json, updated_at)
+        VALUES (?, ?, ?)
+        """,
+        ("writer-lock", "{}", "2026-09-01T00:00:00+00:00"),
+    )
+
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", _recording_connect(original_connect, statements))
+
+    started = time_module.perf_counter()
+    conn = dashboard_storage.connect(db_path)
+    elapsed = time_module.perf_counter() - started
+    conn.close()
+
+    writer.rollback()
+    writer.close()
+
+    assert elapsed < 1.0
+    assert _count_sql_containing(statements, "pragma journal_mode = wal") == 0
+    assert _count_sql_containing(statements, "pragma busy_timeout = 5000") == 1
+    assert _count_sql_containing(statements, "pragma foreign_keys = on") == 1
+
+
+def test_today_payload_build_does_not_reinitialize_wal_or_schema_after_startup(tmp_path: Path, monkeypatch) -> None:
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    asyncio.run(services.initialize())
+
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", _recording_connect(original_connect, statements))
+
+    first_payload = services.get_dashboard_payload()
+    second_payload = services.get_dashboard_payload()
+    third_payload = services.get_dashboard_payload()
+
+    asyncio.run(services.shutdown())
+
+    assert first_payload["today"] == []
+    assert second_payload["today"] == []
+    assert third_payload["today"] == []
+    assert _count_sql_containing(statements, "pragma journal_mode = wal") == 0
+    assert _count_sql_with_prefixes(
+        statements,
+        "create table",
+        "create index",
+        "create unique index",
+        "alter table",
+        "pragma table_info(",
+    ) == 0
+    assert _count_sql_with_prefixes(statements, "insert ", "update ", "delete ", "replace ") == 0
 
 
 @pytest.mark.parametrize("position_count", [383, 1000, 2500])

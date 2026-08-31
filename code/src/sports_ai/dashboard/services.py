@@ -618,7 +618,7 @@ class DashboardServices:
             self.market_provider.provider_name(),
         )
         with storage.connect(self.config.dashboard_db_path) as conn:
-            storage.ensure_schema(conn)
+            storage.initialize_database(conn)
             try:
                 football_edge_desk.ensure_schema(conn)
                 self._edge_desk_available = True
@@ -631,7 +631,7 @@ class DashboardServices:
                 logger.exception("edge desk shadow initialization failed; continuing in fail-open mode")
             self._load_runtime_state(conn)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            football_paper_trading.ensure_schema(conn)
+            football_paper_trading.initialize_database(conn)
             football_canonical_fixture.ensure_schema(conn)
             football_portfolio_selection.ensure_schema(conn)
             self._schema_initialized = True
