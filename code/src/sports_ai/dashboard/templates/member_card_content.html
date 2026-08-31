@@ -1,20 +1,23 @@
 {% from "_ui.html" import pagination_nav %}
 <section class="page-heading edge-desk-heading">
   <div>
-    <p class="eyebrow desk-page-kicker">Edge Desk · Published Picks</p>
-    <h1>Published Picks</h1>
-    <p class="subhead desk-page-subhead">A simplified client view of the published card without the full desk mechanics.</p>
+    <p class="eyebrow desk-page-kicker">Edge Desk · Current Portfolio</p>
+    <h1>Current Portfolio</h1>
+    <p class="subhead desk-page-subhead">A simplified client view of the current portfolio-selected card without implying a frozen publication lifecycle.</p>
   </div>
 </section>
 
 <section class="section-block desk-panel">
   <div class="desk-panel-head">
     <div>
-      <span class="desk-panel-title">Published Card</span>
-      <span class="desk-panel-note">Read-only preview</span>
+      <span class="desk-panel-title">Current Portfolio Card</span>
+      <span class="desk-panel-note">{{ payload.publish_note }}</span>
     </div>
     <span class="desk-panel-meta">{{ payload.publish_state }}</span>
   </div>
+  {% if payload.portfolio_policy %}
+    <p class="section-intro">{{ payload.portfolio_policy.policy_id }} · {{ payload.portfolio_policy.policy_version }} · effective from {{ payload.portfolio_policy.effective_from }}</p>
+  {% endif %}
   {% if payload.visible_rows %}
     <div class="desktop-table">
       <div class="desk-table-wrap">
@@ -26,6 +29,7 @@
               <th class="num">Model %</th>
               <th class="num">Entry Odds</th>
               <th>Confidence</th>
+              <th>Portfolio</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -37,6 +41,10 @@
                 <td class="num">{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</td>
                 <td class="num">{{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else "N/A" }}</td>
                 <td>{{ row.confidence_label }}</td>
+                <td>
+                  <strong>{{ row.portfolio_state }}</strong>
+                  <div class="row-sub">{{ row.portfolio_note }}</div>
+                </td>
                 <td><span class="desk-pill desk-pill-pending">{{ row.status }}</span></td>
               </tr>
             {% endfor %}
@@ -49,7 +57,7 @@
         <article class="mobile-data-card">
           <div class="mobile-data-card__header">
             <div>
-              <p class="mobile-data-card__kicker">Published Pick</p>
+              <p class="mobile-data-card__kicker">Current Portfolio Pick</p>
               <a class="mobile-data-card__title" href="/pick-detail/{{ row.fixture_id }}">{{ row.match }}</a>
             </div>
             <span class="desk-pill desk-pill-pending">{{ row.status }}</span>
@@ -59,14 +67,16 @@
             <div><span>Confidence</span><strong>{{ row.confidence_label }}</strong></div>
             <div><span>Model %</span><strong>{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</strong></div>
             <div><span>Entry Odds</span><strong>{{ "{:.2f}".format(row.entry_odds|float) if row.entry_odds is not none else "N/A" }}</strong></div>
+            <div><span>Portfolio</span><strong>{{ row.portfolio_state }}</strong></div>
           </div>
+          <p class="mobile-data-card__note">{{ row.portfolio_note }}</p>
         </article>
       {% endfor %}
     </div>
     {{ pagination_nav(payload.pagination, "page", set_query_param_href) }}
   {% else %}
     <article class="empty-state desk-empty-state">
-      <strong>No published picks are visible for the current board.</strong>
+      <strong>No current portfolio picks are visible for the current board.</strong>
       <p>{{ payload.publish_note }}</p>
     </article>
   {% endif %}

@@ -19,6 +19,14 @@ from sports_ai.dashboard import storage as dashboard_storage
 from sports_ai.dashboard.day12_rolling_xg import SOURCE_IDENTIFIER, build_xg_inspection
 from sports_ai.dashboard.fixture_provider import ApiFootballFixtureProvider, FixtureProviderError, FootballDataOrgFixtureProvider
 from sports_ai.dashboard.fixture_provider import API_FOOTBALL_PROVIDER, AuthoritativeFixtureStatistics
+from sports_ai.dashboard.portfolio_selection import (
+    PORTFOLIO_POLICY_ID_V1,
+    PORTFOLIO_POLICY_VERSION_V1,
+    PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT,
+    PORTFOLIO_STATE_PENDING,
+    PORTFOLIO_STATE_SELECTED,
+    PortfolioDisposition,
+)
 from sports_ai.dashboard.models import (
     FIXTURE_STATUS_FINISHED,
     FIXTURE_STATUS_LIVE,
@@ -28,7 +36,7 @@ from sports_ai.dashboard.models import (
 )
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices, _default_market_provider, _humanize_market_selection
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
-from sports_ai.storage import football_canonical_fixture, football_edge_desk, football_paper_trading
+from sports_ai.storage import football_canonical_fixture, football_edge_desk, football_paper_trading, football_portfolio_selection
 
 
 class FakeFixtureProvider:
@@ -693,6 +701,114 @@ def _seed_today_read_path_paper_rows(config: DashboardConfig, fixtures: list[Nor
             entry_odds=2.04,
             model_fair_price=1.72,
         )
+
+
+def _portfolio_enabled_config(tmp_path: Path) -> DashboardConfig:
+    return replace(
+        _dashboard_config(tmp_path),
+        portfolio_policy_effective_from="2026-08-01T00:00:00+00:00",
+    )
+
+
+def _portfolio_prediction(fixture: NormalizedFixture) -> dict[str, object]:
+    return {
+        "prediction_id": f"portfolio_prediction_{fixture.fixture_id}",
+        "fixture_id": fixture.fixture_id,
+        "competition_id": fixture.competition_id,
+        "competition_name": fixture.competition_name,
+        "home_team_name": fixture.home_team_name,
+        "away_team_name": fixture.away_team_name,
+        "kickoff_utc": fixture.kickoff_utc,
+        "season": fixture.season,
+        "model_snapshot_id": f"snapshot_{fixture.fixture_id}",
+        "model_versions": {"current_snapshot_model_version": "football_day11_manager_core_v1"},
+        "prediction_version": "football_prediction_v1",
+    }
+
+
+def _portfolio_decision_row(
+    *,
+    fixture: NormalizedFixture,
+    market_family: str,
+    selection: str,
+    line: float | None,
+    paper_trade_id: str | None,
+    edge: float,
+    model_probability: float,
+    fair_price: float,
+    best_price: float,
+    source_timestamp: str = "2026-08-20T10:00:00+00:00",
+    current_decision_state: str = "BET",
+    decision: str = "PRELIMINARY_CANDIDATE",
+    paper_entry_eligible: bool = True,
+    market_freshness: str = "FRESH",
+    day12_state: str = "PASSED",
+    reason_codes: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "fixture_id": fixture.fixture_id,
+        "competition_id": fixture.competition_id,
+        "competition_name": fixture.competition_name,
+        "decision": decision,
+        "current_decision_state": current_decision_state,
+        "market_family": market_family,
+        "selection": selection,
+        "line": line,
+        "model_probability": model_probability,
+        "model_fair_decimal_price": fair_price,
+        "best_available_price": best_price,
+        "best_available_bookmaker": "Pinnacle",
+        "best_available_source_timestamp": source_timestamp,
+        "market_as_of": source_timestamp,
+        "settlement_aware_edge": edge,
+        "paper_entry_eligible": paper_entry_eligible,
+        "paper_trade_id": paper_trade_id,
+        "market_freshness": market_freshness,
+        "day12_state": day12_state,
+        "reason_codes": list(reason_codes or []),
+    }
+
+
+def _record_portfolio_test_trade(
+    conn,
+    *,
+    fixture: NormalizedFixture,
+    prediction_id: str,
+    market: str,
+    selection: str,
+    line: float | None,
+    edge: float,
+    model_probability: float = 0.55,
+    fair_price: float = 1.8,
+    entry_odds: float = 2.0,
+    decision_timestamp: str = "2026-08-20T10:00:00+00:00",
+) -> str:
+    return football_paper_trading.record_paper_trade_entry(
+        conn,
+        football_paper_trading.PaperTradeEntry(
+            prediction_id=prediction_id,
+            fixture_id=fixture.fixture_id,
+            model_snapshot_id=f"snapshot_{prediction_id}",
+            model_version="football_day11_manager_core_v1",
+            market=market,
+            selection=selection,
+            line=line,
+            model_probability=model_probability,
+            model_fair_price=fair_price,
+            available_market_price=entry_odds,
+            edge=edge,
+            minimum_acceptable_price=1.8,
+            decision="PAPER_CANDIDATE",
+            decision_timestamp=decision_timestamp,
+            kickoff=fixture.kickoff_utc,
+            safeguard_state="PASSED",
+            entry_eligibility="ELIGIBLE",
+            bookmaker="Pinnacle",
+            provider="fake-market-provider",
+            entry_odds=entry_odds,
+            entry_captured_at=decision_timestamp,
+        ),
+    )
 
 
 def test_api_football_normalization_maps_status_and_score():
@@ -2788,7 +2904,7 @@ def test_dashboard_payload_current_slate_counts_use_persisted_paper_scope(
     metrics = {item["label"]: item for item in payload["glance_metrics"]}
     funnel = {item["label"]: item for item in payload["desk_funnel"]}
 
-    assert payload["best_picks_summary"]["count"] == 1
+    assert payload["best_picks_summary"]["count"] == 2
     assert len(payload["today_published_rows"]) == 1
     assert payload["current_slate_summary"]["fixture_count"] == 2
     assert payload["current_slate_summary"]["count"] == 3
@@ -3565,6 +3681,1218 @@ def test_dashboard_get_routes_do_not_run_schema_initialization_after_startup(
 
     assert all(response.status_code == 200 for response in responses)
     assert schema_calls == {"dashboard": 0, "paper": 0, "canonical": 0}
+
+
+def test_dashboard_portfolio_policy_separates_selected_subset_from_opportunity_truth(tmp_path: Path) -> None:
+    services, fixtures = _build_today_read_path_services(tmp_path)
+    services.config = replace(
+        services.config,
+        portfolio_policy_effective_from="2026-08-01T00:00:00+00:00",
+    )
+    primary_fixture = fixtures[0]
+    decision_timestamp = "2026-08-20T10:00:00+00:00"
+
+    def record_trade(
+        conn,
+        *,
+        prediction_id: str,
+        market: str,
+        selection: str,
+        line: float | None,
+        edge: float,
+        fair_price: float,
+        entry_odds: float,
+    ) -> str:
+        return football_paper_trading.record_paper_trade_entry(
+            conn,
+            football_paper_trading.PaperTradeEntry(
+                prediction_id=prediction_id,
+                fixture_id=primary_fixture.fixture_id,
+                model_snapshot_id=f"snapshot_{prediction_id}",
+                model_version="football_day11_manager_core_v1",
+                market=market,
+                selection=selection,
+                line=line,
+                model_probability=0.55,
+                model_fair_price=fair_price,
+                available_market_price=entry_odds,
+                edge=edge,
+                minimum_acceptable_price=1.8,
+                decision="PAPER_CANDIDATE",
+                decision_timestamp=decision_timestamp,
+                kickoff=primary_fixture.kickoff_utc,
+                safeguard_state="READY",
+                entry_eligibility="ELIGIBLE",
+                bookmaker="Pinnacle",
+                provider="fake-market-provider",
+                entry_odds=entry_odds,
+                entry_captured_at=decision_timestamp,
+            ),
+        )
+
+    asyncio.run(services.initialize())
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        goals_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_goals",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.09,
+            fair_price=1.72,
+            entry_odds=2.04,
+        )
+        one_x_two_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_1x2",
+            market="1x2",
+            selection="HOME",
+            line=None,
+            edge=0.07,
+            fair_price=1.64,
+            entry_odds=2.18,
+        )
+        btts_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_btts",
+            market="btts",
+            selection="YES",
+            line=None,
+            edge=0.06,
+            fair_price=1.90,
+            entry_odds=2.12,
+        )
+        corners_trade_id = record_trade(
+            conn,
+            prediction_id="portfolio_corners",
+            market="corner_total",
+            selection="OVER",
+            line=9.5,
+            edge=0.04,
+            fair_price=1.95,
+            entry_odds=2.08,
+        )
+
+    primary_decision_rows = [
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "goals_total",
+            "selection": "OVER",
+            "line": 2.5,
+            "model_probability": 0.58,
+            "model_fair_decimal_price": 1.72,
+            "best_available_price": 2.04,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.09,
+            "paper_entry_eligible": True,
+            "paper_trade_id": goals_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "1x2",
+            "selection": "HOME",
+            "line": None,
+            "model_probability": 0.61,
+            "model_fair_decimal_price": 1.64,
+            "best_available_price": 2.18,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.07,
+            "paper_entry_eligible": True,
+            "paper_trade_id": one_x_two_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "btts",
+            "selection": "YES",
+            "line": None,
+            "model_probability": 0.52,
+            "model_fair_decimal_price": 1.90,
+            "best_available_price": 2.12,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.06,
+            "paper_entry_eligible": True,
+            "paper_trade_id": btts_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+        {
+            "fixture_id": primary_fixture.fixture_id,
+            "competition_id": "ENG1",
+            "competition_name": "Premier League",
+            "decision": "PRELIMINARY_CANDIDATE",
+            "current_decision_state": "BET",
+            "market_family": "corner_total",
+            "selection": "OVER",
+            "line": 9.5,
+            "model_probability": 0.50,
+            "model_fair_decimal_price": 1.95,
+            "best_available_price": 2.08,
+            "best_available_bookmaker": "Pinnacle",
+            "best_available_source_timestamp": decision_timestamp,
+            "settlement_aware_edge": 0.04,
+            "paper_entry_eligible": True,
+            "paper_trade_id": corners_trade_id,
+            "market_freshness": "FRESH",
+            "day12_state": "PASSED",
+            "reason_codes": [],
+        },
+    ]
+    services._market_evaluation_map = lambda: {
+        primary_fixture.fixture_id: {
+            "state": "READY",
+            "reason": None,
+            "decision_rows": primary_decision_rows,
+            "display_rows": list(primary_decision_rows),
+        }
+    }
+
+    prediction = {
+        "prediction_id": "portfolio_prediction_primary",
+        "fixture_id": primary_fixture.fixture_id,
+        "competition_id": primary_fixture.competition_id,
+        "home_team_name": primary_fixture.home_team_name,
+        "away_team_name": primary_fixture.away_team_name,
+        "kickoff_utc": primary_fixture.kickoff_utc,
+        "season": primary_fixture.season,
+    }
+
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        selection_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+
+    selection_by_trade_id = {
+        str(row["paper_trade_id"]): str(row["selection_state"])
+        for row in selection_rows
+    }
+    assert selection_by_trade_id[goals_trade_id] == PORTFOLIO_STATE_SELECTED
+    assert selection_by_trade_id[one_x_two_trade_id] == PORTFOLIO_STATE_SELECTED
+    assert selection_by_trade_id[btts_trade_id] == PORTFOLIO_STATE_SELECTED
+    assert selection_by_trade_id[corners_trade_id] == PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT
+    assert len(selection_rows) == 4
+
+    dashboard_payload = services.get_dashboard_payload()
+    member_card_payload = services.get_member_card_payload()
+    performance_payload = services.get_performance_payload()
+    reports_payload = services.get_reports_payload()
+
+    assert dashboard_payload["today_summary"]["suggested_bets"] == 3
+    assert dashboard_payload["today_summary"]["matches"] == 1
+    assert dashboard_payload["today_summary"]["open_portfolio_exposure"] == pytest.approx(3.0)
+    assert dashboard_payload["best_picks_summary"]["count"] == 3
+    assert (
+        dashboard_payload["best_picks_summary"]["source"]
+        == "Current deterministic portfolio selection. A separate frozen publication lifecycle is not active yet."
+    )
+    assert {
+        str(row["paper_trade_id"])
+        for row in dashboard_payload["published_paper_rows"]
+    } == {goals_trade_id, one_x_two_trade_id, btts_trade_id}
+
+    assert member_card_payload["publish_state"] == "CURRENT PORTFOLIO"
+    assert member_card_payload["portfolio_policy"] == {
+        "policy_id": PORTFOLIO_POLICY_ID_V1,
+        "policy_version": PORTFOLIO_POLICY_VERSION_V1,
+        "effective_from": "2026-08-01T00:00:00+00:00",
+    }
+    assert len(member_card_payload["rows"]) == 3
+    assert {row["portfolio_state"] for row in member_card_payload["rows"]} == {"SELECTED"}
+
+    assert performance_payload["current_paper_summary"]["positions"] == 4
+    assert performance_payload["current_paper_summary"]["open_positions"] == 4
+    assert performance_payload["current_portfolio_summary"]["positions"] == 3
+    assert performance_payload["current_portfolio_summary"]["open_positions"] == 3
+    assert len(performance_payload["portfolio_positions"]) == 3
+    assert len(performance_payload["open_portfolio_positions"]) == 3
+    assert performance_payload["portfolio_publish_state"] == "CURRENT PORTFOLIO"
+
+    assert reports_payload["portfolio_publish_state"] == "CURRENT PORTFOLIO"
+    assert reports_payload["portfolio_policy"] == {
+        "policy_id": PORTFOLIO_POLICY_ID_V1,
+        "policy_version": PORTFOLIO_POLICY_VERSION_V1,
+        "effective_from": "2026-08-01T00:00:00+00:00",
+    }
+
+    asyncio.run(services.shutdown())
+
+
+def test_current_portfolio_removes_position_when_current_bet_becomes_no_bet(tmp_path: Path) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    prediction = _portfolio_prediction(fixture)
+
+    asyncio.run(services.initialize())
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
+        paper_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=fixture,
+            prediction_id="portfolio_no_bet_history",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.09,
+            fair_price=1.72,
+            entry_odds=2.04,
+        )
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.09,
+                        model_probability=0.58,
+                        fair_price=1.72,
+                        best_price=2.04,
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        selected_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=-0.02,
+                        model_probability=0.52,
+                        fair_price=1.92,
+                        best_price=1.70,
+                        source_timestamp="2026-08-20T10:30:00+00:00",
+                        current_decision_state="NO_BET_VALUE",
+                        decision="NO_BET",
+                        paper_entry_eligible=False,
+                        reason_codes=["PRICE_NO_VALUE"],
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+        evaluation_count = conn.execute("SELECT COUNT(*) FROM football_portfolio_evaluations").fetchone()[0]
+        paper_rows = football_paper_trading.fetch_paper_trade_rows(conn)
+
+    assert len(selected_rows) == 1
+    assert selected_rows[0]["selection_state"] == PORTFOLIO_STATE_SELECTED
+    assert current_rows == []
+    assert evaluation_count == 2
+    assert len(paper_rows) == 1
+    assert paper_rows[0]["paper_trade_id"] == paper_trade_id
+
+    asyncio.run(services.shutdown())
+
+
+def test_current_portfolio_removes_position_when_current_bet_becomes_stale(tmp_path: Path) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    prediction = _portfolio_prediction(fixture)
+
+    asyncio.run(services.initialize())
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
+        paper_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=fixture,
+            prediction_id="portfolio_stale_history",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.08,
+            fair_price=1.76,
+            entry_odds=2.01,
+        )
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.08,
+                        model_probability=0.57,
+                        fair_price=1.76,
+                        best_price=2.01,
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.02,
+                        model_probability=0.55,
+                        fair_price=1.82,
+                        best_price=1.88,
+                        source_timestamp="2026-08-20T10:30:00+00:00",
+                        current_decision_state="NO_BET_STALE_MARKET",
+                        decision="STALE_MARKET",
+                        paper_entry_eligible=False,
+                        market_freshness="STALE",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+        evaluation_count = conn.execute("SELECT COUNT(*) FROM football_portfolio_evaluations").fetchone()[0]
+
+    assert current_rows == []
+    assert evaluation_count == 2
+
+    asyncio.run(services.shutdown())
+
+
+def test_current_portfolio_same_source_timestamp_fresh_to_stale_uses_newer_evaluation(tmp_path: Path, monkeypatch) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    prediction = _portfolio_prediction(fixture)
+    evaluation_times = iter(
+        [
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+        ]
+    )
+
+    asyncio.run(services.initialize())
+    monkeypatch.setattr("sports_ai.dashboard.services.utc_now_iso", lambda: next(evaluation_times))
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
+        paper_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=fixture,
+            prediction_id="portfolio_same_source_timestamp_stale",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.08,
+            fair_price=1.76,
+            entry_odds=2.01,
+            decision_timestamp="2026-08-31T09:55:00+00:00",
+        )
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.08,
+                        model_probability=0.57,
+                        fair_price=1.76,
+                        best_price=2.01,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.02,
+                        model_probability=0.55,
+                        fair_price=1.82,
+                        best_price=1.88,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                        current_decision_state="NO_BET_STALE_MARKET",
+                        decision="STALE_MARKET",
+                        paper_entry_eligible=False,
+                        market_freshness="STALE",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+            initialize_schema=False,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T12:30:00+00:00"
+    assert current_evaluations[0]["candidate_snapshot_at"] == "2026-08-31T09:55:00+00:00"
+    assert current_rows == []
+
+    asyncio.run(services.shutdown())
+
+
+def test_current_portfolio_same_source_timestamp_fresh_to_stale_to_fresh_appends_recurrence(tmp_path: Path, monkeypatch) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    prediction = _portfolio_prediction(fixture)
+    evaluation_times = iter(
+        [
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T10:00:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+            "2026-08-31T12:30:00+00:00",
+            "2026-08-31T13:00:00+00:00",
+            "2026-08-31T13:00:00+00:00",
+        ]
+    )
+
+    asyncio.run(services.initialize())
+    monkeypatch.setattr("sports_ai.dashboard.services.utc_now_iso", lambda: next(evaluation_times))
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        assert services._canonical_fixture_for_prediction(conn, prediction) is not None
+        paper_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=fixture,
+            prediction_id="portfolio_same_source_timestamp_recurrence",
+            market="goals_total",
+            selection="OVER",
+            line=2.5,
+            edge=0.08,
+            fair_price=1.76,
+            entry_odds=2.01,
+            decision_timestamp="2026-08-31T09:55:00+00:00",
+        )
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.08,
+                        model_probability=0.57,
+                        fair_price=1.76,
+                        best_price=2.01,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.02,
+                        model_probability=0.55,
+                        fair_price=1.82,
+                        best_price=1.88,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                        current_decision_state="NO_BET_STALE_MARKET",
+                        decision="STALE_MARKET",
+                        paper_entry_eligible=False,
+                        market_freshness="STALE",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        services._market_evaluation_map = lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family="goals_total",
+                        selection="OVER",
+                        line=2.5,
+                        paper_trade_id=paper_trade_id,
+                        edge=0.08,
+                        model_probability=0.57,
+                        fair_price=1.76,
+                        best_price=2.01,
+                        source_timestamp="2026-08-31T09:55:00+00:00",
+                    )
+                ],
+                "display_rows": [],
+            }
+        }
+        services._sync_portfolio_selection_for_prediction(conn, prediction=prediction)
+
+        evaluation_history = conn.execute(
+            """
+            SELECT evaluation_id, predecessor_evaluation_id, evaluated_at, evaluation_signature, candidate_count
+            FROM football_portfolio_evaluations
+            ORDER BY evaluated_at, created_at, evaluation_id
+            """
+        ).fetchall()
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+            initialize_schema=False,
+        )
+        current_rows = football_portfolio_selection.fetch_current_portfolio_selections(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+        )
+
+    history = [dict(row) for row in evaluation_history]
+    assert len(history) == 3
+    assert history[0]["evaluation_signature"] == history[2]["evaluation_signature"]
+    assert history[0]["evaluation_id"] != history[2]["evaluation_id"]
+    assert history[2]["predecessor_evaluation_id"] == history[1]["evaluation_id"]
+    assert current_evaluations[0]["evaluation_id"] == history[2]["evaluation_id"]
+    assert current_evaluations[0]["evaluated_at"] == "2026-08-31T13:00:00+00:00"
+    assert current_rows[0]["paper_trade_id"] == paper_trade_id
+    assert current_rows[0]["selection_state"] == PORTFOLIO_STATE_SELECTED
+
+    asyncio.run(services.shutdown())
+
+
+def test_dashboard_policy_active_without_selection_keeps_best_picks_empty(tmp_path: Path, monkeypatch) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    fixture_row = fixture.to_dict(timezone_name="UTC")
+    paper_rows = [
+        {
+            "paper_trade_id": f"paper_pending_{index}",
+            "fixture_id": fixture.fixture_id,
+            "market": market,
+            "selection": selection,
+            "line": line,
+            "model_probability": 0.55,
+            "model_fair_price": fair_price,
+            "entry_odds": entry_odds,
+            "edge": edge,
+            "bookmaker": "Pinnacle",
+            "kickoff": fixture.kickoff_utc,
+            "competition_id": fixture.competition_id,
+            "competition_name": fixture.competition_name,
+            "home_team_name": fixture.home_team_name,
+            "away_team_name": fixture.away_team_name,
+            "decision_timestamp": "2026-08-20T10:00:00+00:00",
+            "trade_state": "PENDING",
+            "latest_update_payload": None,
+        }
+        for index, (market, selection, line, edge, fair_price, entry_odds) in enumerate(
+            [
+                ("goals_total", "OVER", 2.5, 0.09, 1.72, 2.04),
+                ("1x2", "HOME", None, 0.07, 1.64, 2.18),
+                ("btts", "YES", None, 0.06, 1.90, 2.12),
+                ("corner_total", "OVER", 9.5, 0.04, 1.95, 2.08),
+            ],
+            start=1,
+        )
+    ]
+    decision_rows = [
+        _portfolio_decision_row(
+            fixture=fixture,
+            market_family=str(row["market"]),
+            selection=str(row["selection"]),
+            line=None if row.get("line") is None else float(row["line"]),
+            paper_trade_id=str(row["paper_trade_id"]),
+            edge=float(row["edge"]),
+            model_probability=0.55,
+            fair_price=float(row["model_fair_price"]),
+            best_price=float(row["entry_odds"]),
+        )
+        for row in paper_rows
+    ]
+
+    local_date = datetime.fromisoformat(fixture.kickoff_utc).astimezone(ZoneInfo("Asia/Manila")).date()
+    monkeypatch.setattr(services, "_current_local_date", lambda: local_date)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: [fixture_row])
+    monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: [fixture_row])
+    monkeypatch.setattr(services, "_filter_fixture_rows", lambda *, bucket, fixture_rows: [fixture_row] if bucket == "today" else [])
+    monkeypatch.setattr(
+        services,
+        "_market_evaluation_map",
+        lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": decision_rows,
+                "display_rows": list(decision_rows),
+            }
+        },
+    )
+    monkeypatch.setattr(services, "_paper_positions", lambda: (paper_rows, football_paper_trading.paper_trading_status(paper_rows)))
+
+    payload = services.get_dashboard_payload()
+
+    assert payload["best_picks"] == []
+    assert payload["best_picks_summary"]["count"] == 0
+    assert payload["best_picks_summary"]["empty_message"] == "Portfolio selection pending for current qualified opportunities."
+    assert len([row for row in payload["today_desk_rows"] if row["desk_label"] == "BET"]) == 4
+
+
+def test_dashboard_policy_inactive_keeps_legacy_best_picks_behavior(tmp_path: Path, monkeypatch) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    fixture_row = fixture.to_dict(timezone_name="UTC")
+    paper_rows = [
+        {
+            "paper_trade_id": "paper_legacy_best_pick",
+            "fixture_id": fixture.fixture_id,
+            "market": "1x2",
+            "selection": "HOME",
+            "line": None,
+            "model_probability": 0.55,
+            "model_fair_price": 1.64,
+            "entry_odds": 2.18,
+            "edge": 0.07,
+            "bookmaker": "Pinnacle",
+            "kickoff": fixture.kickoff_utc,
+            "competition_id": fixture.competition_id,
+            "competition_name": fixture.competition_name,
+            "home_team_name": fixture.home_team_name,
+            "away_team_name": fixture.away_team_name,
+            "decision_timestamp": "2026-08-20T10:00:00+00:00",
+            "trade_state": "PENDING",
+            "latest_update_payload": None,
+        }
+    ]
+    decision_row = _portfolio_decision_row(
+        fixture=fixture,
+        market_family="1x2",
+        selection="HOME",
+        line=None,
+        paper_trade_id="paper_legacy_best_pick",
+        edge=0.07,
+        model_probability=0.61,
+        fair_price=1.64,
+        best_price=2.18,
+    )
+
+    monkeypatch.setattr(services, "_current_local_date", lambda: datetime.fromisoformat(fixture.kickoff_utc).astimezone(ZoneInfo("Asia/Manila")).date())
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: [fixture_row])
+    monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: [fixture_row])
+    monkeypatch.setattr(services, "_filter_fixture_rows", lambda *, bucket, fixture_rows: [fixture_row] if bucket == "today" else [])
+    monkeypatch.setattr(
+        services,
+        "_market_evaluation_map",
+        lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [decision_row],
+                "display_rows": [decision_row],
+            }
+        },
+    )
+    monkeypatch.setattr(services, "_paper_positions", lambda: (paper_rows, football_paper_trading.paper_trading_status(paper_rows)))
+
+    payload = services.get_dashboard_payload()
+
+    assert payload["best_picks_summary"]["count"] == 1
+    assert payload["best_picks"][0]["paper_trade_id"] == "paper_legacy_best_pick"
+
+
+def test_dashboard_portfolio_match_counts_use_canonical_fixture_identity(tmp_path: Path, monkeypatch) -> None:
+    kickoff_utc = "2026-08-31T12:00:00+00:00"
+    first_fixture = replace(
+        _fixture(
+            fixture_id="api-football:123",
+            home_team_name="Arsenal",
+            away_team_name="Chelsea",
+        ),
+        provider="api-football",
+        provider_fixture_id="123",
+        kickoff_utc=kickoff_utc,
+    )
+    second_fixture = replace(
+        _fixture(
+            fixture_id="football-data.org:456",
+            home_team_name="Arsenal",
+            away_team_name="Chelsea",
+        ),
+        provider="football-data.org",
+        provider_fixture_id="456",
+        kickoff_utc=kickoff_utc,
+    )
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([first_fixture, second_fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    with dashboard_storage.connect(services.config.dashboard_db_path) as conn:
+        dashboard_storage.ensure_schema(conn)
+        dashboard_storage.upsert_fixtures(conn, [first_fixture, second_fixture], updated_at="2026-08-31T00:00:00+00:00")
+
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        first_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=first_fixture,
+            prediction_id="api_position",
+            market="1x2",
+            selection="HOME",
+            line=None,
+            edge=0.07,
+            fair_price=1.64,
+            entry_odds=2.18,
+            decision_timestamp="2026-08-31T09:00:00+00:00",
+        )
+        second_trade_id = _record_portfolio_test_trade(
+            conn,
+            fixture=second_fixture,
+            prediction_id="fd_position",
+            market="btts",
+            selection="YES",
+            line=None,
+            edge=0.06,
+            fair_price=1.90,
+            entry_odds=2.12,
+            decision_timestamp="2026-08-31T09:05:00+00:00",
+        )
+        canonical_fixture_id_1 = services._canonical_fixture_for_prediction(conn, _portfolio_prediction(first_fixture))
+        canonical_fixture_id_2 = services._canonical_fixture_for_prediction(conn, _portfolio_prediction(second_fixture))
+        assert canonical_fixture_id_1 == canonical_fixture_id_2
+        football_portfolio_selection.record_portfolio_evaluation(
+            conn,
+            policy=services._portfolio_policy(),
+            canonical_fixture_id=str(canonical_fixture_id_1),
+            evaluated_at="2026-08-31T09:10:00+00:00",
+            candidate_snapshot_at="2026-08-31T09:10:00+00:00",
+            evaluation_signature=football_portfolio_selection.portfolio_evaluation_signature(
+                policy=services._portfolio_policy(),
+                canonical_fixture_id=str(canonical_fixture_id_1),
+                candidates=[
+                    {
+                        "paper_trade_id": first_trade_id,
+                        "market": "1x2",
+                        "selection": "HOME",
+                        "line": None,
+                        "edge_at_selection": 0.07,
+                        "decision_timestamp": "2026-08-31T09:00:00+00:00",
+                        "created_at": "2026-08-31T09:00:00+00:00",
+                        "safeguard_state": "PASSED",
+                    },
+                    {
+                        "paper_trade_id": second_trade_id,
+                        "market": "btts",
+                        "selection": "YES",
+                        "line": None,
+                        "edge_at_selection": 0.06,
+                        "decision_timestamp": "2026-08-31T09:05:00+00:00",
+                        "created_at": "2026-08-31T09:05:00+00:00",
+                        "safeguard_state": "PASSED",
+                    },
+                ],
+            ),
+            dispositions=[
+                PortfolioDisposition(
+                    paper_trade_id=first_trade_id,
+                    canonical_fixture_id=str(canonical_fixture_id_1),
+                    market="1x2",
+                    selection="HOME",
+                    line=None,
+                    selection_state=PORTFOLIO_STATE_SELECTED,
+                    selection_rank=1,
+                    selection_reason="Selected for canonical test.",
+                    edge_at_selection=0.07,
+                ),
+                PortfolioDisposition(
+                    paper_trade_id=second_trade_id,
+                    canonical_fixture_id=str(canonical_fixture_id_1),
+                    market="btts",
+                    selection="YES",
+                    line=None,
+                    selection_state=PORTFOLIO_STATE_SELECTED,
+                    selection_rank=2,
+                    selection_reason="Selected for canonical test.",
+                    edge_at_selection=0.06,
+                ),
+            ],
+        )
+
+    first_row = first_fixture.to_dict(timezone_name="UTC")
+    second_row = second_fixture.to_dict(timezone_name="UTC")
+    monkeypatch.setattr(services, "_current_local_date", lambda: date(2026, 8, 31))
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: [first_row, second_row])
+    monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: [first_row, second_row])
+    monkeypatch.setattr(
+        services,
+        "_filter_fixture_rows",
+        lambda *, bucket, fixture_rows: [first_row, second_row] if bucket == "today" else [],
+    )
+    monkeypatch.setattr(services, "_market_evaluation_map", lambda: {})
+
+    payload = services.get_dashboard_payload()
+    metrics = {item["label"]: item for item in payload["glance_metrics"]}
+
+    assert payload["today_summary"]["matches"] == 1
+    assert metrics["Matches"]["value"] == "1"
+
+
+def test_dashboard_get_routes_do_not_create_portfolio_evaluations_when_policy_active(tmp_path: Path, monkeypatch) -> None:
+    fixture = _fixture()
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    fixture_row = fixture.to_dict(timezone_name="UTC")
+    paper_rows = [
+        {
+            "paper_trade_id": "paper_get_safe",
+            "fixture_id": fixture.fixture_id,
+            "market": "1x2",
+            "selection": "HOME",
+            "line": None,
+            "model_probability": 0.55,
+            "model_fair_price": 1.64,
+            "entry_odds": 2.18,
+            "edge": 0.07,
+            "bookmaker": "Pinnacle",
+            "kickoff": fixture.kickoff_utc,
+            "competition_id": fixture.competition_id,
+            "competition_name": fixture.competition_name,
+            "home_team_name": fixture.home_team_name,
+            "away_team_name": fixture.away_team_name,
+            "decision_timestamp": "2026-08-20T10:00:00+00:00",
+            "trade_state": "PENDING",
+            "latest_update_payload": None,
+        }
+    ]
+    decision_row = _portfolio_decision_row(
+        fixture=fixture,
+        market_family="1x2",
+        selection="HOME",
+        line=None,
+        paper_trade_id="paper_get_safe",
+        edge=0.07,
+        model_probability=0.61,
+        fair_price=1.64,
+        best_price=2.18,
+    )
+    record_calls = {"count": 0}
+    original_record = football_portfolio_selection.record_portfolio_evaluation
+
+    def counted_record(*args, **kwargs):
+        record_calls["count"] += 1
+        return original_record(*args, **kwargs)
+
+    local_date = datetime.fromisoformat(fixture.kickoff_utc).astimezone(ZoneInfo("Asia/Manila")).date()
+    monkeypatch.setattr(services, "_current_local_date", lambda: local_date)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: [fixture_row])
+    monkeypatch.setattr(services, "_future_fixture_rows", lambda rows: [fixture_row])
+    monkeypatch.setattr(services, "_filter_fixture_rows", lambda *, bucket, fixture_rows: [fixture_row] if bucket == "today" else [])
+    monkeypatch.setattr(
+        services,
+        "_market_evaluation_map",
+        lambda: {
+            fixture.fixture_id: {
+                "state": "READY",
+                "reason": None,
+                "decision_rows": [decision_row],
+                "display_rows": [decision_row],
+            }
+        },
+    )
+    monkeypatch.setattr(services, "_paper_positions", lambda: (paper_rows, football_paper_trading.paper_trading_status(paper_rows)))
+    monkeypatch.setattr(football_portfolio_selection, "record_portfolio_evaluation", counted_record)
+
+    app = create_app(services=services)
+    with TestClient(app) as client:
+        responses = [
+            client.get("/today"),
+            client.get("/betting-desk"),
+            client.get("/model-performance"),
+            client.get("/reports"),
+            client.get("/member-card"),
+        ]
+
+    assert all(response.status_code == 200 for response in responses)
+    assert record_calls["count"] == 0
+
+
+@pytest.mark.parametrize("position_count", [383, 1000, 2500])
+def test_current_portfolio_sync_reads_paper_ledger_once_per_batch(tmp_path: Path, monkeypatch, position_count: int) -> None:
+    fixture_count = max(1, position_count // 5)
+    fixtures = [
+        replace(
+            _fixture(
+                fixture_id=f"fake:portfolio_perf_{index:04d}",
+                home_team_name=f"Home {index:04d}",
+                away_team_name=f"Away {index:04d}",
+            ),
+            provider_fixture_id=f"fixture-{index:04d}",
+            kickoff_utc=f"2026-09-{(index % 20) + 1:02d}T12:00:00+00:00",
+        )
+        for index in range(fixture_count)
+    ]
+    services = DashboardServices(
+        config=_portfolio_enabled_config(tmp_path),
+        fixture_provider=FakeFixtureProvider(fixtures),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    prediction_by_fixture_id = {fixture.fixture_id: _portfolio_prediction(fixture) for fixture in fixtures}
+    evaluations: dict[str, dict[str, object]] = {}
+
+    with dashboard_storage.connect(services.config.dashboard_db_path) as conn:
+        dashboard_storage.ensure_schema(conn)
+        dashboard_storage.upsert_fixtures(conn, fixtures, updated_at="2026-08-31T00:00:00+00:00")
+
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        football_paper_trading.ensure_schema(conn)
+        football_portfolio_selection.ensure_schema(conn)
+        football_canonical_fixture.ensure_schema(conn)
+        recorded = 0
+        for fixture in fixtures:
+            decision_rows = []
+            for market, selection, line, edge, fair_price, entry_odds in [
+                ("1x2", "HOME", None, 0.08, 1.64, 2.18),
+                ("btts", "YES", None, 0.07, 1.90, 2.10),
+                ("goals_total", "OVER", 2.5, 0.09, 1.72, 2.04),
+                ("corner_total", "OVER", 9.5, 0.05, 1.95, 2.08),
+                ("asian_handicap", "HOME", -0.5, 0.06, 1.88, 2.02),
+            ]:
+                if recorded >= position_count:
+                    break
+                prediction_id = f"perf_{fixture.fixture_id}_{recorded}"
+                paper_trade_id = _record_portfolio_test_trade(
+                    conn,
+                    fixture=fixture,
+                    prediction_id=prediction_id,
+                    market=market,
+                    selection=selection,
+                    line=line,
+                    edge=edge,
+                    fair_price=fair_price,
+                    entry_odds=entry_odds,
+                    decision_timestamp=f"2026-08-31T09:{recorded % 60:02d}:00+00:00",
+                )
+                decision_rows.append(
+                    _portfolio_decision_row(
+                        fixture=fixture,
+                        market_family=market,
+                        selection=selection,
+                        line=line,
+                        paper_trade_id=paper_trade_id,
+                        edge=edge,
+                        model_probability=0.55,
+                        fair_price=fair_price,
+                        best_price=entry_odds,
+                        source_timestamp=f"2026-08-31T10:{recorded % 60:02d}:00+00:00",
+                    )
+                )
+                recorded += 1
+            if decision_rows:
+                evaluations[fixture.fixture_id] = {
+                    "state": "READY",
+                    "reason": None,
+                    "decision_rows": decision_rows,
+                    "display_rows": list(decision_rows),
+                }
+            if recorded >= position_count:
+                break
+
+        for fixture_id in evaluations:
+            assert services._canonical_fixture_for_prediction(conn, prediction_by_fixture_id[fixture_id]) is not None
+        services._schema_initialized = True
+
+        counts = {
+            "paper_fetch": 0,
+            "portfolio_ensure": 0,
+            "canonical_ensure": 0,
+            "canonical_resolve": 0,
+            "fixture_lookup": 0,
+            "portfolio_writes": 0,
+        }
+        original_fetch = football_paper_trading.fetch_paper_trade_rows
+        original_portfolio_ensure = football_portfolio_selection.ensure_schema
+        original_canonical_ensure = football_canonical_fixture.ensure_schema
+        original_resolve = football_canonical_fixture.resolve_or_create_canonical_fixture
+        original_fetch_fixture = dashboard_storage.fetch_fixture
+        original_record = football_portfolio_selection.record_portfolio_evaluation
+        original_dashboard_connect = dashboard_storage.connect
+        dashboard_sql = {"count": 0}
+
+        def counted_fetch(*args, **kwargs):
+            counts["paper_fetch"] += 1
+            return original_fetch(*args, **kwargs)
+
+        def counted_portfolio_ensure(*args, **kwargs):
+            counts["portfolio_ensure"] += 1
+            return original_portfolio_ensure(*args, **kwargs)
+
+        def counted_canonical_ensure(*args, **kwargs):
+            counts["canonical_ensure"] += 1
+            return original_canonical_ensure(*args, **kwargs)
+
+        def counted_resolve(*args, **kwargs):
+            counts["canonical_resolve"] += 1
+            return original_resolve(*args, **kwargs)
+
+        def counted_fetch_fixture(*args, **kwargs):
+            counts["fixture_lookup"] += 1
+            return original_fetch_fixture(*args, **kwargs)
+
+        def counted_record(*args, **kwargs):
+            counts["portfolio_writes"] += 1
+            return original_record(*args, **kwargs)
+
+        def counted_dashboard_connect(*args, **kwargs):
+            dashboard_conn = original_dashboard_connect(*args, **kwargs)
+            dashboard_conn.set_trace_callback(lambda _: dashboard_sql.__setitem__("count", dashboard_sql["count"] + 1))
+            return dashboard_conn
+
+        monkeypatch.setattr(football_paper_trading, "fetch_paper_trade_rows", counted_fetch)
+        monkeypatch.setattr(football_portfolio_selection, "ensure_schema", counted_portfolio_ensure)
+        monkeypatch.setattr(football_canonical_fixture, "ensure_schema", counted_canonical_ensure)
+        monkeypatch.setattr(football_canonical_fixture, "resolve_or_create_canonical_fixture", counted_resolve)
+        monkeypatch.setattr(dashboard_storage, "fetch_fixture", counted_fetch_fixture)
+        monkeypatch.setattr(football_portfolio_selection, "record_portfolio_evaluation", counted_record)
+        monkeypatch.setattr(dashboard_storage, "connect", counted_dashboard_connect)
+        started = time_module.perf_counter()
+        services._sync_current_portfolio_selections(
+            conn,
+            evaluations=evaluations,
+            prediction_by_fixture_id={fixture_id: prediction_by_fixture_id[fixture_id] for fixture_id in evaluations},
+        )
+        elapsed = time_module.perf_counter() - started
+        current_evaluations = football_portfolio_selection.fetch_current_portfolio_evaluations(
+            conn,
+            policy_id=PORTFOLIO_POLICY_ID_V1,
+            policy_version=PORTFOLIO_POLICY_VERSION_V1,
+            initialize_schema=False,
+        )
+
+    assert counts["paper_fetch"] == 1
+    assert counts["portfolio_ensure"] == 0
+    assert counts["canonical_ensure"] == 0
+    assert counts["canonical_resolve"] == 0
+    assert counts["fixture_lookup"] == 0
+    assert counts["portfolio_writes"] == len(evaluations)
+    assert dashboard_sql["count"] <= 1
+    assert len(current_evaluations) == len(evaluations)
+    assert elapsed > 0.0
 
 
 def test_sync_once_runs_blocking_body_off_event_loop_and_today_request_stays_responsive(

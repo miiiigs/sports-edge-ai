@@ -53,7 +53,7 @@
   <div class="desk-panel-head">
     <div>
       <span class="desk-panel-title">Best Picks</span>
-      <span class="desk-panel-note">Strongest current bets, enriched with published paper-entry truth when it exists</span>
+      <span class="desk-panel-note">{{ payload.best_picks_summary.source }}</span>
     </div>
     <span class="desk-panel-meta">{{ payload.best_picks_summary.count }} PICKS</span>
   </div>
@@ -73,6 +73,7 @@
               <th class="num">Implied %</th>
               <th class="num">EV / 1u</th>
               <th>Bookmaker</th>
+              <th>Portfolio</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -109,6 +110,10 @@
                 </td>
                 <td>{{ row.bookmaker or "N/A" }}</td>
                 <td>
+                  <strong>{{ row.portfolio_selection_state_label }}</strong>
+                  <div class="row-sub">{{ row.portfolio_selection_reason }}</div>
+                </td>
+                <td>
                   <span class="desk-pill {% if pick_tone == 'bet' %}desk-pill-bet{% elif pick_tone == 'lost' %}desk-pill-lost{% elif pick_tone == 'final' %}desk-pill-final{% else %}desk-pill-pending{% endif %}">{{ pick_state }}</span>
                 </td>
               </tr>
@@ -137,6 +142,7 @@
             <div><span>Model %</span><strong>{{ "{:.1%}".format(row.model_probability|float) if row.model_probability is not none else "N/A" }}</strong></div>
             <div><span>Implied %</span><strong>{{ "{:.1%}".format(row.implied_probability|float) if row.implied_probability is not none else "N/A" }}</strong></div>
             <div><span>EV / 1u</span><strong class="{% if row.edge is not none and row.edge >= 0 %}desk-edge-positive{% else %}desk-edge-negative{% endif %}">{{ "{:+.2%}".format(row.edge|float) if row.edge is not none else "N/A" }}</strong></div>
+            <div><span>Portfolio</span><strong>{{ row.portfolio_selection_state_label }}</strong></div>
           </div>
           <div class="mobile-data-card__footer">
             <span>
@@ -147,6 +153,7 @@
               {% if row.current_market_edge is not none %}
                 · Current EV {{ "{:+.2%}".format(row.current_market_edge|float) }}
               {% endif %}
+              · {{ row.portfolio_selection_reason }}
             </span>
             <a class="table-link" href="/pick-detail/{{ row.fixture_id }}">Open pick</a>
           </div>
@@ -157,7 +164,7 @@
   {% else %}
     <article class="empty-state desk-empty-state">
       <strong>{{ payload.best_picks_summary.empty_message }}</strong>
-      <p>Use Today's Desk below to inspect current BET and NO BET decisions even when nothing is on the published card yet.</p>
+      <p>Use Today's Desk below to inspect current BET and NO BET decisions even when nothing is on the current portfolio card yet.</p>
     </article>
   {% endif %}
 </section>
@@ -230,7 +237,7 @@
         <div><span>Scheduled Today</span><strong>{{ payload.today|length }}</strong></div>
         <div><span>Current BET Rows</span><strong>{{ payload.today_summary.approved }}</strong></div>
         <div><span>Current Desk Rows</span><strong>{{ payload.today_summary.predictions }}</strong></div>
-        <div><span>Published Picks</span><strong>{{ payload.best_picks_summary.count }}</strong></div>
+        <div><span>Portfolio Bets</span><strong>{{ payload.best_picks_summary.count }}</strong></div>
         <div><span>Upcoming Matches</span><strong>{{ payload.upcoming_count }}</strong></div>
       </div>
       <div class="inline-actions">

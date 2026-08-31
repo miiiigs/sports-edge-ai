@@ -243,6 +243,41 @@ def split_provider_fixture_id(fixture_id: str) -> tuple[str, str]:
     return provider or "", rest
 
 
+def fetch_canonical_fixture_ids_for_fixture_ids(
+    conn: sqlite3.Connection,
+    fixture_ids: list[str] | tuple[str, ...] | set[str],
+    *,
+    initialize_schema: bool = True,
+) -> dict[str, str]:
+    if initialize_schema:
+        ensure_schema(conn)
+    provider_fixture_ids_by_provider: dict[str, list[str]] = {}
+    for fixture_id in fixture_ids:
+        provider, provider_fixture_id = split_provider_fixture_id(str(fixture_id))
+        if not provider or not provider_fixture_id:
+            continue
+        provider_fixture_ids_by_provider.setdefault(provider, []).append(provider_fixture_id)
+    canonical_fixture_id_by_fixture_id: dict[str, str] = {}
+    chunk_size = 900
+    for provider, provider_fixture_ids in provider_fixture_ids_by_provider.items():
+        unique_provider_fixture_ids = sorted(set(provider_fixture_ids))
+        for start in range(0, len(unique_provider_fixture_ids), chunk_size):
+            chunk = unique_provider_fixture_ids[start : start + chunk_size]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = conn.execute(
+                f"""
+                SELECT provider_fixture_id, canonical_fixture_id
+                FROM fixture_provider_aliases
+                WHERE provider = ?
+                  AND provider_fixture_id IN ({placeholders})
+                """,
+                [provider, *chunk],
+            ).fetchall()
+            for row in rows:
+                canonical_fixture_id_by_fixture_id[f"{provider}:{row['provider_fixture_id']}"] = str(row["canonical_fixture_id"])
+    return canonical_fixture_id_by_fixture_id
+
+
 def resolve_or_create_canonical_fixture(
     conn: sqlite3.Connection,
     *,
