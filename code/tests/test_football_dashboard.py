@@ -2197,8 +2197,9 @@ def test_sync_current_market_state_does_not_run_schema_initialization_after_boun
     )
     services._build_snapshot()
 
-    schema_calls = {"dashboard": 0, "paper": 0, "canonical": 0, "portfolio": 0}
+    schema_calls = {"dashboard": 0, "paper": 0, "canonical": 0, "portfolio": 0, "edge_desk": 0}
     original_dashboard_ensure = dashboard_storage.ensure_schema
+    original_edge_desk_ensure = football_edge_desk.ensure_schema
     original_paper_ensure = football_paper_trading.ensure_schema
     original_canonical_ensure = football_canonical_fixture.ensure_schema
     original_portfolio_ensure = football_portfolio_selection.ensure_schema
@@ -2206,6 +2207,10 @@ def test_sync_current_market_state_does_not_run_schema_initialization_after_boun
     def counted_dashboard_ensure(conn):
         schema_calls["dashboard"] += 1
         return original_dashboard_ensure(conn)
+
+    def counted_edge_desk_ensure(conn):
+        schema_calls["edge_desk"] += 1
+        return original_edge_desk_ensure(conn)
 
     def counted_paper_ensure(conn):
         schema_calls["paper"] += 1
@@ -2237,12 +2242,67 @@ def test_sync_current_market_state_does_not_run_schema_initialization_after_boun
         fixture_row["prediction"] = prediction
 
         monkeypatch.setattr(dashboard_storage, "ensure_schema", counted_dashboard_ensure)
+        monkeypatch.setattr(football_edge_desk, "ensure_schema", counted_edge_desk_ensure)
         monkeypatch.setattr(football_paper_trading, "ensure_schema", counted_paper_ensure)
         monkeypatch.setattr(football_canonical_fixture, "ensure_schema", counted_canonical_ensure)
         monkeypatch.setattr(football_portfolio_selection, "ensure_schema", counted_portfolio_ensure)
         services._sync_current_market_state([fixture_row], dashboard_conn=dashboard_conn)
 
-    assert schema_calls == {"dashboard": 0, "paper": 0, "canonical": 0, "portfolio": 0}
+    assert schema_calls == {"dashboard": 0, "paper": 0, "canonical": 0, "portfolio": 0, "edge_desk": 0}
+
+
+def test_existing_prediction_shadow_write_does_not_reinitialize_edge_desk_after_boundary_init(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = _fixture()
+    config = replace(_dashboard_config(tmp_path), current_xg_connected=True)
+    services = DashboardServices(
+        config=config,
+        fixture_provider=FakeFixtureProvider([fixture]),
+        market_provider=FakeMarketProvider(configured=False),
+        xg_profile_factory=_xg_factory_for_fixtures(fixture),
+    )
+    services._build_snapshot()
+
+    schema_calls = {"edge_desk": 0}
+    original_edge_desk_ensure = football_edge_desk.ensure_schema
+
+    def counted_edge_desk_ensure(conn):
+        schema_calls["edge_desk"] += 1
+        return original_edge_desk_ensure(conn)
+
+    with dashboard_storage.connect(config.dashboard_db_path) as dashboard_conn:
+        dashboard_storage.ensure_schema(dashboard_conn)
+        football_edge_desk.ensure_schema(dashboard_conn)
+        dashboard_storage.upsert_fixtures(
+            dashboard_conn,
+            [fixture],
+            updated_at="2026-08-29T00:00:00+00:00",
+        )
+        with football_paper_trading.connect(config.paper_trading_db_path) as paper_conn:
+            football_paper_trading.ensure_schema(paper_conn)
+            football_canonical_fixture.ensure_schema(paper_conn)
+            football_portfolio_selection.ensure_schema(paper_conn)
+
+        services._schema_initialized = True
+        first_prediction = services.ensure_prediction(dashboard_conn, fixture)
+        shadow_rows_before = dashboard_conn.execute(
+            "SELECT COUNT(*) FROM edge_desk_agent_predictions WHERE fixture_id = ?",
+            (fixture.fixture_id,),
+        ).fetchone()[0]
+
+        monkeypatch.setattr(football_edge_desk, "ensure_schema", counted_edge_desk_ensure)
+        reused_prediction = services.ensure_prediction(dashboard_conn, fixture)
+        shadow_rows_after = dashboard_conn.execute(
+            "SELECT COUNT(*) FROM edge_desk_agent_predictions WHERE fixture_id = ?",
+            (fixture.fixture_id,),
+        ).fetchone()[0]
+
+    assert reused_prediction["prediction_id"] == first_prediction["prediction_id"]
+    assert shadow_rows_before > 0
+    assert shadow_rows_after == shadow_rows_before
+    assert schema_calls["edge_desk"] == 0
 
 
 def test_dashboard_services_settles_finished_asian_handicap_trade_idempotently_and_reports_live_results(

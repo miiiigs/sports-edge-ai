@@ -4396,6 +4396,7 @@ class DashboardServices:
                 conn,
                 fixture=fixture.to_dict(timezone_name="UTC"),
                 prediction=prediction,
+                initialize_schema=self._read_requires_schema_init(),
             )
         except Exception as exc:
             self._mark_edge_desk_degraded(
