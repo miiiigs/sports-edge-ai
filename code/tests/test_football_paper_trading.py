@@ -106,6 +106,80 @@ def test_paper_trading_store_appends_snapshots_and_settles_entries(tmp_path):
     assert paper_trading_status(rows)["ledger_state"] == "READY"
 
 
+def test_market_snapshot_queries_use_indexes_for_identity_lookup_and_fixture_history(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    snapshot = StoredMarketSnapshot(
+        fixture_id="evt_fixture_1",
+        provider="mock-provider",
+        bookmaker="Book A",
+        market="1x2",
+        selection="HOME",
+        line=2.5,
+        odds=2.2,
+        ingestion_version="v1",
+        provider_market_id="mkt_1",
+        provider_timestamp="2026-08-20T09:00:00+00:00",
+        captured_at="2026-08-20T09:00:30+00:00",
+        provider_fixture_id="provider_fixture_1",
+    )
+    with connect(db_path) as conn:
+        ensure_schema(conn)
+        record_market_snapshot(conn, snapshot)
+        identity_plan = conn.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT snapshot_id
+            FROM market_snapshots
+            WHERE fixture_id = ?
+              AND provider = ?
+              AND bookmaker = ?
+              AND market = ?
+              AND selection = ?
+              AND line IS ?
+              AND odds = ?
+              AND provider_timestamp IS ?
+              AND provider_fixture_id IS ?
+              AND is_pre_match = ?
+            ORDER BY snapshot_id DESC
+            LIMIT 1
+            """,
+            (
+                snapshot.fixture_id,
+                snapshot.provider,
+                snapshot.bookmaker,
+                snapshot.market,
+                snapshot.selection,
+                snapshot.line,
+                snapshot.odds,
+                snapshot.provider_timestamp,
+                snapshot.provider_fixture_id,
+                1,
+            ),
+        ).fetchall()
+        fixture_plan = conn.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT snapshot_id, fixture_id, provider, bookmaker, market, selection, line, odds,
+                   provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
+                   provider_fixture_id, home_team_name, away_team_name, competition_id, competition_name,
+                   kickoff_utc, freshness_state
+            FROM market_snapshots
+            WHERE fixture_id = ?
+            ORDER BY captured_at, snapshot_id
+            """,
+            (snapshot.fixture_id,),
+        ).fetchall()
+
+    identity_details = " | ".join(str(row[3]) for row in identity_plan)
+    fixture_details = " | ".join(str(row[3]) for row in fixture_plan)
+
+    assert "idx_market_snapshots_identity_lookup" in identity_details
+    assert "idx_market_snapshots_fixture_captured" in fixture_details
+    assert "SCAN market_snapshots" not in identity_details
+    assert "SCAN market_snapshots" not in fixture_details
+    assert "USE TEMP B-TREE FOR ORDER BY" not in fixture_details
+
+
 def test_paper_trading_store_prevents_duplicate_entry_signatures(tmp_path):
     db_path = tmp_path / "football_paper_trading.sqlite"
     entry = PaperTradeEntry(
