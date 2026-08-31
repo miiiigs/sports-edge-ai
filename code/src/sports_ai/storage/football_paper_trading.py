@@ -158,13 +158,14 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
-    try:
-        conn.execute("PRAGMA journal_mode = WAL")
-    except sqlite3.OperationalError:
-        # Brand-new concurrent connections can race while SQLite transitions
-        # the file into WAL mode. Falling back for that connection is safe.
-        pass
     return conn
+
+
+def initialize_database(conn: sqlite3.Connection) -> None:
+    journal_mode = str(conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]).lower()
+    if journal_mode != "wal":
+        raise sqlite3.OperationalError(f"expected WAL journal mode, got {journal_mode!r}")
+    ensure_schema(conn)
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

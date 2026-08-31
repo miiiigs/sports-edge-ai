@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time as time_module
 
 import pytest
 
@@ -12,6 +13,7 @@ from sports_ai.storage.football_paper_trading import (
     fetch_market_snapshots,
     find_existing_paper_trade_entry,
     fetch_paper_trade_rows,
+    initialize_database,
     paper_trading_performance,
     paper_trading_status,
     record_market_snapshot,
@@ -20,6 +22,23 @@ from sports_ai.storage.football_paper_trading import (
     StoredMarketSnapshot,
     append_trade_update,
 )
+
+
+def _normalize_sql(sql: str) -> str:
+    return " ".join(str(sql).split()).lower()
+
+
+def _recording_connect(connect_fn, statements: list[str]):
+    class RecordingConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=(), /):
+            statements.append(_normalize_sql(str(sql)))
+            return super().execute(sql, parameters)
+
+    def _connect(*args, **kwargs):
+        kwargs["factory"] = RecordingConnection
+        return connect_fn(*args, **kwargs)
+
+    return _connect
 
 
 def test_paper_trading_store_appends_snapshots_and_settles_entries(tmp_path):
@@ -178,6 +197,53 @@ def test_market_snapshot_queries_use_indexes_for_identity_lookup_and_fixture_his
     assert "SCAN market_snapshots" not in identity_details
     assert "SCAN market_snapshots" not in fixture_details
     assert "USE TEMP B-TREE FOR ORDER BY" not in fixture_details
+
+
+def test_paper_connect_skips_wal_reinitialization_while_writer_holds_transaction(tmp_path, monkeypatch):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    with connect(db_path) as conn:
+        initialize_database(conn)
+
+    with sqlite3.connect(db_path) as conn:
+        assert str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal"
+
+    writer = sqlite3.connect(db_path, timeout=5)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute(
+        """
+        INSERT INTO market_snapshots (
+            fixture_id, provider, bookmaker, market, selection, odds,
+            captured_at, is_pre_match, ingestion_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "writer-fixture",
+            "writer-provider",
+            "Writer Book",
+            "1x2",
+            "HOME",
+            2.0,
+            "2026-09-01T00:00:00+00:00",
+            1,
+            "writer-ingestion",
+        ),
+    )
+
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect", _recording_connect(original_connect, statements))
+
+    started = time_module.perf_counter()
+    conn = connect(db_path)
+    elapsed = time_module.perf_counter() - started
+    conn.close()
+
+    writer.rollback()
+    writer.close()
+
+    assert elapsed < 1.0
+    assert sum("pragma journal_mode = wal" in statement for statement in statements) == 0
+    assert sum("pragma busy_timeout = 5000" in statement for statement in statements) == 1
 
 
 def test_paper_trading_store_prevents_duplicate_entry_signatures(tmp_path):
