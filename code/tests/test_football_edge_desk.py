@@ -557,6 +557,30 @@ def test_route_b_output_shadows_into_agent_prediction_rows_and_is_idempotent(tmp
     assert all(row["reason_code"] == "CONSENSUS_INSUFFICIENT_AGENTS" for row in decision_rows)
 
 
+def test_record_shadow_prediction_bundle_initializes_schema_by_default(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "edge_desk.sqlite"
+    schema_calls = {"count": 0}
+    original_ensure_schema = football_edge_desk.ensure_schema
+
+    def counted_ensure_schema(conn: sqlite3.Connection) -> None:
+        schema_calls["count"] += 1
+        original_ensure_schema(conn)
+
+    monkeypatch.setattr(football_edge_desk, "ensure_schema", counted_ensure_schema)
+
+    with football_edge_desk.connect(db_path) as conn:
+        persisted = football_edge_desk.record_shadow_prediction_bundle(
+            conn,
+            fixture=_fixture(),
+            prediction=_ready_prediction(),
+        )
+        stored_prediction_count = conn.execute("SELECT COUNT(*) FROM edge_desk_agent_predictions").fetchone()[0]
+
+    assert schema_calls["count"] >= 1
+    assert stored_prediction_count == len(persisted["prediction_rows"])
+    assert stored_prediction_count > 0
+
+
 def test_changed_model_version_and_as_of_create_new_prediction_truth(tmp_path):
     db_path = tmp_path / "edge_desk.sqlite"
     fixture = _fixture()

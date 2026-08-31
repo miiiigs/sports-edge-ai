@@ -263,6 +263,15 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     seed_foundation(conn)
 
 
+def _ensure_schema_if_requested(
+    conn: sqlite3.Connection,
+    *,
+    initialize_schema: bool,
+) -> None:
+    if initialize_schema:
+        ensure_schema(conn)
+
+
 def seed_foundation(conn: sqlite3.Connection) -> None:
     ensure_schema_only(conn)
     with conn:
@@ -913,8 +922,9 @@ def record_shadow_prediction_bundle(
     *,
     fixture: dict[str, Any],
     prediction: dict[str, Any],
+    initialize_schema: bool = True,
 ) -> dict[str, Any]:
-    ensure_schema(conn)
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     prediction_rows = [
         row
         for row in _build_agent_prediction_rows(fixture=fixture, prediction=prediction)
@@ -930,7 +940,11 @@ def record_shadow_prediction_bundle(
     consensus_rows = []
     decision_rows = []
     for grouped_rows in _group_predictions_by_market(stored_predictions):
-        consensus_row = _build_consensus_row(conn, grouped_rows)
+        consensus_row = _build_consensus_row(
+            conn,
+            grouped_rows,
+            initialize_schema=initialize_schema,
+        )
         stored_consensus = _insert_consensus_row(conn, consensus_row)
         consensus_rows.append(stored_consensus)
         decision_row = _build_decision_row(grouped_rows, stored_consensus)
@@ -1252,9 +1266,18 @@ def _market_group_sort_key(group_key: tuple[str, float | None]) -> tuple[str, in
     return (market_family, 1, float(line))
 
 
-def _build_consensus_row(conn: sqlite3.Connection, grouped_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_consensus_row(
+    conn: sqlite3.Connection,
+    grouped_rows: list[dict[str, Any]],
+    *,
+    initialize_schema: bool = True,
+) -> dict[str, Any]:
     exemplar = grouped_rows[0]
-    config = _active_consensus_config(conn, market_family=str(exemplar["market_family"]))
+    config = _active_consensus_config(
+        conn,
+        market_family=str(exemplar["market_family"]),
+        initialize_schema=initialize_schema,
+    )
     prediction_ids = [str(row["prediction_id"]) for row in grouped_rows]
     participating_agents = sorted({str(row["agent_id"]) for row in grouped_rows})
     required_agents = set(str(agent_id) for agent_id in list(config.get("required_agents") or []))
@@ -1572,8 +1595,13 @@ def _insert_decision_row(conn: sqlite3.Connection, payload: dict[str, Any]) -> d
     return _deserialize_decision_row(dict(row))
 
 
-def _active_consensus_config(conn: sqlite3.Connection, *, market_family: str) -> dict[str, Any]:
-    ensure_schema(conn)
+def _active_consensus_config(
+    conn: sqlite3.Connection,
+    *,
+    market_family: str,
+    initialize_schema: bool = True,
+) -> dict[str, Any]:
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     row = conn.execute(
         """
         SELECT *
