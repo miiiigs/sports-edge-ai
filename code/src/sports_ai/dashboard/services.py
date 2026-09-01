@@ -112,6 +112,17 @@ TODAY_PRIMARY_KPI_LABELS = (
     "P/L",
     "ROI",
 )
+CLIENT_MATCH_CARD_MARKETS = (
+    ("1x2", "MATCH WINNER / 1X2"),
+    ("btts", "BTTS"),
+    ("goals_total", "GOALS"),
+    ("corner_total", "CORNERS"),
+    ("asian_handicap", "ASIAN HANDICAP"),
+)
+CLIENT_MATCH_CARD_MARKET_ORDER = {
+    market_family: index
+    for index, (market_family, _label) in enumerate(CLIENT_MATCH_CARD_MARKETS)
+}
 
 
 def _fixture_sort_key(row: dict[str, Any]) -> tuple[str, str]:
@@ -5212,6 +5223,206 @@ class DashboardServices:
         }
         return self._build_working_rows_for_fixture_map(current_slate_fixture_map)
 
+    def _canonical_display_id_for_fixture(
+        self,
+        row: dict[str, Any],
+        canonical_id_by_fixture_id: dict[str, str],
+    ) -> str:
+        fixture_id = str(row.get("fixture_id") or "")
+        mapped = canonical_id_by_fixture_id.get(fixture_id)
+        if mapped:
+            return mapped
+        if row.get("competition_id") and row.get("home_team_name") and row.get("away_team_name") and row.get("kickoff_utc"):
+            return football_canonical_fixture.canonical_fixture_id_from_identity(
+                competition_id=str(row["competition_id"]),
+                home_team_name=str(row["home_team_name"]),
+                away_team_name=str(row["away_team_name"]),
+                kickoff_utc=str(row["kickoff_utc"]),
+                season=None if row.get("season") is None else str(row.get("season")),
+            )
+        return fixture_id
+
+    def _canonical_display_ids_for_fixtures(self, fixture_rows: list[dict[str, Any]]) -> dict[str, str]:
+        fixture_ids = [
+            str(row["fixture_id"])
+            for row in fixture_rows
+            if row.get("fixture_id") not in {None, ""}
+        ]
+        if not fixture_ids:
+            return {}
+        try:
+            with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+                return football_canonical_fixture.fetch_canonical_fixture_ids_for_fixture_ids(
+                    conn,
+                    fixture_ids,
+                    initialize_schema=self._read_requires_schema_init(),
+                )
+        except sqlite3.OperationalError:
+            return {}
+
+    @staticmethod
+    def _client_card_reason(row: dict[str, Any]) -> str:
+        state = str(row.get("current_decision_state") or _current_decision_state(row))
+        humanized = _humanize_row_reason_codes(row)
+        if humanized:
+            return humanized
+        if state == "NO_BET_VALUE":
+            return "Insufficient value"
+        if state == "NO_BET_STALE_MARKET":
+            return "Waiting for fresh odds"
+        if state == "NO_BET_MISSING_PRICE":
+            return "Missing reference price"
+        if state == "NO_BET_SAFEGUARD":
+            return "Safeguard failed"
+        if state == "UNSUPPORTED":
+            return "Market unavailable"
+        if state == "BLOCKED":
+            return "Review required"
+        return _decision_state_detail(state)
+
+    @staticmethod
+    def _client_card_row_sort_key(row: dict[str, Any]) -> tuple[int, int, float, int, str, tuple[str, str, float | None]]:
+        current_state = str(row.get("current_decision_state") or _current_decision_state(row))
+        portfolio_selected = bool(row.get("portfolio_selected"))
+        edge = row.get("settlement_aware_edge")
+        edge_value = float(edge) if edge is not None else -1_000_000_000.0
+        rank = row.get("portfolio_selection_rank")
+        rank_value = int(rank) if rank is not None else 999_999
+        return (
+            0 if portfolio_selected else 1 if current_state == "BET" else 2,
+            rank_value,
+            -edge_value,
+            CLIENT_MATCH_CARD_MARKET_ORDER.get(str(row.get("market_family") or ""), 999),
+            str(row.get("best_available_source_timestamp") or row.get("market_as_of") or row.get("decision_timestamp") or ""),
+            _market_identity(row),
+        )
+
+    def _client_match_card_market_row(
+        self,
+        *,
+        fixture: dict[str, Any],
+        market_family: str,
+        market_label: str,
+        source_row: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if source_row is None:
+            return {
+                "market_family": market_family,
+                "market_label": market_label,
+                "selection_label": "Market unavailable",
+                "bet_label": "Market unavailable",
+                "line": None,
+                "odds": None,
+                "odds_label": "",
+                "action": "NO BET",
+                "decision_state": "NO_BET_UNAVAILABLE",
+                "decision_group": "no_bet",
+                "reason": "Market unavailable",
+                "is_bet": False,
+                "portfolio_selected": False,
+            }
+        current_state = str(source_row.get("current_decision_state") or _current_decision_state(source_row))
+        labels = _humanize_market_selection(
+            market_family=market_family,
+            selection=str(source_row.get("selection") or ""),
+            line=None if source_row.get("line") is None else float(source_row["line"]),
+            home_team_name=str(fixture["home_team_name"]),
+            away_team_name=str(fixture["away_team_name"]),
+        )
+        odds = None if source_row.get("best_available_price") is None else float(source_row["best_available_price"])
+        is_bet = current_state == "BET"
+        return {
+            "market_family": market_family,
+            "market_label": market_label,
+            "selection_label": labels["selection_label"],
+            "bet_label": labels["bet_label"],
+            "line": None if source_row.get("line") is None else float(source_row["line"]),
+            "odds": odds,
+            "odds_label": "" if odds is None else f"{odds:.2f}",
+            "action": "BET" if is_bet else "NO BET",
+            "decision_state": current_state,
+            "decision_group": _decision_group(current_state),
+            "reason": "" if is_bet else self._client_card_reason(source_row),
+            "is_bet": is_bet,
+            "portfolio_selected": bool(source_row.get("portfolio_selected")),
+            "paper_trade_id": source_row.get("paper_trade_id"),
+        }
+
+    def _build_client_match_cards(
+        self,
+        fixture_rows: list[dict[str, Any]],
+        *,
+        portfolio_context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        serialized_rows = [self.serialize_fixture_row(row) for row in sorted(fixture_rows, key=_fixture_sort_key)]
+        canonical_id_by_fixture_id = self._canonical_display_ids_for_fixtures(serialized_rows)
+        selected_by_canonical_id: dict[str, dict[str, Any]] = {}
+        for row in serialized_rows:
+            canonical_id = self._canonical_display_id_for_fixture(row, canonical_id_by_fixture_id)
+            existing = selected_by_canonical_id.get(canonical_id)
+            if existing is None or _fixture_sort_key(row) < _fixture_sort_key(existing):
+                selected_by_canonical_id[canonical_id] = row
+
+        cards: list[dict[str, Any]] = []
+        portfolio_records = portfolio_context or self._portfolio_selection_records()
+        for canonical_id, fixture in sorted(
+            selected_by_canonical_id.items(),
+            key=lambda item: _fixture_sort_key(item[1]),
+        ):
+            market_evaluation = fixture.get("market_evaluation") or {}
+            annotated_rows = self._annotate_rows_with_portfolio(
+                [
+                    {
+                        **row,
+                        "current_decision_state": str(row.get("current_decision_state") or _current_decision_state(row)),
+                    }
+                    for row in (market_evaluation.get("decision_rows") or [])
+                ],
+                records=portfolio_records,
+                qualified_predicate=lambda row: str(row.get("current_decision_state") or "") == "BET",
+            )
+            rows_by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for row in annotated_rows:
+                market_family = str(row.get("market_family") or "")
+                if market_family in CLIENT_MATCH_CARD_MARKET_ORDER:
+                    rows_by_family[market_family].append(row)
+            market_rows = []
+            for market_family, market_label in CLIENT_MATCH_CARD_MARKETS:
+                family_rows = sorted(rows_by_family.get(market_family, []), key=self._client_card_row_sort_key)
+                market_rows.append(
+                    self._client_match_card_market_row(
+                        fixture=fixture,
+                        market_family=market_family,
+                        market_label=market_label,
+                        source_row=None if not family_rows else family_rows[0],
+                    )
+                )
+            valid_bets = sum(1 for row in market_rows if row["is_bet"])
+            kickoff_local = parse_iso_datetime(str(fixture["kickoff_utc"])).astimezone(
+                ZoneInfo(self.config.display_timezone)
+            )
+            cards.append(
+                {
+                    "fixture_id": str(fixture["fixture_id"]),
+                    "canonical_fixture_id": canonical_id,
+                    "home_team_name": str(fixture["home_team_name"]),
+                    "away_team_name": str(fixture["away_team_name"]),
+                    "competition_name": str(fixture["competition_name"]),
+                    "kickoff_utc": str(fixture["kickoff_utc"]),
+                    "kickoff_local_short": kickoff_local.strftime("%b %-d · %-I:%M %p PHT")
+                    if os.name != "nt"
+                    else kickoff_local.strftime("%b %#d · %#I:%M %p PHT"),
+                    "market_rows": market_rows,
+                    "valid_bets": valid_bets,
+                    "valid_bets_label": "NO VALID BETS" if valid_bets == 0 else f"{valid_bets} VALID BETS",
+                    "details_href": f"/matches/{fixture['fixture_id']}",
+                    "has_mixed_decisions": any(row["is_bet"] for row in market_rows)
+                    and any(not row["is_bet"] for row in market_rows),
+                    "all_no_bet": all(not row["is_bet"] for row in market_rows),
+                }
+            )
+        return cards
+
     def _build_betting_desk_rows_for_fixture_map(self, fixture_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         desk_rows: list[dict[str, Any]] = []
         for evaluation in self._market_evaluation_map().values():
@@ -5493,6 +5704,10 @@ class DashboardServices:
             best_picks = current_best_picks
         current_slate_rows = self._build_current_slate_working_rows(fixture_rows)
         today_working_rows = self._build_today_working_rows(fixture_rows)
+        client_match_cards = self._build_client_match_cards(
+            self._future_fixture_rows(fixture_rows),
+            portfolio_context=portfolio_context,
+        )
         other_decision_rows = [row for row in current_slate_rows if not row["is_actionable"]]
         performance_summary_payload = self._load_json_file(self._performance_summary_path())
         current_slate_summary = self._current_slate_summary(working_rows=current_slate_rows, paper_rows=paper_rows)
@@ -5541,6 +5756,7 @@ class DashboardServices:
             "published_paper_rows": published_paper_rows,
             "today_published_rows": today_published_rows,
             "current_slate_rows": current_slate_rows,
+            "client_match_cards": client_match_cards,
             "today_desk_rows": today_working_rows,
             "visible_today_desk_rows": today_desk_pagination["items"],
             "today_desk_pagination": today_desk_pagination,
@@ -5645,7 +5861,13 @@ class DashboardServices:
                 or (row.get("prediction") or {}).get("prediction_status") == prediction_status
             ]
         serializable_rows = [self.serialize_fixture_row(row) for row in sorted(rows, key=_fixture_sort_key)]
+        client_match_cards = (
+            self._build_client_match_cards(rows)
+            if status_bucket in {"today", "upcoming", "next"}
+            else []
+        )
         pagination = _paginate_collection(serializable_rows, page=page, page_size=20)
+        card_pagination = _paginate_collection(client_match_cards, page=page, page_size=12)
         return {
             "filters": {
                 "competition": competition,
@@ -5655,7 +5877,11 @@ class DashboardServices:
             },
             "rows": serializable_rows,
             "visible_rows": pagination["items"],
+            "client_match_cards": client_match_cards,
+            "visible_client_match_cards": card_pagination["items"],
             "pagination": pagination,
+            "client_match_cards_pagination": card_pagination,
+            "show_client_match_cards": status_bucket in {"today", "upcoming", "next"},
             "system_status": self.get_system_status(),
         }
 
