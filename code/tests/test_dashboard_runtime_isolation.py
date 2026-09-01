@@ -550,7 +550,7 @@ def test_supervisor_does_not_launch_scheduler_when_web_readiness_times_out(monke
     assert web_child.killed is False
 
 
-def test_supervisor_signal_cleanup_returns_success(monkeypatch) -> None:
+def test_supervisor_signal_cleanup_returns_success_for_sigterm_and_sigint(monkeypatch) -> None:
     class FakeChild:
         def __init__(self, name: str) -> None:
             self.name = name
@@ -569,34 +569,40 @@ def test_supervisor_signal_cleanup_returns_success(monkeypatch) -> None:
             self.killed = True
             self.return_code = -9
 
-    launched_children: list[FakeChild] = []
-    signal_handlers = {}
+    for target_signum in (signal.SIGTERM, signal.SIGINT):
+        with monkeypatch.context() as scoped:
+            launched_children: list[FakeChild] = []
+            signal_handlers = {}
 
-    def fake_popen(argv, env):
-        child = FakeChild(str(argv[0]))
-        launched_children.append(child)
-        return child
+            def fake_popen(argv, env):
+                child = FakeChild(str(argv[0]))
+                launched_children.append(child)
+                return child
 
-    def fake_sleep(_seconds):
-        signal_handlers[signal.SIGTERM](signal.SIGTERM, None)
+            def fake_sleep(_seconds):
+                signal_handlers[target_signum](target_signum, None)
 
-    monkeypatch.setattr(
-        runtime_supervisor,
-        "build_child_specs",
-        lambda: [
-            runtime_supervisor.ChildSpec("web", ["web"], {}, "http://127.0.0.1:9127/health"),
-            runtime_supervisor.ChildSpec("scheduler", ["scheduler"], {}),
-        ],
-    )
-    monkeypatch.setattr(runtime_supervisor.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(runtime_supervisor, "_wait_for_web_readiness", lambda child, readiness_url: True)
-    monkeypatch.setattr(runtime_supervisor.signal, "signal", lambda signum, handler: signal_handlers.setdefault(signum, handler))
-    monkeypatch.setattr(runtime_supervisor.time, "sleep", fake_sleep)
+            scoped.setattr(
+                runtime_supervisor,
+                "build_child_specs",
+                lambda: [
+                    runtime_supervisor.ChildSpec("web", ["web"], {}, "http://127.0.0.1:9127/health"),
+                    runtime_supervisor.ChildSpec("scheduler", ["scheduler"], {}),
+                ],
+            )
+            scoped.setattr(runtime_supervisor.subprocess, "Popen", fake_popen)
+            scoped.setattr(runtime_supervisor, "_wait_for_web_readiness", lambda child, readiness_url: True)
+            scoped.setattr(
+                runtime_supervisor.signal,
+                "signal",
+                lambda signum, handler: signal_handlers.setdefault(signum, handler),
+            )
+            scoped.setattr(runtime_supervisor.time, "sleep", fake_sleep)
 
-    assert runtime_supervisor.main() == 0
-    assert [child.name for child in launched_children] == ["web", "scheduler"]
-    assert all(child.terminated for child in launched_children)
-    assert not any(child.killed for child in launched_children)
+            assert runtime_supervisor.main() == 0
+            assert [child.name for child in launched_children] == ["web", "scheduler"]
+            assert all(child.terminated for child in launched_children)
+            assert not any(child.killed for child in launched_children)
 
 
 def test_web_and_scheduler_processes_are_pid_isolated_and_web_stays_responsive(tmp_path: Path) -> None:
