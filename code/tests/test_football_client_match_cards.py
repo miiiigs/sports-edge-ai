@@ -306,5 +306,71 @@ def test_dashboard_renders_client_cards_and_detail_link(tmp_path: Path) -> None:
     assert "client-match-card__teams" in response.text
 
 
+def test_client_match_cards_render_carousel_controls_and_no_duplicate_list(tmp_path: Path) -> None:
+    fixtures = [
+        _fixture(
+            f"api-football:{200 + index}",
+            home=f"Home {index}",
+            away=f"Away {index}",
+            kickoff_utc=f"2026-09-0{index + 1}T18:45:00+00:00",
+        )
+        for index in range(5)
+    ]
+    service = DashboardServices(config=_config(tmp_path))
+    service._market_runtime_state["evaluations"] = {
+        fixture["fixture_id"]: {
+            "fixture_id": fixture["fixture_id"],
+            "state": "READY",
+            "decision_rows": [_decision(fixture["fixture_id"], "1x2", "HOME")],
+            "display_rows": [],
+        }
+        for fixture in fixtures
+    }
+    service._all_fixtures_with_predictions = lambda: fixtures
+    service.initialize = _async_noop
+    service.shutdown = _async_noop
+    service.get_system_status = lambda: {
+        "fixture_feed": {"state": "READY"},
+        "odds_feed": {"state": "READY"},
+        "current_time_local": datetime.now(timezone.utc).isoformat(),
+    }
+    app = create_app(services=service)
+
+    with TestClient(app) as client:
+        response = client.get("/today")
+
+    assert response.status_code == 200
+    assert response.text.count('class="client-match-carousel"') == 1
+    assert response.text.count('class="client-match-grid"') == 1
+    assert response.text.count('client-match-card client-match-card--actionable') == 5
+    assert 'aria-label="Previous matches"' in response.text
+    assert 'aria-label="Next matches"' in response.text
+    assert "data-client-match-track" in response.text
+    assert "data-client-match-status" in response.text
+    rendered_positions = [response.text.index(f"Home {index}") for index in range(5)]
+    assert rendered_positions == sorted(rendered_positions)
+    assert response.text.count('href="/matches/api-football:200"') == 1
+
+
+def test_client_match_carousel_assets_are_native_and_boundary_aware() -> None:
+    static_root = Path(__file__).resolve().parents[1] / "src" / "sports_ai" / "dashboard" / "static"
+    css = (static_root / "dashboard.css").read_text(encoding="utf-8")
+    js = (static_root / "dashboard.js").read_text(encoding="utf-8")
+    first_fetch = js.index("fetch(")
+
+    assert "scroll-snap-type: x mandatory" in css
+    assert "scroll-snap-align: start" in css
+    assert "--client-cards-per-view: 4" in css
+    assert "--client-cards-per-view: 3" in css
+    assert "--client-cards-per-view: 2" in css
+    assert "--client-cards-per-view: 1" in css
+    assert 'prevButton.addEventListener("click", () => moveByGroup(-1))' in js
+    assert 'nextButton.addEventListener("click", () => moveByGroup(1))' in js
+    assert "prevButton.hidden = !needsControls || metrics.atStart" in js
+    assert "nextButton.hidden = !needsControls || metrics.atEnd" in js
+    assert "data-client-match" not in js[first_fetch : first_fetch + 500]
+    assert "provider" not in js.lower()
+
+
 async def _async_noop() -> None:
     return None
