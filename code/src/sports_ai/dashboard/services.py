@@ -79,8 +79,13 @@ DEFAULT_API_FOOTBALL_DAILY_BUDGET_ENV_VAR = "SPORTS_AI_API_FOOTBALL_DAILY_BUDGET
 DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR = "SPORTS_AI_API_FOOTBALL_QUOTA_RESET_HOUR_UTC"
 DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR = "SPORTS_AI_API_FOOTBALL_OPERATIONAL_DAILY_CAP"
 DEFAULT_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM_ENV_VAR = "SPORTS_AI_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM"
+DEFAULT_RUNTIME_ROLE_ENV_VAR = "SPORTS_AI_RUNTIME_ROLE"
 
 PAID_PROVIDER_DISABLED_STATE = "PAID_PROVIDER_CALLS_DISABLED"
+RUNTIME_ROLE_COMBINED = "combined"
+RUNTIME_ROLE_WEB = "web"
+RUNTIME_ROLE_SCHEDULER = "scheduler"
+RUNTIME_ROLES = {RUNTIME_ROLE_COMBINED, RUNTIME_ROLE_WEB, RUNTIME_ROLE_SCHEDULER}
 
 logger = logging.getLogger(__name__)
 PAPER_ACTIVE_STATES = {"PENDING", "OPEN", "UNSETTLED"}
@@ -221,6 +226,15 @@ def _env_bool(name: str, default: bool) -> bool:
 def _env_str(name: str, default: str) -> str:
     raw = os.environ.get(name, "").strip()
     return raw if raw else default
+
+
+def _runtime_role_from_env() -> str:
+    value = _env_str(DEFAULT_RUNTIME_ROLE_ENV_VAR, RUNTIME_ROLE_COMBINED).lower()
+    if value not in RUNTIME_ROLES:
+        raise ValueError(
+            f"{DEFAULT_RUNTIME_ROLE_ENV_VAR} must be one of {sorted(RUNTIME_ROLES)}, got {value!r}"
+        )
+    return value
 
 
 def _hash_one_shot_token(token: str) -> str:
@@ -465,6 +479,7 @@ class DashboardConfig:
     portfolio_policy_id: str = PORTFOLIO_POLICY_ID_V1
     portfolio_policy_version: str = PORTFOLIO_POLICY_VERSION_V1
     portfolio_policy_effective_from: str = ""
+    runtime_role: str = RUNTIME_ROLE_COMBINED
 
     @classmethod
     def default(cls) -> "DashboardConfig":
@@ -495,6 +510,7 @@ class DashboardConfig:
             api_football_quota_reset_hour_utc=_env_int(DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR, 0) or 0,
             api_football_operational_daily_cap=_env_int(DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR, None),
             portfolio_policy_effective_from=_env_str(DEFAULT_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM_ENV_VAR, ""),
+            runtime_role=_runtime_role_from_env(),
         )
 
 
@@ -511,6 +527,10 @@ class DashboardServices:
         xg_profile_factory: Any | None = None,
     ):
         self.config = DashboardConfig.default() if config is None else config
+        if self.config.runtime_role not in RUNTIME_ROLES:
+            raise ValueError(
+                f"runtime_role must be one of {sorted(RUNTIME_ROLES)}, got {self.config.runtime_role!r}"
+            )
         self.fixture_provider = fixture_provider or _default_fixture_provider()
         self.market_provider = market_provider or _default_market_provider(self.config)
         self.statistics_provider = statistics_provider or _default_statistics_provider()
@@ -610,7 +630,8 @@ class DashboardServices:
         ensure_operational_data_dir(self.config.performance_output_dir)
         initialized_at = utc_now_iso()
         logger.info(
-            "dashboard startup: storage_mode=%s data_dir=%s scheduler_enabled=%s fixture_provider=%s market_provider=%s",
+            "dashboard startup: role=%s storage_mode=%s data_dir=%s scheduler_enabled=%s fixture_provider=%s market_provider=%s",
+            self.config.runtime_role,
             self.config.storage_mode,
             self.config.operational_data_dir,
             self.config.enable_scheduler,
@@ -649,17 +670,22 @@ class DashboardServices:
                         updated_at=utc_now_iso(),
                     )
                     logger.exception("edge desk route a registration failed during startup")
-        self._startup_sync_task = asyncio.create_task(self._run_startup_sync())
-        startup_timeout_seconds = max(0, int(self.config.startup_sync_timeout_seconds))
-        if startup_timeout_seconds > 0:
-            try:
-                await asyncio.wait_for(asyncio.shield(self._startup_sync_task), timeout=startup_timeout_seconds)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "dashboard startup sync still running after %ss; continuing startup with persisted state",
-                    startup_timeout_seconds,
-                )
-        if self.config.enable_scheduler and self._background_task is None:
+        if self.config.runtime_role != RUNTIME_ROLE_WEB:
+            self._startup_sync_task = asyncio.create_task(self._run_startup_sync())
+            startup_timeout_seconds = max(0, int(self.config.startup_sync_timeout_seconds))
+            if startup_timeout_seconds > 0:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._startup_sync_task), timeout=startup_timeout_seconds)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "dashboard startup sync still running after %ss; continuing startup with persisted state",
+                        startup_timeout_seconds,
+                    )
+        if (
+            self.config.runtime_role != RUNTIME_ROLE_WEB
+            and self.config.enable_scheduler
+            and self._background_task is None
+        ):
             self._background_task = asyncio.create_task(self._run_scheduler())
 
     async def shutdown(self) -> None:
@@ -2892,6 +2918,12 @@ class DashboardServices:
                 next_future = now_utc + timedelta(seconds=future_interval)
 
     async def manual_refresh(self) -> dict[str, Any]:
+        if self.config.runtime_role == RUNTIME_ROLE_WEB:
+            return {
+                "refresh_state": "DISABLED_IN_WEB_ROLE",
+                "seconds_remaining": 0,
+                "system_status": self.get_system_status(),
+            }
         now_utc = datetime.now(timezone.utc)
         last_attempted = self._provider_state.get("last_attempted_sync_at")
         if last_attempted:
@@ -6228,6 +6260,7 @@ class DashboardServices:
         return {
             "status": "ok",
             "web_process_status": "ok",
+            "runtime_role": self.config.runtime_role,
             "timestamp_utc": utc_now_iso(),
             "startup_sync_state": self._startup_sync_state["state"],
             "startup_sync_started_at": self._startup_sync_state["started_at"],
