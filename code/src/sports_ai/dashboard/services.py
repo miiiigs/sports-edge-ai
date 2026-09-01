@@ -765,6 +765,12 @@ class DashboardServices:
         if isinstance(one_shot_sync_state, dict):
             self._one_shot_sync_state.update(one_shot_sync_state)
 
+    def _refresh_persisted_runtime_state_for_web(self) -> None:
+        if self.config.runtime_role != RUNTIME_ROLE_WEB:
+            return
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            self._load_runtime_state(conn)
+
     def _edge_desk_shadow_state(self) -> dict[str, Any]:
         return {
             "available": self._edge_desk_available,
@@ -6108,6 +6114,7 @@ class DashboardServices:
         storage_state: dict[str, Any] | None = None,
         summary_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        self._refresh_persisted_runtime_state_for_web()
         snapshot_state = "READY" if self.snapshot is not None else "BLOCKED"
         market_state = self._market_provider_state()
         fixture_requirements = self._fixture_feed_runtime_requirements()
@@ -6253,14 +6260,18 @@ class DashboardServices:
         return self._build_system_status()
 
     def get_health_payload(self) -> dict[str, Any]:
+        self._refresh_persisted_runtime_state_for_web()
         storage_state = self._storage_status()
         snapshot_ready = self.snapshot is not None
         startup_sync_task_running = self._startup_sync_task is not None and not self._startup_sync_task.done()
-        scheduler_running = self._background_task is not None and not self._background_task.done()
+        local_scheduler_running = self._background_task is not None and not self._background_task.done()
+        scheduler_execution_mode = "EXTERNAL_PROCESS" if self.config.runtime_role == RUNTIME_ROLE_WEB else "LOCAL_TASK"
+        scheduler_running = None if self.config.runtime_role == RUNTIME_ROLE_WEB else local_scheduler_running
         return {
             "status": "ok",
             "web_process_status": "ok",
             "runtime_role": self.config.runtime_role,
+            "scheduler_execution_mode": scheduler_execution_mode,
             "timestamp_utc": utc_now_iso(),
             "startup_sync_state": self._startup_sync_state["state"],
             "startup_sync_started_at": self._startup_sync_state["started_at"],
@@ -6268,6 +6279,7 @@ class DashboardServices:
             "startup_sync_last_error": self._startup_sync_state["last_error"],
             "startup_sync_task_running": startup_sync_task_running,
             "scheduler_enabled": self.config.enable_scheduler,
+            "local_scheduler_running": local_scheduler_running,
             "scheduler_running": scheduler_running,
             "fixture_provider_state": self._provider_state["state"],
             "last_fixture_sync_at": self._provider_state["last_sync_at"],

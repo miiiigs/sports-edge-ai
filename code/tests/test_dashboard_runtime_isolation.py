@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from fastapi.testclient import TestClient
 from sports_ai.dashboard.app import create_app
 from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE, NormalizedFixture
 from sports_ai.dashboard import runtime_supervisor
+from sports_ai.dashboard import storage as dashboard_storage
 from sports_ai.dashboard.runtime_supervisor import build_child_specs
 from sports_ai.dashboard.services import (
     DEFAULT_RUNTIME_ROLE_ENV_VAR,
@@ -231,8 +233,117 @@ def test_web_role_initializes_without_startup_sync_scheduler_or_provider_calls(t
     assert market_provider.calls == 0
     health = services.get_health_payload()
     assert health["runtime_role"] == RUNTIME_ROLE_WEB
+    assert health["scheduler_execution_mode"] == "EXTERNAL_PROCESS"
     assert health["startup_sync_task_running"] is False
-    assert health["scheduler_running"] is False
+    assert health["local_scheduler_running"] is False
+    assert health["scheduler_running"] is None
+    asyncio.run(services.shutdown())
+
+
+def test_web_role_refreshes_scheduler_persisted_runtime_state_without_side_effects(tmp_path: Path, monkeypatch) -> None:
+    fixture_provider = CountingFixtureProvider()
+    market_provider = CountingMarketProvider()
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path, runtime_role=RUNTIME_ROLE_WEB),
+        fixture_provider=fixture_provider,
+        market_provider=market_provider,
+    )
+    asyncio.run(services.initialize())
+
+    assert services._startup_sync_task is None
+    assert services._background_task is None
+    assert fixture_provider.calls == 0
+    assert market_provider.calls == 0
+
+    refreshed_at = "2026-09-01T12:34:56+00:00"
+    with dashboard_storage.connect(services.config.dashboard_db_path) as conn:
+        dashboard_storage.put_runtime_state(
+            conn,
+            state_key="provider_state",
+            state_value={
+                "state": "CONNECTED",
+                "last_sync_at": refreshed_at,
+                "last_attempted_sync_at": refreshed_at,
+                "last_successful_sync_at": refreshed_at,
+                "last_sync_kind": "scheduler",
+                "last_counts": {"normalized": 77, "supported": 66, "live": 5, "today": 9, "upcoming": 11, "next": 3},
+            },
+            updated_at=refreshed_at,
+            initialize_schema=False,
+        )
+        dashboard_storage.put_runtime_state(
+            conn,
+            state_key="prediction_state",
+            state_value={
+                "state": "READY",
+                "last_prediction_generated_at": refreshed_at,
+                "last_successful_prediction_at": refreshed_at,
+                "last_prediction_error": None,
+                "pending_fixture_count": 1,
+                "blocked_fixture_count": 2,
+                "ready_fixture_count": 42,
+            },
+            updated_at=refreshed_at,
+            initialize_schema=False,
+        )
+        dashboard_storage.put_runtime_state(
+            conn,
+            state_key="market_runtime_state",
+            state_value={
+                "state": "SYNCED",
+                "automatic_odds_sync": "DISABLED",
+                "last_sync_at": refreshed_at,
+                "last_successful_snapshot_at": refreshed_at,
+                "last_error": None,
+                "fixtures_considered": 12,
+                "fixtures_matched": 10,
+                "market_snapshots": 8,
+                "markets_covered": ["1x2"],
+                "freshness": "CURRENT",
+                "unresolved_fixture_count": 0,
+                "stale_market_count": 0,
+                "candidate_count": 6,
+                "paper_entry_count": 4,
+                "settlement_queue_count": 2,
+                "decision_count": 7,
+                "evaluations": {},
+            },
+            updated_at=refreshed_at,
+            initialize_schema=False,
+        )
+
+    side_effect_counts = {"initialize_database": 0, "ensure_schema": 0, "put_runtime_state": 0}
+
+    def fail_initialize_database(conn) -> None:
+        side_effect_counts["initialize_database"] += 1
+        raise AssertionError("GET must not initialize schema or WAL")
+
+    def fail_ensure_schema(conn) -> None:
+        side_effect_counts["ensure_schema"] += 1
+        raise AssertionError("GET must not run dashboard DDL")
+
+    def fail_put_runtime_state(*args, **kwargs) -> None:
+        side_effect_counts["put_runtime_state"] += 1
+        raise AssertionError("GET must not write runtime state")
+
+    monkeypatch.setattr(dashboard_storage, "initialize_database", fail_initialize_database)
+    monkeypatch.setattr(dashboard_storage, "ensure_schema", fail_ensure_schema)
+    monkeypatch.setattr(dashboard_storage, "put_runtime_state", fail_put_runtime_state)
+
+    system_status = services.get_system_status()
+    health = services.get_health_payload()
+
+    assert system_status["fixture_feed"]["last_sync_at"] == refreshed_at
+    assert system_status["fixture_feed"]["counts"]["supported"] == 66
+    assert system_status["prediction_engine"]["ready_fixture_count"] == 42
+    assert system_status["market_sync"]["state"] == "SYNCED"
+    assert health["last_fixture_sync_at"] == refreshed_at
+    assert health["market_sync_state"] == "SYNCED"
+    assert health["last_market_sync_at"] == refreshed_at
+    assert fixture_provider.calls == 0
+    assert market_provider.calls == 0
+    assert side_effect_counts == {"initialize_database": 0, "ensure_schema": 0, "put_runtime_state": 0}
+
     asyncio.run(services.shutdown())
 
 
@@ -311,6 +422,183 @@ def test_supervisor_terminates_peer_when_child_exits(monkeypatch) -> None:
     assert launched_children[1].killed is False
 
 
+def test_supervisor_launches_scheduler_only_after_web_readiness(monkeypatch) -> None:
+    class FakeChild:
+        def __init__(self, name: str, return_code: int | None) -> None:
+            self.name = name
+            self.return_code = return_code
+            self.terminated = False
+            self.killed = False
+
+        def poll(self) -> int | None:
+            return self.return_code
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.return_code = 0
+
+        def kill(self) -> None:
+            self.killed = True
+            self.return_code = -9
+
+    launched: list[str] = []
+
+    def fake_popen(argv, env):
+        name = str(argv[0])
+        launched.append(name)
+        return FakeChild(name, None if name == "web" else 1)
+
+    def fake_wait(child, readiness_url):
+        assert child.name == "web"
+        assert launched == ["web"]
+        assert readiness_url == "http://127.0.0.1:9124/health"
+        return True
+
+    monkeypatch.setattr(
+        runtime_supervisor,
+        "build_child_specs",
+        lambda: [
+            runtime_supervisor.ChildSpec("web", ["web"], {}, "http://127.0.0.1:9124/health"),
+            runtime_supervisor.ChildSpec("scheduler", ["scheduler"], {}),
+        ],
+    )
+    monkeypatch.setattr(runtime_supervisor.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(runtime_supervisor, "_wait_for_web_readiness", fake_wait)
+    monkeypatch.setattr(runtime_supervisor.time, "sleep", lambda _seconds: None)
+
+    assert runtime_supervisor.main() == 1
+    assert launched == ["web", "scheduler"]
+
+
+def test_supervisor_does_not_launch_scheduler_when_web_exits_before_readiness(monkeypatch) -> None:
+    class FakeChild:
+        def __init__(self) -> None:
+            self.terminated = False
+            self.killed = False
+
+        def poll(self) -> int:
+            return 1
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+    launched: list[str] = []
+    web_child = FakeChild()
+
+    def fake_popen(argv, env):
+        launched.append(str(argv[0]))
+        return web_child
+
+    monkeypatch.setattr(
+        runtime_supervisor,
+        "build_child_specs",
+        lambda: [
+            runtime_supervisor.ChildSpec("web", ["web"], {}, "http://127.0.0.1:9125/health"),
+            runtime_supervisor.ChildSpec("scheduler", ["scheduler"], {}),
+        ],
+    )
+    monkeypatch.setattr(runtime_supervisor.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(runtime_supervisor.time, "monotonic", lambda: 0.0)
+
+    assert runtime_supervisor.main() == 1
+    assert launched == ["web"]
+    assert web_child.terminated is False
+
+
+def test_supervisor_does_not_launch_scheduler_when_web_readiness_times_out(monkeypatch) -> None:
+    class FakeChild:
+        def __init__(self) -> None:
+            self.return_code: int | None = None
+            self.terminated = False
+            self.killed = False
+
+        def poll(self) -> int | None:
+            return self.return_code
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.return_code = 0
+
+        def kill(self) -> None:
+            self.killed = True
+            self.return_code = -9
+
+    launched: list[str] = []
+    web_child = FakeChild()
+
+    def fake_popen(argv, env):
+        launched.append(str(argv[0]))
+        return web_child
+
+    monkeypatch.setattr(
+        runtime_supervisor,
+        "build_child_specs",
+        lambda: [
+            runtime_supervisor.ChildSpec("web", ["web"], {}, "http://127.0.0.1:9126/health"),
+            runtime_supervisor.ChildSpec("scheduler", ["scheduler"], {}),
+        ],
+    )
+    monkeypatch.setattr(runtime_supervisor.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(runtime_supervisor, "_wait_for_web_readiness", lambda child, readiness_url: False)
+
+    assert runtime_supervisor.main() == 1
+    assert launched == ["web"]
+    assert web_child.terminated is True
+    assert web_child.killed is False
+
+
+def test_supervisor_signal_cleanup_returns_success(monkeypatch) -> None:
+    class FakeChild:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.return_code: int | None = None
+            self.terminated = False
+            self.killed = False
+
+        def poll(self) -> int | None:
+            return self.return_code
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.return_code = 0
+
+        def kill(self) -> None:
+            self.killed = True
+            self.return_code = -9
+
+    launched_children: list[FakeChild] = []
+    signal_handlers = {}
+
+    def fake_popen(argv, env):
+        child = FakeChild(str(argv[0]))
+        launched_children.append(child)
+        return child
+
+    def fake_sleep(_seconds):
+        signal_handlers[signal.SIGTERM](signal.SIGTERM, None)
+
+    monkeypatch.setattr(
+        runtime_supervisor,
+        "build_child_specs",
+        lambda: [
+            runtime_supervisor.ChildSpec("web", ["web"], {}, "http://127.0.0.1:9127/health"),
+            runtime_supervisor.ChildSpec("scheduler", ["scheduler"], {}),
+        ],
+    )
+    monkeypatch.setattr(runtime_supervisor.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(runtime_supervisor, "_wait_for_web_readiness", lambda child, readiness_url: True)
+    monkeypatch.setattr(runtime_supervisor.signal, "signal", lambda signum, handler: signal_handlers.setdefault(signum, handler))
+    monkeypatch.setattr(runtime_supervisor.time, "sleep", fake_sleep)
+
+    assert runtime_supervisor.main() == 0
+    assert [child.name for child in launched_children] == ["web", "scheduler"]
+    assert all(child.terminated for child in launched_children)
+    assert not any(child.killed for child in launched_children)
+
+
 def test_web_and_scheduler_processes_are_pid_isolated_and_web_stays_responsive(tmp_path: Path) -> None:
     port = _free_port()
     src_path = str(_repo_root() / "code" / "src")
@@ -346,17 +634,18 @@ def test_web_and_scheduler_processes_are_pid_isolated_and_web_stays_responsive(t
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    scheduler_env = {**env, "SPORTS_AI_RUNTIME_ROLE": RUNTIME_ROLE_SCHEDULER, "SPORTS_AI_SCHEDULER_WORKER_TEST_BLOCK_SECONDS": "5"}
-    scheduler = subprocess.Popen(
-        [sys.executable, "-m", "sports_ai.dashboard.scheduler_worker"],
-        cwd=str(_repo_root() / "code"),
-        env=scheduler_env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    scheduler: subprocess.Popen | None = None
     try:
-        assert web.pid != scheduler.pid
         _wait_for_url(f"http://127.0.0.1:{port}/health")
+        scheduler_env = {**env, "SPORTS_AI_RUNTIME_ROLE": RUNTIME_ROLE_SCHEDULER, "SPORTS_AI_SCHEDULER_WORKER_TEST_BLOCK_SECONDS": "5"}
+        scheduler = subprocess.Popen(
+            [sys.executable, "-m", "sports_ai.dashboard.scheduler_worker"],
+            cwd=str(_repo_root() / "code"),
+            env=scheduler_env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        assert web.pid != scheduler.pid
 
         status_started = time.perf_counter()
         status_response = httpx.get(f"http://127.0.0.1:{port}/status", timeout=3.0)
@@ -373,9 +662,13 @@ def test_web_and_scheduler_processes_are_pid_isolated_and_web_stays_responsive(t
         assert today_elapsed < 3.0
     finally:
         for process in (web, scheduler):
+            if process is None:
+                continue
             if process.poll() is None:
                 process.terminate()
         for process in (web, scheduler):
+            if process is None:
+                continue
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
