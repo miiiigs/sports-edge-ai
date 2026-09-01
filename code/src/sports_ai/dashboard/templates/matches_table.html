@@ -63,6 +63,11 @@
     </div>
   </form>
 
+  {% if payload.show_client_match_cards %}
+    {% with cards=payload.visible_client_match_cards, title="Match Recommendations", note="Five fixed market rows with explicit BET / NO BET status", pagination=payload.client_match_cards_pagination, pagination_param="page", embedded=True %}
+      {% include "client_match_cards.html" %}
+    {% endwith %}
+  {% else %}
   <div class="desktop-table">
     <div class="table-shell">
       <table>
@@ -158,4 +163,5 @@
     {% endfor %}
   </div>
   {{ pagination_nav(payload.pagination, "page", set_query_param_href) }}
+  {% endif %}
 </section>

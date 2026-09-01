@@ -1094,6 +1094,183 @@ thead th,
   gap: 12px;
 }
 
+.client-match-panel {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.client-match-panel--embedded {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.client-match-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.client-match-card {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(24, 28, 27, 0.92);
+}
+
+.client-match-card--actionable {
+  border-color: rgba(127, 200, 106, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(127, 200, 106, 0.12);
+}
+
+.client-match-card__header,
+.client-match-card__footer,
+.client-market-row {
+  min-width: 0;
+}
+
+.client-match-card__teams {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+
+.client-match-card__teams strong {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 27px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-match-card__teams strong:last-child {
+  text-align: right;
+}
+
+.client-match-card__teams span,
+.client-market-label,
+.client-market-action,
+.client-match-card__footer strong {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.client-match-card__teams span {
+  color: var(--muted-soft);
+  font-size: 11px;
+}
+
+.client-match-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.client-market-list {
+  display: grid;
+  gap: 8px;
+}
+
+.client-market-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(58, 67, 63, 0.72);
+  border-radius: 8px;
+  background: rgba(19, 22, 21, 0.7);
+}
+
+.client-market-row--bet {
+  border-color: rgba(127, 200, 106, 0.35);
+  background: var(--green-wash);
+}
+
+.client-market-row--no-bet {
+  opacity: 0.78;
+}
+
+.client-market-row__main {
+  min-width: 0;
+}
+
+.client-market-label {
+  display: block;
+  color: var(--muted-soft);
+  font-size: 10px;
+}
+
+.client-market-row strong {
+  display: block;
+  min-width: 0;
+  margin-top: 3px;
+  font-size: 18px;
+  line-height: 1.18;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-market-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.client-market-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: rgba(126, 131, 125, 0.12);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.client-market-action--bet {
+  color: var(--green);
+  border-color: rgba(127, 200, 106, 0.35);
+  background: rgba(127, 200, 106, 0.18);
+}
+
+.client-match-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.client-match-card__footer strong {
+  color: var(--amber-strong);
+  font-size: 12px;
+}
+
 .fixture-row {
   align-items: center;
   padding: 16px;
@@ -1726,6 +1903,35 @@ code {
   .pagination-link {
     width: 100%;
     justify-content: center;
+  }
+
+  .client-match-panel,
+  .client-match-card {
+    padding: 14px;
+  }
+
+  .client-match-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .client-match-card__teams {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .client-match-card__teams strong,
+  .client-match-card__teams strong:last-child {
+    text-align: left;
+  }
+
+  .client-market-row {
+    grid-template-columns: 1fr;
+  }
+
+  .client-market-row strong {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
   }
 
   .pagination-desktop {

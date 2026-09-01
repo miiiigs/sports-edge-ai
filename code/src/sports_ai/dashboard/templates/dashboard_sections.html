@@ -30,6 +30,10 @@
   </section>
 {% endif %}
 
+{% with cards=payload.client_match_cards, title="Upcoming Match Recommendations", note="Five market families per match using current Sports Edge decision truth", pagination=None %}
+  {% include "client_match_cards.html" %}
+{% endwith %}
+
 <section class="section-block desk-panel">
   <div class="section-heading">
     <div>

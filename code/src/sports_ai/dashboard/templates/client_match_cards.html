@@ -1,0 +1,58 @@
+{% from "_ui.html" import pagination_nav %}
+<div class="client-match-panel {% if embedded %}client-match-panel--embedded{% endif %}" id="client-match-cards">
+  <div class="desk-panel-head">
+    <div>
+      <span class="desk-panel-title">{{ title or "Match Recommendations" }}</span>
+      <span class="desk-panel-note">{{ note or "One card per fixture with the five markets clients ask for first" }}</span>
+    </div>
+    <span class="desk-panel-meta">{{ cards|length }} FIXTURES</span>
+  </div>
+
+  {% if cards %}
+    <div class="client-match-grid">
+      {% for card in cards %}
+        <article class="client-match-card {% if card.valid_bets > 0 %}client-match-card--actionable{% endif %}">
+          <header class="client-match-card__header">
+            <div class="client-match-card__teams">
+              <strong title="{{ card.home_team_name }}">{{ card.home_team_name }}</strong>
+              <span>vs</span>
+              <strong title="{{ card.away_team_name }}">{{ card.away_team_name }}</strong>
+            </div>
+            <div class="client-match-card__meta">
+              <span>{{ card.competition_name }}</span>
+              <span>{{ card.kickoff_local_short }}</span>
+            </div>
+          </header>
+
+          <div class="client-market-list">
+            {% for market in card.market_rows %}
+              <div class="client-market-row {% if market.is_bet %}client-market-row--bet{% else %}client-market-row--no-bet{% endif %}">
+                <div class="client-market-row__main">
+                  <span class="client-market-label">{{ market.market_label }}</span>
+                  <strong>{{ market.bet_label }}{% if market.odds_label %} @ {{ market.odds_label }}{% endif %}</strong>
+                  {% if market.reason %}
+                    <small>{{ market.reason }}</small>
+                  {% endif %}
+                </div>
+                <span class="client-market-action {% if market.is_bet %}client-market-action--bet{% endif %}">{{ market.action }}</span>
+              </div>
+            {% endfor %}
+          </div>
+
+          <footer class="client-match-card__footer">
+            <strong>{{ card.valid_bets_label }}</strong>
+            <a class="table-link" href="{{ card.details_href }}">View Details</a>
+          </footer>
+        </article>
+      {% endfor %}
+    </div>
+    {% if pagination %}
+      {{ pagination_nav(pagination, pagination_param or "page", set_query_param_href, "client-match-cards") }}
+    {% endif %}
+  {% else %}
+    <article class="empty-state desk-empty-state">
+      <strong>No upcoming match recommendations are available.</strong>
+      <p>Current BET and NO BET decisions will appear here after the scheduler records the market evaluation payload.</p>
+    </article>
+  {% endif %}
+</div>
