@@ -1155,7 +1155,7 @@ thead th,
 .client-match-card {
   display: grid;
   gap: 16px;
-  flex: 0 0 max(280px, calc((100% - (var(--client-card-gap) * (var(--client-cards-per-view) - 1))) / var(--client-cards-per-view)));
+  flex: 0 0 max(240px, calc((100% - (var(--client-card-gap) * (var(--client-cards-per-view) - 1))) / var(--client-cards-per-view)));
   min-width: 0;
   padding: 18px;
   border: 1px solid var(--border);
@@ -1790,6 +1790,10 @@ code {
 @media (max-width: 1300px) {
   .page-wrap {
     padding: 28px 24px 22px;
+  }
+
+  .client-match-carousel {
+    --client-cards-per-view: 3;
   }
 
   .surface-grid--sidebar,
