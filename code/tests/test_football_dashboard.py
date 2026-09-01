@@ -3826,11 +3826,12 @@ def test_matches_page_pagination_preserves_filters_and_resets_form_page(
         response = client.get("/matches?competition=ENG1&status_bucket=today&page=2")
 
     assert response.status_code == 200
-    assert "Showing 21-21 of 21" in response.text
+    assert "Page 2 of 2" in response.text
     assert 'href="/matches?competition=ENG1&amp;status_bucket=today"' in response.text
     assert 'name="page" value="1"' in response.text
-    assert f"{page_two_payload['visible_rows'][0]['home_team_name']} vs {page_two_payload['visible_rows'][0]['away_team_name']}" in response.text
-    assert f"{page_one_payload['visible_rows'][0]['home_team_name']} vs {page_one_payload['visible_rows'][0]['away_team_name']}" not in response.text
+    assert f"{page_two_payload['visible_client_match_cards'][0]['home_team_name']}" in response.text
+    assert f"{page_two_payload['visible_client_match_cards'][0]['away_team_name']}" in response.text
+    assert f"{page_one_payload['visible_client_match_cards'][0]['home_team_name']}" not in response.text
 
 
 def test_betting_desk_and_no_bet_archive_paginate_without_provider_http_work(

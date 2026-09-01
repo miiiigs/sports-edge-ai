@@ -9,7 +9,10 @@
   </div>
 
   {% if cards %}
-    <div class="client-match-grid">
+    <div class="client-match-carousel" data-client-match-carousel>
+      <button class="client-match-carousel__arrow client-match-carousel__arrow--prev" type="button" aria-label="Previous matches" data-client-match-prev hidden>&lsaquo;</button>
+      <div class="client-match-carousel__viewport" tabindex="0" aria-label="{{ title or 'Match Recommendations' }}" data-client-match-track>
+        <div class="client-match-grid">
       {% for card in cards %}
         <article class="client-match-card {% if card.valid_bets > 0 %}client-match-card--actionable{% endif %}">
           <header class="client-match-card__header">
@@ -45,6 +48,10 @@
           </footer>
         </article>
       {% endfor %}
+        </div>
+      </div>
+      <button class="client-match-carousel__arrow client-match-carousel__arrow--next" type="button" aria-label="Next matches" data-client-match-next hidden>&rsaquo;</button>
+      <div class="client-match-carousel__status" aria-live="polite" data-client-match-status></div>
     </div>
     {% if pagination %}
       {{ pagination_nav(pagination, pagination_param or "page", set_query_param_href, "client-match-cards") }}
