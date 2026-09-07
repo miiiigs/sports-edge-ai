@@ -2,13 +2,13 @@
 {% set fixture_feed_ready = payload.system_status.fixture_feed.state in ['CONNECTED', 'READY'] %}
 {% set market_feed_ready = payload.system_status.odds_feed.state in ['CONNECTED', 'READY', 'IDLE', 'NO_CURRENT_EVENTS'] %}
 {% if page == 'today' or page == 'dashboard' %}
-  {% set page_label = 'Today' %}
+  {% set page_label = 'Dashboard' %}
 {% elif page == 'betting_desk' or page == 'candidates' %}
-  {% set page_label = 'Betting Desk' %}
+  {% set page_label = 'Bets' %}
 {% elif page == 'member_card' %}
   {% set page_label = 'Current Portfolio' %}
 {% elif page == 'performance' %}
-  {% set page_label = 'Model Performance' %}
+  {% set page_label = 'History' %}
 {% elif page == 'segment_explorer' %}
   {% set page_label = 'Segment Explorer' %}
 {% elif page == 'error_centre' %}
@@ -16,7 +16,7 @@
 {% elif page == 'no_bet_archive' %}
   {% set page_label = 'No-Bet Archive' %}
 {% elif page == 'pick_detail' or page == 'match_detail' %}
-  {% set page_label = 'Match Detail' %}
+  {% set page_label = 'Match Details' %}
 {% elif page == 'reports' %}
   {% set page_label = 'Reports' %}
 {% elif page == 'status' %}
@@ -26,7 +26,7 @@
 {% elif page == 'predictions' %}
   {% set page_label = 'Predictions' %}
 {% else %}
-  {% set page_label = 'Football Desk' %}
+  {% set page_label = 'Football' %}
 {% endif %}
 <!doctype html>
 <html lang="en">
@@ -38,6 +38,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Oswald:wght@400;500;600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='dashboard.css') }}">
+  <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='client-clean.css') }}">
 </head>
 <body data-page="{{ page }}">
   <div class="app-shell">
@@ -46,10 +47,10 @@
       <div class="sidebar-header">
         <div class="brand-block">
           <a class="brand" href="/">
-            <span class="brand-mark">ED</span>
+            <span class="brand-mark">SE</span>
             <span class="brand-lockup">
-              <strong>EDGE DESK</strong>
-              <small>Sports Edge AI Football</small>
+              <strong>SPORTS EDGE</strong>
+              <small>Football intelligence</small>
             </span>
           </a>
         </div>
@@ -58,9 +59,9 @@
           <div class="workspace-main">
             <span class="avatar">FB</span>
             <span>
-              <span class="workspace-kicker">Workspace</span>
-              <b>Football Analysis</b>
-              <small>Live model and market desk</small>
+              <span class="workspace-kicker">Football</span>
+              <b>Live Recommendations</b>
+              <small>Client dashboard</small>
             </span>
           </div>
           <span class="workspace-caret {% if fixture_feed_ready %}workspace-caret-live{% endif %}" aria-hidden="true"></span>
@@ -69,79 +70,48 @@
 
       <nav class="sidebar-nav" aria-label="Primary navigation">
         <div class="nav-section">
-          <p class="eyebrow">Client Workspace</p>
+          <p class="eyebrow">Football</p>
           <a href="/" class="nav-item {% if page == 'today' or page == 'dashboard' %}nav-active{% endif %}">
             <span class="nav-copy">
-              <span class="nav-label">Today</span>
-              <small class="nav-caption">Today's matches, live desk, and key bets</small>
+              <span class="nav-label">Dashboard</span>
+              <small class="nav-caption">Summary and current recommendations</small>
             </span>
             {% if page == 'today' or page == 'dashboard' %}<i class="status-dot"></i>{% endif %}
           </a>
           <a href="/matches" class="nav-item {% if page == 'matches' %}nav-active{% endif %}">
             <span class="nav-copy">
               <span class="nav-label">Matches</span>
-              <small class="nav-caption">Today's and upcoming fixtures</small>
+              <small class="nav-caption">Live, upcoming, and finished fixtures</small>
             </span>
             {% if page == 'matches' %}<i class="status-dot"></i>{% endif %}
           </a>
           <a href="/betting-desk" class="nav-item {% if page == 'betting_desk' or page == 'candidates' %}nav-active{% endif %}">
             <span class="nav-copy">
-              <span class="nav-label">Betting Desk</span>
+              <span class="nav-label">Bets</span>
               <small class="nav-caption">Current BET and NO BET decisions</small>
             </span>
-            {% if payload.system_status.current_fixture_state.live_count > 0 %}<i class="status-dot status-dot-live"></i>{% endif %}
+            {% if page == 'betting_desk' or page == 'candidates' %}<i class="status-dot"></i>{% endif %}
           </a>
           <a href="/model-performance" class="nav-item {% if page == 'performance' %}nav-active{% endif %}">
             <span class="nav-copy">
-              <span class="nav-label">Model Performance</span>
-              <small class="nav-caption">Settled results, ROI, and breakdowns</small>
+              <span class="nav-label">History</span>
+              <small class="nav-caption">Normalized results, units, and ROI</small>
             </span>
-          </a>
-          <a href="/reports" class="nav-item {% if page == 'reports' %}nav-active{% endif %}">
-            <span class="nav-copy">
-              <span class="nav-label">Reports</span>
-              <small class="nav-caption">Windowed paper performance summaries</small>
-            </span>
+            {% if page == 'performance' %}<i class="status-dot"></i>{% endif %}
           </a>
         </div>
 
-        <div class="nav-section">
-          <p class="eyebrow">Analysis</p>
-          <a href="/member-card" class="nav-item {% if page == 'member_card' %}nav-active{% endif %}">
-            <span class="nav-copy">
-              <span class="nav-label">Current Portfolio</span>
-              <small class="nav-caption">Simplified current portfolio view</small>
-            </span>
-          </a>
-          <a href="/segment-explorer" class="nav-item {% if page == 'segment_explorer' %}nav-active{% endif %}">
-            <span class="nav-copy">
-              <span class="nav-label">Segment Explorer</span>
-              <small class="nav-caption">Market and league performance cuts</small>
-            </span>
-          </a>
-          <a href="/no-bet-archive" class="nav-item {% if page == 'no_bet_archive' %}nav-active{% endif %}">
-            <span class="nav-copy">
-              <span class="nav-label">No-Bet Archive</span>
-              <small class="nav-caption">Rejected and blocked desk history</small>
-            </span>
-          </a>
-        </div>
-
-        <div class="nav-section">
-          <p class="eyebrow">Internal</p>
-          <a href="/error-centre" class="nav-item {% if page == 'error_centre' %}nav-active{% endif %}">
-            <span class="nav-copy">
-              <span class="nav-label">Error Centre</span>
-              <small class="nav-caption">Provider blockers and operational warnings</small>
-            </span>
-          </a>
-          <a href="/status" class="nav-item {% if page == 'status' %}nav-active{% endif %}">
-            <span class="nav-copy">
-              <span class="nav-label">System Status</span>
-              <small class="nav-caption">Runtime, quota, and raw diagnostics</small>
-            </span>
-          </a>
-        </div>
+        <details class="utility-nav">
+          <summary>Advanced</summary>
+          <div class="utility-nav__links">
+            <a href="/member-card">Current Portfolio</a>
+            <a href="/reports">Reports</a>
+            <a href="/no-bet-archive">No-Bet Archive</a>
+            <a href="/segment-explorer">Segment Explorer</a>
+            <a href="/status">System Status</a>
+            <a href="/error-centre">Error Centre</a>
+          </div>
+        </details>
       </nav>
 
       <div class="sidebar-bottom">
@@ -150,12 +120,9 @@
             <span class="pulse-line {% if fixture_feed_ready %}{% else %}pulse-line-warning{% endif %}"></span>
             <small>Live Workspace</small>
           </div>
-          <strong>{{ payload.system_status.prediction_engine.state }}</strong>
+          <strong>{{ 'READY' if fixture_feed_ready else payload.system_status.fixture_feed.state }}</strong>
           <span class="pro-version">{{ payload.system_status.current_model_snapshot.snapshot_id or 'snapshot unavailable' }}</span>
-          <p class="sidebar-note">
-            Fixtures {{ payload.system_status.fixture_feed.state }} ·
-            Market {{ payload.system_status.odds_feed.state if market_feed_ready else 'LIMITED' }}
-          </p>
+          <p class="sidebar-note">Fixtures {{ payload.system_status.fixture_feed.state }} · Market {{ payload.system_status.odds_feed.state if market_feed_ready else 'LIMITED' }}</p>
         </div>
       </div>
     </aside>
@@ -177,14 +144,14 @@
               <b>Menu</b>
             </button>
             <div class="crumb">
-              <span>Edge Desk</span>
+              <span>Football</span>
               <span>/</span>
               <b>{{ page_label }}</b>
             </div>
           </div>
           <div class="topbar-meta">
             <span>{{ payload.system_status.current_time_local }}</span>
-            <span>Display TZ {{ payload.system_status.display_timezone }}</span>
+            <span>{{ payload.system_status.display_timezone }}</span>
           </div>
         </div>
         <div class="top-actions">
@@ -194,16 +161,9 @@
               {{ status_badge(payload.system_status.fixture_feed.state, 'positive' if fixture_feed_ready else 'warning') }}
             </div>
             <div class="topbar-status-block">
-              <span class="topbar-label">Market</span>
+              <span class="topbar-label">Markets</span>
               {{ status_badge(payload.system_status.odds_feed.state, 'positive' if market_feed_ready else 'inactive') }}
             </div>
-          </div>
-          <div class="profile-button">
-            <span class="avatar avatar-small">SE</span>
-            <span>
-              <b>Sports Edge AI</b>
-              <small>Football desk</small>
-            </span>
           </div>
         </div>
       </header>
@@ -211,8 +171,8 @@
       <main class="page-wrap">
         {% block content %}{% endblock %}
         <footer class="page-footer">
-          <span><i class="status-dot"></i> Data updated {{ payload.system_status.fixture_feed.last_sync_at or 'not yet synced' }}</span>
-          <span>Football Edge Desk</span>
+          <span><i class="status-dot"></i> Updated {{ payload.system_status.fixture_feed.last_sync_at or 'not yet synced' }}</span>
+          <span>Sports Edge Football</span>
         </footer>
       </main>
     </section>

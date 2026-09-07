@@ -1,0 +1,169 @@
+{% set history = payload.client_history if payload.client_history is defined else None %}
+{% set latest_day = history.latest_completed_day if history and history.available else None %}
+<section class="clean-page-heading">
+  <div class="clean-page-heading__copy">
+    <p class="eyebrow">Sports Edge · Football</p>
+    <h1>Football Dashboard</h1>
+    <p>Current recommendations, upcoming matches, and the latest normalized betting results without the analyst clutter.</p>
+  </div>
+  <div class="clean-actions">
+    <a class="clean-button" href="/betting-desk">View Bets</a>
+    <a class="clean-button--ghost" href="/matches?status_bucket=upcoming">All Matches</a>
+    <a class="clean-button--ghost" href="/model-performance">History</a>
+  </div>
+</section>
+
+<section class="clean-summary-grid" aria-label="Football dashboard summary">
+  <article class="clean-stat clean-stat--primary">
+    <span class="clean-stat__label">Valid Bets</span>
+    <strong class="clean-stat__value">{{ payload.best_picks_summary.count }}</strong>
+    <span class="clean-stat__note">current actionable positions</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Upcoming Matches</span>
+    <strong class="clean-stat__value">{{ payload.client_match_cards|length }}</strong>
+    <span class="clean-stat__note">loaded in the current recommendation deck</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Today</span>
+    <strong class="clean-stat__value">{{ payload.today_matches_pagination.total_items }}</strong>
+    <span class="clean-stat__note">fixtures on the local date</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Live Now</span>
+    <strong class="clean-stat__value">{{ payload.live|length }}</strong>
+    <span class="clean-stat__note">matches currently in play</span>
+  </article>
+</section>
+
+{% if latest_day %}
+<section class="clean-section clean-section--flat" id="latest-results">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Latest Completed Day</p>
+      <h2>{{ latest_day.date_label }}</h2>
+      <p>Normalized client view: one representative qualified bet per match and market family.</p>
+    </div>
+    <a class="clean-button--ghost" href="/model-performance">Full History</a>
+  </div>
+  <div class="clean-history-hero">
+    <article class="clean-history-record">
+      <span class="clean-history-record__date">{{ latest_day.matches }} matches · {{ latest_day.bets }} normalized bets</span>
+      <div class="clean-history-record__headline">
+        {{ latest_day.wins }}W - {{ latest_day.losses }}L{% if latest_day.pushes %} - {{ latest_day.pushes }}P{% endif %}
+      </div>
+      <div class="clean-history-record__sub">
+        {% if latest_day.net_units is not none %}{{ "{:+.2f}".format(latest_day.net_units|float) }}u{% else %}P/L unavailable{% endif %}
+        ·
+        {% if latest_day.roi is not none %}{{ "{:+.2%}".format(latest_day.roi|float) }} ROI{% else %}ROI unavailable{% endif %}
+      </div>
+      <div class="clean-history-mini-grid">
+        <div><span>Wins</span><strong>{{ latest_day.wins }}</strong></div>
+        <div><span>Losses</span><strong>{{ latest_day.losses }}</strong></div>
+        <div><span>Pushes</span><strong>{{ latest_day.pushes }}</strong></div>
+        <div><span>Strike</span><strong>{% if latest_day.strike_rate is not none %}{{ "{:.2%}".format(latest_day.strike_rate|float) }}{% else %}N/A{% endif %}</strong></div>
+      </div>
+    </article>
+    <article class="clean-section clean-section--flat" style="margin-top:0;padding:14px;">
+      <div class="clean-section__head" style="margin-bottom:8px;">
+        <div><p class="eyebrow">By Market</p><h2 style="font-size:20px;">Performance</h2></div>
+      </div>
+      <div class="clean-market-breakdown">
+        {% for market in latest_day.by_market %}
+          <div class="clean-market-row">
+            <strong>{{ market.label }}</strong>
+            <span>{{ market.wins }}W-{{ market.losses }}L{% if market.pushes %}-{{ market.pushes }}P{% endif %}</span>
+            <strong class="{% if market.net_units is not none and market.net_units >= 0 %}clean-market-row__pl-positive{% else %}clean-market-row__pl-negative{% endif %}">
+              {% if market.net_units is not none %}{{ "{:+.2f}".format(market.net_units|float) }}u{% else %}N/A{% endif %}
+            </strong>
+          </div>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+</section>
+{% endif %}
+
+<section class="clean-section" id="best-bets">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Actionable Now</p>
+      <h2>Best Valid Bets</h2>
+      <p>Only positions already qualified by Sports Edge. No recommendation is created here.</p>
+    </div>
+    <span class="clean-section__meta">{{ payload.best_picks_summary.count }} current</span>
+  </div>
+
+  {% if payload.best_picks %}
+    <div class="clean-bet-grid">
+      {% for row in payload.best_picks[:6] %}
+        <article class="clean-bet-card clean-bet-card--bet">
+          <div class="clean-bet-card__top">
+            <div style="min-width:0;">
+              <span class="clean-bet-card__kickoff">{{ row.kickoff_time_local }} · {{ row.competition_name }}</span>
+              <a class="clean-bet-card__match" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+            </div>
+            <span class="clean-pill clean-pill--bet">BET</span>
+          </div>
+          <div class="clean-bet-card__pick">
+            <span>{{ row.market_label }}</span>
+            <strong>{{ row.selection_label }}{% if row.line is not none %} {{ row.line }}{% endif %}</strong>
+          </div>
+          <div class="clean-bet-card__bottom">
+            <span class="clean-bet-card__odds">{% if row.entry_odds is not none %}@ {{ "{:.2f}".format(row.entry_odds|float) }}{% else %}Odds N/A{% endif %}</span>
+            <a class="table-link" href="/pick-detail/{{ row.fixture_id }}">Details</a>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+    {% if payload.best_picks_summary.count > 6 %}
+      <div class="clean-actions" style="margin-top:12px;justify-content:flex-start;">
+        <a class="clean-button--ghost" href="/betting-desk">See all valid bets</a>
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="clean-empty">
+      <strong>No valid bets right now.</strong>
+      <div>Matches remain visible below. Sports Edge will keep them as NO BET until price, value, freshness, and safeguards pass.</div>
+    </div>
+  {% endif %}
+</section>
+
+{% with cards=payload.client_match_cards, title="Upcoming Match Recommendations", note="One match card with 1X2, BTTS, Goals, Corners, and Asian Handicap", pagination=None %}
+  {% include "client_match_cards.html" %}
+{% endwith %}
+
+<section class="clean-explainer">
+  <p><strong>Why can only a few matches have bets?</strong> Every upcoming match can be evaluated, but a BET only appears after current odds, reference pricing, freshness, value, minimum price, and safeguards all pass. Otherwise the market stays NO BET.</p>
+  <a class="clean-button--ghost" href="/betting-desk">See Decisions</a>
+</section>
+
+<section class="clean-section clean-section--flat" id="today-matches">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Fixture Board</p>
+      <h2>Today's Matches</h2>
+      <p>Quick status only. Open a match for the deeper model and market detail.</p>
+    </div>
+    <a class="clean-button--ghost" href="/matches">All Matches</a>
+  </div>
+
+  {% if payload.visible_today_matches %}
+    <div class="clean-list">
+      {% for row in payload.visible_today_matches[:6] %}
+        {% set desk_state = row.market_signal.current_decision_state if row.market_signal else row.market_status_label %}
+        <article class="clean-list-row">
+          <div class="clean-list-row__meta">{{ row.kickoff_local }}<br>{{ row.competition_name }}</div>
+          <div class="clean-list-row__main">
+            <a href="/matches/{{ row.fixture_id }}"><strong>{{ row.home_team_name }} vs {{ row.away_team_name }}</strong></a>
+            <small>{% if row.status in ['LIVE', 'HALFTIME', 'FINISHED'] %}{{ row.home_score if row.home_score is not none else 0 }} - {{ row.away_score if row.away_score is not none else 0 }}{% else %}{{ row.status.replace('_', ' ') }}{% endif %}</small>
+          </div>
+          <div class="clean-list-row__result">{{ desk_state.replace('_', ' ') }}</div>
+          <a class="table-link" href="/matches/{{ row.fixture_id }}">Open</a>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="clean-empty">No remaining matches on today's local date. Upcoming recommendations continue above.</div>
+  {% endif %}
+</section>
