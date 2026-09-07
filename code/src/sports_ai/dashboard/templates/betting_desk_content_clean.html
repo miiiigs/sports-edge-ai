@@ -1,0 +1,136 @@
+{% from "_ui.html" import pagination_nav %}
+<section class="clean-page-heading">
+  <div class="clean-page-heading__copy">
+    <p class="eyebrow">Sports Edge · Football</p>
+    <h1>Bets</h1>
+    <p>Current Sports Edge decisions in a client-first view. BETs are surfaced first; NO BET decisions stay available without dominating the page.</p>
+  </div>
+  <div class="clean-actions">
+    <a class="clean-button--ghost" href="/">Dashboard</a>
+    <a class="clean-button--ghost" href="/matches?status_bucket=upcoming">Upcoming Matches</a>
+  </div>
+</section>
+
+<section class="clean-summary-grid" aria-label="Current bet decision summary">
+  <article class="clean-stat clean-stat--primary">
+    <span class="clean-stat__label">Valid Bets</span>
+    <strong class="clean-stat__value">{{ payload.summary.bets }}</strong>
+    <span class="clean-stat__note">actionable now</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">No Bet</span>
+    <strong class="clean-stat__value">{{ payload.summary.no_bets }}</strong>
+    <span class="clean-stat__note">evaluated, not actionable</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Blocked</span>
+    <strong class="clean-stat__value">{{ payload.summary.blocked }}</strong>
+    <span class="clean-stat__note">data or rule blockers</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Evaluations</span>
+    <strong class="clean-stat__value">{{ payload.summary.rows }}</strong>
+    <span class="clean-stat__note">current pre-match desk rows</span>
+  </article>
+</section>
+
+<section class="clean-section" id="valid-bets">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Actionable</p>
+      <h2>Valid Bets</h2>
+      <p>Only existing Sports Edge BET decisions. Nothing is re-scored or requalified in this view.</p>
+    </div>
+    <span class="clean-section__meta">{{ payload.summary.bets }} BET</span>
+  </div>
+
+  {% set ns = namespace(found=false) %}
+  <div class="clean-bet-grid">
+    {% for row in payload.rows %}
+      {% if row.decision_group == 'bet' and not ns.found %}{% set ns.found = true %}{% endif %}
+      {% if row.decision_group == 'bet' %}
+        <article class="clean-bet-card clean-bet-card--bet">
+          <div class="clean-bet-card__top">
+            <div style="min-width:0;">
+              <span class="clean-bet-card__kickoff">{{ row.kickoff_time_local }} · {{ row.competition_name }}</span>
+              <a class="clean-bet-card__match" href="/pick-detail/{{ row.fixture_id }}">{{ row.home_team_name }} vs {{ row.away_team_name }}</a>
+            </div>
+            <span class="clean-pill clean-pill--bet">BET</span>
+          </div>
+          <div class="clean-bet-card__pick">
+            <span>{{ row.market_label }}</span>
+            <strong>{{ row.bet_label }}</strong>
+          </div>
+          <div class="clean-bet-card__bottom">
+            <span class="clean-bet-card__odds">{% if row.best_offer_odds is not none %}@ {{ "{:.2f}".format(row.best_offer_odds|float) }}{% else %}Odds N/A{% endif %}</span>
+            <a class="table-link" href="/pick-detail/{{ row.fixture_id }}">Details</a>
+          </div>
+          <div class="clean-decision-card__metrics">
+            {% if row.model_probability is not none %}<span>Model {{ "{:.1%}".format(row.model_probability|float) }}</span>{% endif %}
+            {% if row.edge is not none %}<span>Edge {{ "{:+.2%}".format(row.edge|float) }}</span>{% endif %}
+            {% if row.best_offer_bookmaker %}<span>{{ row.best_offer_bookmaker }}</span>{% endif %}
+          </div>
+        </article>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% if not ns.found %}
+    <div class="clean-empty">
+      <strong>No valid bets right now.</strong>
+      <div>The system can still have many evaluated matches below. A market remains NO BET until all decision gates pass.</div>
+    </div>
+  {% endif %}
+</section>
+
+<section class="clean-explainer">
+  <p><strong>Why are some matches NO BET?</strong> A model opinion alone is not enough. Current price, reference market, freshness, minimum acceptable price, value, and safeguards must all pass before Sports Edge marks a position BET.</p>
+  <a class="clean-button--ghost" href="/matches?status_bucket=upcoming">See Matches</a>
+</section>
+
+<section class="clean-section clean-section--flat" id="all-decisions">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Decision Log</p>
+      <h2>All Current Decisions</h2>
+      <p>BET and NO BET remain visible together for transparency, with the technical fields reduced to the useful essentials.</p>
+    </div>
+    <span class="clean-section__meta">{{ payload.pagination.total_items if payload.pagination is defined else payload.summary.rows }} rows</span>
+  </div>
+
+  {% if payload.visible_rows %}
+    <div class="clean-decision-grid">
+      {% for row in payload.visible_rows %}
+        <article class="clean-decision-card {% if row.decision_group == 'bet' %}clean-decision-card--bet{% endif %}">
+          <div class="clean-decision-card__head">
+            <div style="min-width:0;">
+              <div class="clean-list-row__meta">{{ row.kickoff_time_local }} · {{ row.competition_name }}</div>
+              <a href="/pick-detail/{{ row.fixture_id }}"><h3>{{ row.home_team_name }} vs {{ row.away_team_name }}</h3></a>
+            </div>
+            <span class="clean-pill {% if row.decision_group == 'bet' %}clean-pill--bet{% else %}clean-pill--pending{% endif %}">{{ row.desk_decision }}</span>
+          </div>
+          <div class="clean-bet-card__pick" style="margin-top:10px;">
+            <span>{{ row.market_label }}</span>
+            <strong>{{ row.bet_label }}{% if row.best_offer_odds is not none %} @ {{ "{:.2f}".format(row.best_offer_odds|float) }}{% endif %}</strong>
+          </div>
+          {% if row.reason %}<p>{{ row.reason }}</p>{% endif %}
+          <div class="clean-decision-card__metrics">
+            {% if row.model_probability is not none %}<span>Model {{ "{:.1%}".format(row.model_probability|float) }}</span>{% endif %}
+            {% if row.implied_probability is not none %}<span>Implied {{ "{:.1%}".format(row.implied_probability|float) }}</span>{% endif %}
+            {% if row.edge is not none %}<span>Edge {{ "{:+.2%}".format(row.edge|float) }}</span>{% endif %}
+            {% if row.freshness %}<span>{{ row.freshness }}</span>{% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+    {{ pagination_nav(payload.pagination, "page", set_query_param_href, "all-decisions") }}
+  {% else %}
+    <div class="clean-empty">{{ payload.reason or 'No current pre-match decisions are available.' }}</div>
+  {% endif %}
+
+  <details class="clean-details">
+    <summary>Show analyst detail available in match pages</summary>
+    <div class="clean-details__body">
+      <p class="section-intro">Fair odds, minimum odds, reference bookmaker, full freshness metadata, safeguard state, Portfolio selection state, and model probabilities remain available from each match detail. They are intentionally not repeated across the main client dashboard.</p>
+    </div>
+  </details>
+</section>
