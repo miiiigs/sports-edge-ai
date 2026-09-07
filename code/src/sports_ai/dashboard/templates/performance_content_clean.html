@@ -1,0 +1,188 @@
+{% set history = payload.client_history %}
+{% set all_time = history.all_time if history and history.available else None %}
+{% set latest_day = history.latest_completed_day if history and history.available else None %}
+<section class="clean-page-heading">
+  <div class="clean-page-heading__copy">
+    <p class="eyebrow">Sports Edge · Football</p>
+    <h1>History</h1>
+    <p>Client-facing results use one representative qualified bet per canonical match and market family. Alternative lines remain preserved in the research ledger but no longer inflate the headline statistics.</p>
+  </div>
+  <div class="clean-actions">
+    <a class="clean-button--ghost" href="/">Dashboard</a>
+    <a class="clean-button" href="/betting-desk">Current Bets</a>
+  </div>
+</section>
+
+{% if all_time %}
+<section class="clean-summary-grid" aria-label="Normalized all-time client performance">
+  <article class="clean-stat">
+    <span class="clean-stat__label">Normalized Bets</span>
+    <strong class="clean-stat__value">{{ all_time.bets }}</strong>
+    <span class="clean-stat__note">one per match + market</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Record</span>
+    <strong class="clean-stat__value">{{ all_time.wins }}-{{ all_time.losses }}</strong>
+    <span class="clean-stat__note">{{ all_time.pushes }} pushes · {{ all_time.settled }} settled</span>
+  </article>
+  <article class="clean-stat clean-stat--primary">
+    <span class="clean-stat__label">P/L</span>
+    <strong class="clean-stat__value">{% if all_time.net_units is not none %}{{ "{:+.2f}".format(all_time.net_units|float) }}u{% else %}N/A{% endif %}</strong>
+    <span class="clean-stat__note">normalized settled positions</span>
+  </article>
+  <article class="clean-stat clean-stat--primary">
+    <span class="clean-stat__label">ROI</span>
+    <strong class="clean-stat__value">{% if all_time.roi is not none %}{{ "{:+.2%}".format(all_time.roi|float) }}{% else %}N/A{% endif %}</strong>
+    <span class="clean-stat__note">{% if all_time.strike_rate is not none %}{{ "{:.2%}".format(all_time.strike_rate|float) }} strike{% else %}strike unavailable{% endif %}</span>
+  </article>
+</section>
+{% endif %}
+
+{% if latest_day %}
+<section class="clean-section" id="latest-day">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Latest Completed Day</p>
+      <h2>{{ latest_day.date_label }}</h2>
+      <p>{{ latest_day.matches }} matches · {{ latest_day.bets }} normalized bets</p>
+    </div>
+    <span class="clean-section__meta">{% if latest_day.net_units is not none %}{{ "{:+.2f}".format(latest_day.net_units|float) }}u{% endif %}</span>
+  </div>
+
+  <div class="clean-history-hero">
+    <article class="clean-history-record">
+      <span class="clean-history-record__date">Daily client record</span>
+      <div class="clean-history-record__headline">
+        {{ latest_day.wins }}W - {{ latest_day.losses }}L{% if latest_day.pushes %} - {{ latest_day.pushes }}P{% endif %}
+      </div>
+      <div class="clean-history-record__sub">
+        {% if latest_day.net_units is not none %}{{ "{:+.2f}".format(latest_day.net_units|float) }}u{% else %}P/L unavailable{% endif %}
+        · {% if latest_day.roi is not none %}{{ "{:+.2%}".format(latest_day.roi|float) }} ROI{% else %}ROI unavailable{% endif %}
+      </div>
+      <div class="clean-history-mini-grid">
+        <div><span>Matches</span><strong>{{ latest_day.matches }}</strong></div>
+        <div><span>Bets</span><strong>{{ latest_day.bets }}</strong></div>
+        <div><span>Pushes</span><strong>{{ latest_day.pushes }}</strong></div>
+        <div><span>Strike</span><strong>{% if latest_day.strike_rate is not none %}{{ "{:.2%}".format(latest_day.strike_rate|float) }}{% else %}N/A{% endif %}</strong></div>
+      </div>
+    </article>
+
+    <article class="clean-section clean-section--flat" style="margin-top:0;padding:14px;">
+      <div class="clean-section__head" style="margin-bottom:8px;">
+        <div><p class="eyebrow">By Market</p><h2 style="font-size:20px;">Daily Breakdown</h2></div>
+      </div>
+      <div class="clean-market-breakdown">
+        {% for market in latest_day.by_market %}
+          <div class="clean-market-row">
+            <strong>{{ market.label }}</strong>
+            <span>{{ market.wins }}W-{{ market.losses }}L{% if market.pushes %}-{{ market.pushes }}P{% endif %}</span>
+            <strong class="{% if market.net_units is not none and market.net_units >= 0 %}clean-market-row__pl-positive{% else %}clean-market-row__pl-negative{% endif %}">
+              {% if market.net_units is not none %}{{ "{:+.2f}".format(market.net_units|float) }}u{% else %}N/A{% endif %}
+            </strong>
+          </div>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+</section>
+{% endif %}
+
+<section class="clean-section clean-section--flat" id="daily-history">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Daily Results</p>
+      <h2>Recent Performance</h2>
+      <p>Normalized day-by-day results rather than raw alternative-line counts.</p>
+    </div>
+  </div>
+
+  {% if history and history.available and history.recent_days %}
+    <div class="clean-day-list">
+      {% for day in history.recent_days %}
+        <article class="clean-day-row">
+          <strong>{{ day.date_label }}</strong>
+          <div><span>Matches</span><strong>{{ day.matches }}</strong></div>
+          <div><span>Bets</span><strong>{{ day.bets }}</strong></div>
+          <div><span>Record</span><strong>{{ day.wins }}-{{ day.losses }}{% if day.pushes %}-{{ day.pushes }}P{% endif %}</strong></div>
+          <div><span>P/L</span><strong class="{% if day.net_units is not none and day.net_units >= 0 %}clean-market-row__pl-positive{% else %}clean-market-row__pl-negative{% endif %}">{% if day.net_units is not none %}{{ "{:+.2f}".format(day.net_units|float) }}u{% else %}N/A{% endif %}</strong></div>
+          <div><span>ROI</span><strong>{% if day.roi is not none %}{{ "{:+.2%}".format(day.roi|float) }}{% else %}N/A{% endif %}</strong></div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="clean-empty">Normalized daily history is not available yet.</div>
+  {% endif %}
+</section>
+
+<section class="clean-section" id="recent-bets">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Bet History</p>
+      <h2>Recent Settled Bets</h2>
+      <p>Representative client bets only, ordered by the latest settlement activity.</p>
+    </div>
+    <span class="clean-section__meta">{{ history.recent_settled|length if history and history.available else 0 }} shown</span>
+  </div>
+
+  {% if history and history.available and history.recent_settled %}
+    <div class="clean-list">
+      {% for row in history.recent_settled %}
+        <article class="clean-list-row">
+          <div class="clean-list-row__meta">{{ row.kickoff_local }}<br>{{ row.competition_name }}</div>
+          <div class="clean-list-row__main">
+            <strong>{{ row.fixture_label }}</strong>
+            <small>{{ row.market_label }} · {{ row.bet_label }}{% if row.entry_odds is not none %} @ {{ "{:.2f}".format(row.entry_odds|float) }}{% endif %}</small>
+          </div>
+          <div class="clean-list-row__result">
+            {% if row.net_pnl is not none %}{{ "{:+.2f}".format(row.net_pnl|float) }}u{% else %}P/L N/A{% endif %}
+          </div>
+          <span class="clean-pill {% if row.trade_state == 'WON' or row.trade_state == 'HALF_WIN' %}clean-pill--won{% elif row.trade_state == 'LOST' or row.trade_state == 'HALF_LOSS' %}clean-pill--lost{% else %}clean-pill--push{% endif %}">{{ row.result_label }}</span>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="clean-empty">No normalized settled bets are available yet.</div>
+  {% endif %}
+</section>
+
+{% if history and history.available and history.open_positions %}
+<section class="clean-section clean-section--flat" id="open-bets">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Open</p>
+      <h2>Open Bets</h2>
+      <p>Normalized positions still awaiting settlement.</p>
+    </div>
+    <span class="clean-section__meta">{{ history.open_positions|length }} open</span>
+  </div>
+  <div class="clean-list">
+    {% for row in history.open_positions %}
+      <article class="clean-list-row">
+        <div class="clean-list-row__meta">{{ row.kickoff_local }}<br>{{ row.competition_name }}</div>
+        <div class="clean-list-row__main">
+          <strong>{{ row.fixture_label }}</strong>
+          <small>{{ row.market_label }} · {{ row.bet_label }}{% if row.entry_odds is not none %} @ {{ "{:.2f}".format(row.entry_odds|float) }}{% endif %}</small>
+        </div>
+        <div class="clean-list-row__result">Awaiting settlement</div>
+        <span class="clean-pill clean-pill--pending">{{ row.result_label }}</span>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<details class="clean-details">
+  <summary>Research ledger and Portfolio detail</summary>
+  <div class="clean-details__body">
+    {% if history and history.available %}
+      <p class="section-intro"><strong>{{ history.raw_line_count }}</strong> counted line-level research positions are preserved internally. The client view collapses them to <strong>{{ history.normalized_count }}</strong> representative match/market positions, removing <strong>{{ history.collapsed_line_count }}</strong> alternative-line representations from headline reporting without deleting any historical records.</p>
+    {% endif %}
+    <div class="clean-summary-grid" style="margin-top:12px;margin-bottom:0;">
+      <article class="clean-stat"><span class="clean-stat__label">Raw Research Lines</span><strong class="clean-stat__value">{{ history.raw_line_count if history and history.available else 0 }}</strong><span class="clean-stat__note">internal ledger</span></article>
+      <article class="clean-stat"><span class="clean-stat__label">Client Positions</span><strong class="clean-stat__value">{{ history.normalized_count if history and history.available else 0 }}</strong><span class="clean-stat__note">headline reporting</span></article>
+      <article class="clean-stat"><span class="clean-stat__label">Portfolio Selected</span><strong class="clean-stat__value">{{ payload.current_portfolio_summary.positions or 0 }}</strong><span class="clean-stat__note">separate selection layer</span></article>
+      <article class="clean-stat"><span class="clean-stat__label">Portfolio ROI</span><strong class="clean-stat__value">{% if payload.current_portfolio_summary.roi is not none %}{{ "{:+.2%}".format(payload.current_portfolio_summary.roi|float) }}{% else %}N/A{% endif %}</strong><span class="clean-stat__note">selected-only performance</span></article>
+    </div>
+    <p class="section-intro" style="margin-top:12px;">The raw opportunity ledger and Portfolio selection remain distinct source-of-truth records. This page only changes presentation so alternative Goals, Corners, and Asian Handicap lines do not look like separate client recommendations.</p>
+  </div>
+</details>
