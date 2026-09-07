@@ -1,0 +1,136 @@
+/* Responsive shell hotfix for the client-first Football dashboard.
+   Loaded after dashboard.css and client-clean.css so the base 980px mobile
+   breakpoint cannot be overwritten by the client layer's 1180px rule. */
+
+.content-shell,
+.page-wrap,
+#content-shell {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.page-wrap > *,
+.clean-section,
+.client-match-panel,
+.clean-history-hero,
+.clean-summary-grid,
+.clean-bet-grid,
+.clean-list,
+.clean-decision-grid {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.state-badge,
+.clean-pill,
+.workspace-caret {
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .content-shell,
+  .topbar,
+  .page-wrap,
+  #content-shell {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .sidebar {
+    width: min(320px, 88vw);
+    max-width: 320px;
+  }
+
+  .clean-page-heading,
+  .clean-section__head {
+    min-width: 0;
+  }
+
+  .clean-page-heading__copy,
+  .clean-page-heading__copy p,
+  .clean-section__head > div {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .clean-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clean-history-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .clean-bet-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .client-match-carousel,
+  .client-match-carousel__viewport,
+  .client-match-carousel__track {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .clean-page-heading,
+  .clean-section__head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .clean-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .clean-summary-grid,
+  .clean-bet-grid,
+  .clean-decision-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .clean-list-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .clean-history-mini-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clean-market-row {
+    grid-template-columns: minmax(90px, 1fr) auto;
+  }
+
+  .clean-market-row > :nth-child(2) {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-wrap {
+    padding-inline: 10px;
+  }
+
+  .topbar {
+    padding-inline: 10px;
+  }
+
+  .clean-history-mini-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .clean-button,
+  .clean-button--ghost {
+    max-width: 100%;
+  }
+}
