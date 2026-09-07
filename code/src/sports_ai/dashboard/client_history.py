@@ -55,10 +55,9 @@ def _parse_datetime(value: Any) -> datetime | None:
     if value in {None, ""}:
         return None
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
-    return parsed
 
 
 def _local_date(value: Any, timezone_name: str) -> date | None:
@@ -76,7 +75,8 @@ def _local_datetime_label(value: Any, timezone_name: str) -> str:
         return "Kickoff unavailable"
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(ZoneInfo(timezone_name))
-    return parsed.strftime("%b %-d, %-I:%M %p") if hasattr(parsed, "strftime") else str(value)
+    clock = parsed.strftime("%I:%M %p").lstrip("0")
+    return f"{parsed.strftime('%b')} {parsed.day}, {clock}"
 
 
 def _safe_float(value: Any, default: float = float("-inf")) -> float:
@@ -126,7 +126,8 @@ def _selection_label(row: dict[str, Any], fixture: dict[str, Any] | None) -> str
             selection, selection.title()
         )
     if market == "btts":
-        return f"BTTS - {'Yes' if selection == 'YES' else 'No' if selection == 'NO' else selection.title()}"
+        side = "Yes" if selection == "YES" else "No" if selection == "NO" else selection.title()
+        return f"BTTS - {side}"
     if market in {"goals_total", "corner_total"}:
         side = "Over" if selection == "OVER" else "Under" if selection == "UNDER" else selection.title()
         unit = "Goals" if market == "goals_total" else "Corners"
@@ -143,7 +144,11 @@ def _selection_label(row: dict[str, Any], fixture: dict[str, Any] | None) -> str
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     performance = football_paper_trading.paper_trading_performance(rows)
     settled = [row for row in rows if str(row.get("trade_state") or "") in FINAL_STATES]
-    decisive = [row for row in settled if str(row.get("trade_state") or "") in {"WON", "LOST", "HALF_WIN", "HALF_LOSS"}]
+    decisive = [
+        row
+        for row in settled
+        if str(row.get("trade_state") or "") in {"WON", "LOST", "HALF_WIN", "HALF_LOSS"}
+    ]
     weighted_wins = sum(
         1.0 if row.get("trade_state") == "WON" else 0.5 if row.get("trade_state") == "HALF_WIN" else 0.0
         for row in decisive
@@ -176,13 +181,14 @@ def _display_row(
     home = str(fixture.get("home_team_name") or "Home")
     away = str(fixture.get("away_team_name") or "Away")
     kickoff = row.get("kickoff") or fixture.get("kickoff_utc")
+    market = str(row.get("market") or "")
     return {
         **row,
         "canonical_fixture_id": canonical_fixture_id,
         "fixture_label": f"{home} vs {away}" if fixture else fixture_id,
         "competition_name": fixture.get("competition_name") or "",
         "kickoff_local": _local_datetime_label(kickoff, timezone_name),
-        "market_label": MARKET_LABELS.get(str(row.get("market") or ""), str(row.get("market") or "").replace("_", " ").title()),
+        "market_label": MARKET_LABELS.get(market, market.replace("_", " ").title()),
         "bet_label": _selection_label(row, fixture),
         "result_label": str(row.get("trade_state") or "PENDING").replace("_", " "),
     }
@@ -205,19 +211,20 @@ def build_client_history_payload(
     The immutable line-level ledger is never modified.
     """
 
+    empty_payload = {
+        "available": False,
+        "reason": "Paper ledger unavailable",
+        "all_time": _summary([]),
+        "recent_days": [],
+        "latest_completed_day": None,
+        "recent_settled": [],
+        "open_positions": [],
+        "raw_line_count": 0,
+        "normalized_count": 0,
+        "collapsed_line_count": 0,
+    }
     if not paper_db_path.exists():
-        return {
-            "available": False,
-            "reason": "Paper ledger unavailable",
-            "all_time": _summary([]),
-            "recent_days": [],
-            "latest_completed_day": None,
-            "recent_settled": [],
-            "open_positions": [],
-            "raw_line_count": 0,
-            "normalized_count": 0,
-            "collapsed_line_count": 0,
-        }
+        return empty_payload
 
     try:
         with _read_only_connect(paper_db_path) as conn:
@@ -248,18 +255,7 @@ def build_client_history_payload(
             except sqlite3.Error:
                 portfolio_rows = []
     except sqlite3.Error as exc:
-        return {
-            "available": False,
-            "reason": f"Client history unavailable: {type(exc).__name__}",
-            "all_time": _summary([]),
-            "recent_days": [],
-            "latest_completed_day": None,
-            "recent_settled": [],
-            "open_positions": [],
-            "raw_line_count": 0,
-            "normalized_count": 0,
-            "collapsed_line_count": 0,
-        }
+        return {**empty_payload, "reason": f"Client history unavailable: {type(exc).__name__}"}
 
     portfolio_selected_rank = {
         str(row.get("paper_trade_id") or ""): int(row.get("selection_rank") or 0)
@@ -268,15 +264,12 @@ def build_client_history_payload(
     }
 
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    canonical_for_trade: dict[str, str] = {}
     for row in counted_rows:
         fixture_id = str(row.get("fixture_id") or "")
         canonical_fixture_id = canonical_by_fixture.get(fixture_id) or fixture_id
         market = str(row.get("market") or "")
-        if not canonical_fixture_id or not market:
-            continue
-        grouped[(canonical_fixture_id, market)].append(row)
-        canonical_for_trade[str(row.get("paper_trade_id") or "")] = canonical_fixture_id
+        if canonical_fixture_id and market:
+            grouped[(canonical_fixture_id, market)].append(row)
 
     normalized_rows: list[dict[str, Any]] = []
     for (canonical_fixture_id, _market), rows in grouped.items():
