@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-  {% include "performance_content.html" %}
+<section id="content-shell" data-partial-refresh="true" data-refresh-seconds="180">
+  {% include "performance_content_clean.html" %}
+</section>
 {% endblock %}
