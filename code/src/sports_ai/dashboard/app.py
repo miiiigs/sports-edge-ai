@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .client_history import build_client_history_payload
 from .fixture_provider import FixtureProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from .services import DashboardConfig, DashboardServices
@@ -81,6 +82,17 @@ def create_app(
             ),
         }
 
+    def _with_client_history(payload: dict) -> dict:
+        """Attach a presentation-only normalized history snapshot without mutating ledger truth."""
+        return {
+            **payload,
+            "client_history": build_client_history_payload(
+                paper_db_path=resolved_services.config.paper_trading_db_path,
+                dashboard_db_path=resolved_services.config.dashboard_db_path,
+                timezone_name=resolved_services.config.display_timezone,
+            ),
+        }
+
     @app.get("/", response_class=HTMLResponse)
     @app.get("/today", response_class=HTMLResponse)
     def dashboard_home(
@@ -89,12 +101,14 @@ def create_app(
         matches_page: int = Query(default=1, ge=1),
         desk_page: int = Query(default=1, ge=1),
     ):
-        payload = resolved_services.get_dashboard_payload(
-            picks_page=picks_page,
-            matches_page=matches_page,
-            desk_page=desk_page,
+        payload = _with_client_history(
+            resolved_services.get_dashboard_payload(
+                picks_page=picks_page,
+                matches_page=matches_page,
+                desk_page=desk_page,
+            )
         )
-        template_name = "dashboard_sections.html" if request.query_params.get("partial") == "1" else "dashboard.html"
+        template_name = "dashboard_sections_clean.html" if request.query_params.get("partial") == "1" else "dashboard.html"
         return templates.TemplateResponse(
             request=request,
             name=template_name,
@@ -117,7 +131,7 @@ def create_app(
             status_bucket=status_bucket,
             page=page,
         )
-        template_name = "matches_table.html" if request.query_params.get("partial") == "1" else "matches.html"
+        template_name = "matches_table_clean.html" if request.query_params.get("partial") == "1" else "matches.html"
         return templates.TemplateResponse(
             request=request,
             name=template_name,
@@ -151,7 +165,7 @@ def create_app(
     @app.get("/betting-desk", response_class=HTMLResponse)
     def candidates_page(request: Request, page: int = Query(default=1, ge=1)):
         payload = resolved_services.get_betting_desk_payload(page=page)
-        template_name = "betting_desk_content.html" if request.query_params.get("partial") == "1" else "betting_desk.html"
+        template_name = "betting_desk_content_clean.html" if request.query_params.get("partial") == "1" else "betting_desk.html"
         return templates.TemplateResponse(
             request=request,
             name=template_name,
@@ -161,8 +175,8 @@ def create_app(
     @app.get("/performance", response_class=HTMLResponse)
     @app.get("/model-performance", response_class=HTMLResponse)
     def performance_page(request: Request):
-        payload = resolved_services.get_performance_payload()
-        template_name = "performance_content.html" if request.query_params.get("partial") == "1" else "performance.html"
+        payload = _with_client_history(resolved_services.get_performance_payload())
+        template_name = "performance_content_clean.html" if request.query_params.get("partial") == "1" else "performance.html"
         return templates.TemplateResponse(
             request=request,
             name=template_name,
@@ -273,7 +287,7 @@ def create_app(
 
     @app.get("/api/performance")
     def api_performance():
-        return JSONResponse(resolved_services.get_performance_payload())
+        return JSONResponse(_with_client_history(resolved_services.get_performance_payload()))
 
     @app.get("/api/system/status")
     def api_system_status():
