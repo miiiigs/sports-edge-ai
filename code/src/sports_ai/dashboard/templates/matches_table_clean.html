@@ -1,0 +1,112 @@
+{% from "_ui.html" import pagination_nav %}
+<section class="clean-page-heading">
+  <div class="clean-page-heading__copy">
+    <p class="eyebrow">Sports Edge · Football</p>
+    <h1>Matches</h1>
+    <p>Live, upcoming, and finished fixtures in one clean board. Upcoming fixtures keep the five-market recommendation cards.</p>
+  </div>
+  <div class="clean-actions">
+    <a class="clean-button--ghost" href="/">Dashboard</a>
+    <a class="clean-button" href="/betting-desk">View Bets</a>
+  </div>
+</section>
+
+<section class="clean-section clean-section--flat">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Match Window</p>
+      <h2>Fixture Board</h2>
+    </div>
+    <span class="clean-section__meta">{{ payload.pagination.total_items }} fixtures</span>
+  </div>
+
+  <div class="quick-filter-bar" aria-label="Match windows">
+    <a class="filter-chip {% if not payload.filters.status_bucket %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket=None, page=1) }}">All</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'today' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='today', page=1) }}">Today</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'upcoming' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='upcoming', page=1) }}">Upcoming</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'live' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='live', page=1) }}">Live</a>
+    <a class="filter-chip {% if payload.filters.status_bucket == 'finished' %}filter-chip-active{% endif %}" href="{{ query_href(status_bucket='finished', page=1) }}">Finished</a>
+  </div>
+
+  <details class="advanced-filters" {% if payload.filters.competition or payload.filters.team or payload.filters.prediction_status %}open{% endif %}>
+    <summary>More filters</summary>
+    <form class="filters-bar" method="get" action="/matches" data-auto-submit-filters="true">
+      <input type="hidden" name="page" value="1">
+      <div class="filter-group">
+        <label for="status_bucket">Window</label>
+        <select id="status_bucket" name="status_bucket">
+          <option value="">All</option>
+          <option value="today" {% if payload.filters.status_bucket == 'today' %}selected{% endif %}>Today</option>
+          <option value="upcoming" {% if payload.filters.status_bucket == 'upcoming' %}selected{% endif %}>Upcoming</option>
+          <option value="live" {% if payload.filters.status_bucket == 'live' %}selected{% endif %}>Live</option>
+          <option value="finished" {% if payload.filters.status_bucket == 'finished' %}selected{% endif %}>Finished</option>
+          <option value="next" {% if payload.filters.status_bucket == 'next' %}selected{% endif %}>Next</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="competition">Competition</label>
+        <input id="competition" name="competition" type="text" value="{{ payload.filters.competition or '' }}" placeholder="Premier League">
+      </div>
+      <div class="filter-group">
+        <label for="team">Team</label>
+        <input id="team" name="team" type="text" value="{{ payload.filters.team or '' }}" placeholder="Arsenal">
+      </div>
+      <div class="filter-group">
+        <label for="prediction_status">Prediction</label>
+        <select id="prediction_status" name="prediction_status">
+          <option value="">All</option>
+          <option value="PREDICTION_READY" {% if payload.filters.prediction_status == 'PREDICTION_READY' %}selected{% endif %}>Ready</option>
+          <option value="PREDICTION_PENDING" {% if payload.filters.prediction_status == 'PREDICTION_PENDING' %}selected{% endif %}>Pending</option>
+          <option value="COMPETITION_UNSUPPORTED" {% if payload.filters.prediction_status == 'COMPETITION_UNSUPPORTED' %}selected{% endif %}>Competition Unsupported</option>
+          <option value="TEAM_IDENTITY_UNRESOLVED" {% if payload.filters.prediction_status == 'TEAM_IDENTITY_UNRESOLVED' %}selected{% endif %}>Team Unresolved</option>
+          <option value="MODEL_HISTORY_MISSING" {% if payload.filters.prediction_status == 'MODEL_HISTORY_MISSING' %}selected{% endif %}>Model History Missing</option>
+          <option value="CURRENT_MODEL_STATE_UNAVAILABLE" {% if payload.filters.prediction_status == 'CURRENT_MODEL_STATE_UNAVAILABLE' %}selected{% endif %}>Current State Unavailable</option>
+        </select>
+      </div>
+    </form>
+  </details>
+</section>
+
+{% if payload.show_client_match_cards %}
+  {% with cards=payload.visible_client_match_cards, title="Match Recommendations", note="Five fixed markets per match with explicit BET / NO BET status", pagination=payload.client_match_cards_pagination, pagination_param="page", embedded=False %}
+    {% include "client_match_cards.html" %}
+  {% endwith %}
+{% else %}
+<section class="clean-section" id="match-list">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Matches</p>
+      <h2>{% if payload.filters.status_bucket %}{{ payload.filters.status_bucket|title }} Fixtures{% else %}All Fixtures{% endif %}</h2>
+      <p>Only kickoff, match state, score, and current desk status are shown here. Full analysis remains inside each match.</p>
+    </div>
+  </div>
+
+  {% if payload.visible_rows %}
+    <div class="clean-list">
+      {% for row in payload.visible_rows %}
+        {% set market_state = row.market_signal.current_decision_state if row.market_signal else row.market_status_label %}
+        <article class="clean-list-row">
+          <div class="clean-list-row__meta">{{ row.kickoff_local }}<br>{{ row.competition_name }}</div>
+          <div class="clean-list-row__main">
+            <a href="/matches/{{ row.fixture_id }}"><strong>{{ row.home_team_name }} vs {{ row.away_team_name }}</strong></a>
+            <small>
+              {% if row.status in ['LIVE', 'HALFTIME', 'FINISHED'] %}
+                {{ row.status.replace('_', ' ') }} · {{ row.home_score if row.home_score is not none else 0 }} - {{ row.away_score if row.away_score is not none else 0 }}
+              {% else %}
+                {{ row.status.replace('_', ' ') }}
+              {% endif %}
+            </small>
+          </div>
+          <div class="clean-list-row__result">
+            <span class="clean-pill {% if market_state == 'BET' %}clean-pill--bet{% else %}clean-pill--pending{% endif %}">{{ market_state.replace('_', ' ') }}</span>
+          </div>
+          <a class="table-link" href="/matches/{{ row.fixture_id }}">Open</a>
+        </article>
+      {% endfor %}
+    </div>
+    {{ pagination_nav(payload.pagination, "page", set_query_param_href, "match-list") }}
+  {% else %}
+    <div class="clean-empty">No fixtures match the current filters.</div>
+  {% endif %}
+</section>
+{% endif %}
