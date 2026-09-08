@@ -6,6 +6,7 @@
 {% set calibration = intel.calibration %}
 {% set clv = intel.clv %}
 {% set health = intel.health %}
+{% set shadow = intel.shadow_calibration or {} %}
 
 <section class="clean-page-heading intel-heading">
   <div class="clean-page-heading__copy">
@@ -156,6 +157,152 @@
   </article>
 </section>
 
+{% if shadow.available %}
+<section class="clean-section intel-panel">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Probability Calibration V1 · Shadow Only</p>
+      <h2>Can calibration improve Route B probabilities?</h2>
+      <p>The candidate is evaluated in fixture-safe chronological order. It is not connected to live probability, value, qualification, or staking logic.</p>
+    </div>
+    <span class="intel-sample-pill">{{ shadow.state.replace('_', ' ') }}</span>
+  </div>
+
+  {% set walk = shadow.walk_forward %}
+  <div class="intel-metric-strip">
+    <div>
+      <span>Walk-forward Brier</span>
+      <strong>{% if walk.shadow.brier_score is not none %}{{ "{:.4f}".format(walk.raw.brier_score|float) }} → {{ "{:.4f}".format(walk.shadow.brier_score|float) }}{% else %}N/A{% endif %}</strong>
+    </div>
+    <div>
+      <span>Walk-forward Log Loss</span>
+      <strong>{% if walk.shadow.log_loss is not none %}{{ "{:.4f}".format(walk.raw.log_loss|float) }} → {{ "{:.4f}".format(walk.shadow.log_loss|float) }}{% else %}N/A{% endif %}</strong>
+    </div>
+    <div>
+      <span>Walk-forward ECE</span>
+      <strong>{% if walk.shadow.expected_calibration_error is not none %}{{ "{:.2%}".format(walk.raw.expected_calibration_error|float) }} → {{ "{:.2%}".format(walk.shadow.expected_calibration_error|float) }}{% else %}N/A{% endif %}</strong>
+    </div>
+  </div>
+
+  <div class="intel-health-meta">
+    <span>Verdict: {{ walk.verdict.replace('_', ' ') }}</span>
+    <span>{{ walk.sample }} out-of-sample positions</span>
+    <span>{{ walk.evaluated_fixtures }} held-out fixtures</span>
+    <span>Runtime applied: {{ 'YES' if shadow.runtime_applied else 'NO' }}</span>
+    <span>Affects BET decisions: {{ 'YES' if shadow.affects_bet_decisions else 'NO' }}</span>
+  </div>
+  <p class="intel-footnote">{{ walk.leakage_guard }}</p>
+</section>
+
+<section class="intel-two-col">
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head">
+      <div>
+        <p class="eyebrow">Shadow Candidate</p>
+        <h2>Prospective probability mapping</h2>
+        <p>This is the full-history candidate for future shadow comparison only. It has no effective runtime date.</p>
+      </div>
+      <span class="clean-section__meta">{% if shadow.candidate %}{{ shadow.candidate.method }}{% else %}Not enough data{% endif %}</span>
+    </div>
+    {% if shadow.candidate %}
+      <div class="intel-table-wrap">
+        <table class="intel-table" style="min-width: 420px">
+          <thead><tr><th>Raw probability</th><th>Shadow calibrated</th><th>Adjustment</th></tr></thead>
+          <tbody>
+            {% for point in shadow.candidate.mapping %}
+              <tr>
+                <td>{{ "{:.0%}".format(point.raw_probability|float) }}</td>
+                <td><strong>{{ "{:.1%}".format(point.shadow_probability|float) }}</strong></td>
+                <td class="{% if point.shadow_probability >= point.raw_probability %}intel-positive{% else %}intel-negative{% endif %}">{{ "{:+.1%}".format((point.shadow_probability|float) - (point.raw_probability|float)) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="intel-footnote">Candidate {{ shadow.candidate.candidate_id }} · training n={{ shadow.candidate.training_sample }} · cutoff {{ shadow.candidate.training_cutoff or 'unavailable' }}</p>
+    {% else %}
+      <div class="clean-empty">At least 75 decisive normalized positions with both outcomes are required to fit a candidate.</div>
+    {% endif %}
+  </article>
+
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head">
+      <div>
+        <p class="eyebrow">Promotion Gate</p>
+        <h2>Runtime remains unchanged</h2>
+        <p>Even a promising historical shadow result is not permission to alter live Route B probabilities.</p>
+      </div>
+      <span class="intel-sample-pill">{{ shadow.promotion.state.replace('_', ' ') }}</span>
+    </div>
+    <div class="intel-method-grid">
+      <div><span>Runtime applied</span><strong>{{ 'YES' if shadow.runtime_applied else 'NO' }}</strong></div>
+      <div><span>BET thresholds changed</span><strong>{{ 'YES' if shadow.affects_thresholds else 'NO' }}</strong></div>
+      <div><span>Promotion eligible</span><strong>{{ 'YES' if shadow.promotion.eligible else 'NO' }}</strong></div>
+    </div>
+    <p class="intel-footnote">{{ shadow.promotion.reason }}</p>
+  </article>
+</section>
+
+<section class="clean-section intel-panel">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Calibration Diagnostics</p>
+      <h2>Reliability by market</h2>
+      <p>Segment diagnostics show where probability reliability differs. They do not independently authorize a market-specific calibrator.</p>
+    </div>
+  </div>
+  <div class="intel-table-wrap">
+    <table class="intel-table">
+      <thead><tr><th>Market</th><th>n</th><th>Mean predicted</th><th>Actual</th><th>Brier</th><th>Log loss</th><th>ECE</th><th>Sample</th></tr></thead>
+      <tbody>
+        {% for row in shadow.by_market %}
+          <tr>
+            <td><strong>{{ row.label }}</strong></td>
+            <td>{{ row.sample }}</td>
+            <td>{% if row.mean_probability is not none %}{{ "{:.1%}".format(row.mean_probability|float) }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.actual_rate is not none %}{{ "{:.1%}".format(row.actual_rate|float) }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.brier_score is not none %}{{ "{:.4f}".format(row.brier_score|float) }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.log_loss is not none %}{{ "{:.4f}".format(row.log_loss|float) }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.expected_calibration_error is not none %}{{ "{:.2%}".format(row.expected_calibration_error|float) }}{% else %}N/A{% endif %}</td>
+            <td><span class="intel-sample-pill {% if row.sample_state == 'SUFFICIENT' %}is-ready{% endif %}">{{ 'Ready' if row.sample_state == 'SUFFICIENT' else 'Need more' }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="intel-two-col">
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head"><div><p class="eyebrow">Edge Reliability</p><h2>Calibration by persisted edge</h2></div></div>
+    <div class="intel-breakdown-list">
+      {% for row in shadow.by_edge %}
+        <div class="intel-breakdown-row intel-breakdown-row--four">
+          <div><strong>{{ row.label }}</strong><small>n={{ row.sample }}</small></div>
+          <span>{% if row.mean_probability is not none %}{{ "{:.0%}".format(row.mean_probability|float) }} predicted{% endif %}</span>
+          <span>{% if row.actual_rate is not none %}{{ "{:.0%}".format(row.actual_rate|float) }} actual{% endif %}</span>
+          <strong>{% if row.expected_calibration_error is not none %}{{ "{:.1%}".format(row.expected_calibration_error|float) }} ECE{% else %}N/A{% endif %}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head"><div><p class="eyebrow">Odds Reliability</p><h2>Calibration by entry price</h2></div></div>
+    <div class="intel-breakdown-list">
+      {% for row in shadow.by_odds %}
+        <div class="intel-breakdown-row intel-breakdown-row--four">
+          <div><strong>{{ row.label }}</strong><small>n={{ row.sample }}</small></div>
+          <span>{% if row.mean_probability is not none %}{{ "{:.0%}".format(row.mean_probability|float) }} predicted{% endif %}</span>
+          <span>{% if row.actual_rate is not none %}{{ "{:.0%}".format(row.actual_rate|float) }} actual{% endif %}</span>
+          <strong>{% if row.expected_calibration_error is not none %}{{ "{:.1%}".format(row.expected_calibration_error|float) }} ECE{% else %}N/A{% endif %}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endif %}
+
 <section class="clean-section intel-panel">
   <div class="clean-section__head">
     <div>
@@ -247,6 +394,7 @@
   <summary>Methodology and safeguards</summary>
   <div class="clean-details__body">
     <p>{{ intel.methodology }}</p>
+    {% if shadow.available %}<p>{{ shadow.methodology }}</p>{% endif %}
     <div class="intel-method-grid">
       <div><span>Raw line-level positions</span><strong>{{ intel.raw_line_count }}</strong></div>
       <div><span>Normalized client positions</span><strong>{{ intel.normalized_count }}</strong></div>
@@ -255,7 +403,7 @@
       <div><span>Segment threshold</span><strong>{{ intel.sample_thresholds.segment }}</strong></div>
       <div><span>CLV threshold</span><strong>{{ intel.sample_thresholds.clv }}</strong></div>
     </div>
-    <p class="intel-footnote">A HEALTHY or WATCH label is withheld until the global performance, calibration and genuine CLV sample thresholds are all met. No missing closing price is reconstructed from current odds.</p>
+    <p class="intel-footnote">A HEALTHY or WATCH label is withheld until the global performance, calibration and genuine CLV sample thresholds are all met. No missing closing price is reconstructed from current odds. Shadow calibration is also withheld from runtime until a separate explicit promotion decision.</p>
   </div>
 </details>
 {% endif %}
