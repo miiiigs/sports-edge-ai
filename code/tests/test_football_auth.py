@@ -46,6 +46,7 @@ def test_dashboard_auth_signup_login_and_logout_flow(tmp_path, monkeypatch):
         assert login.status_code == 200
         assert "Welcome back" in login.text
         assert "SPORTS EDGE" in login.text
+        assert "Continue as guest" in login.text
 
         signup = client.post(
             "/signup",
@@ -70,3 +71,36 @@ def test_dashboard_auth_signup_login_and_logout_flow(tmp_path, monkeypatch):
 
         protected_again = client.get("/")
         assert protected_again.status_code == 303
+
+
+def test_guest_access_allows_reads_and_blocks_mutations(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_AUTH_ENABLED", "1")
+    monkeypatch.setenv("SPORTS_AI_AUTH_COOKIE_SECURE", "0")
+    monkeypatch.setenv("SPORTS_AI_AUTH_DB_PATH", str(tmp_path / "auth.sqlite"))
+
+    app = create_app(services=_StubServices())
+
+    @app.get("/guest-read-test")
+    def guest_read_test():
+        return {"ok": True}
+
+    @app.post("/guest-write-test")
+    def guest_write_test():
+        return {"ok": True}
+
+    with TestClient(app, follow_redirects=False) as client:
+        guest = client.post("/guest", data={"next": "/guest-read-test"})
+        assert guest.status_code == 303
+        assert guest.headers["location"] == "/guest-read-test"
+        assert "sports_edge_guest=1" in guest.headers["set-cookie"]
+
+        read_response = client.get("/guest-read-test")
+        assert read_response.status_code == 200
+        assert read_response.json() == {"ok": True}
+
+        write_response = client.post("/guest-write-test")
+        assert write_response.status_code == 403
+        assert write_response.json()["detail"] == "Sign in required for this action"
+
+        login = client.get("/login")
+        assert login.status_code == 200
