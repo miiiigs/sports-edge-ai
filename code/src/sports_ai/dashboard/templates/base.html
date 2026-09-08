@@ -128,6 +128,15 @@
               <button class="account-card__logout" type="submit">Sign out</button>
             </form>
           </div>
+        {% elif guest_access %}
+          <div class="account-card account-card--guest">
+            <span class="account-card__avatar">G</span>
+            <span class="account-card__copy">
+              <span>Guest access</span>
+              <strong>View-only dashboard</strong>
+            </span>
+            <a class="account-card__logout" href="/login">Sign in</a>
+          </div>
         {% endif %}
 
         <div class="pro-card">
