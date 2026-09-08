@@ -75,8 +75,10 @@ def test_clv_requires_persisted_closing_snapshot_and_rewards_better_entry_price(
 
     result = _clv(rows)
 
+    positive = (1.0 / 2.00) - (1.0 / 2.50)
+    negative = (1.0 / 2.00) - (1.0 / 1.80)
     assert result["sample"] == 2
-    assert result["average_clv"] == pytest.approx((0.25 - 0.10) / 2)
+    assert result["average_clv"] == pytest.approx((positive + negative) / 2)
     assert result["positive_rate"] == pytest.approx(0.5)
     assert result["status"] == "INSUFFICIENT_DATA"
 
