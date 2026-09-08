@@ -98,6 +98,20 @@
           </button>
         </form>
 
+        <div class="auth-divider"><span>or</span></div>
+
+        <form method="post" action="/guest" class="auth-guest-form">
+          <input type="hidden" name="next" value="{{ next_path or '/' }}">
+          <button type="submit" class="auth-guest">
+            <span>
+              <strong>Continue as guest</strong>
+              <small>View the dashboard without an account</small>
+            </span>
+            <b aria-hidden="true">→</b>
+          </button>
+        </form>
+        <p class="auth-guest-note">Guest access is view-only. Sign in later when account access is required.</p>
+
         <p class="auth-footer-copy">
           {% if mode == 'signup' %}
             Already have an account? <a href="/login{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}">Sign in</a>

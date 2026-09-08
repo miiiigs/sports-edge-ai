@@ -18,6 +18,10 @@ from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from .services import DashboardConfig, DashboardServices
 
 
+GUEST_COOKIE_NAME = "sports_edge_guest"
+GUEST_COOKIE_VALUE = "1"
+
+
 def _template_directory() -> Path:
     return Path(__file__).resolve().parent / "templates"
 
@@ -90,15 +94,23 @@ def create_app(
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
         request.state.user = None
+        request.state.guest = False
         if not auth_settings.enabled:
             return await call_next(request)
 
         token = request.cookies.get(SESSION_COOKIE_NAME)
         user = auth_store.get_user_for_session(token)
+        guest_access = request.cookies.get(GUEST_COOKIE_NAME) == GUEST_COOKIE_VALUE
         request.state.user = user
-        public_path = request.url.path in {"/login", "/signup", "/health"} or request.url.path.startswith("/static/")
+        request.state.guest = guest_access and user is None
+        public_path = request.url.path in {"/login", "/signup", "/guest", "/health"} or request.url.path.startswith("/static/")
         if public_path or user is not None:
             return await call_next(request)
+
+        if request.state.guest:
+            if request.method in {"GET", "HEAD", "OPTIONS"}:
+                return await call_next(request)
+            return JSONResponse({"detail": "Sign in required for this action"}, status_code=403)
 
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "Authentication required"}, status_code=401)
@@ -114,6 +126,7 @@ def create_app(
             "page": page,
             "payload": payload,
             "current_user": getattr(request.state, "user", None),
+            "guest_access": bool(getattr(request.state, "guest", False)),
             "query_href": lambda anchor=None, **updates: _build_query_href(request, anchor=anchor, **updates),
             "set_query_param_href": (
                 lambda param_name, param_value=None, anchor=None: _build_query_href(
@@ -193,6 +206,7 @@ def create_app(
             samesite="lax",
             path="/",
         )
+        response.delete_cookie(GUEST_COOKIE_NAME, path="/")
         return response
 
     @app.get("/signup", response_class=HTMLResponse)
@@ -252,6 +266,23 @@ def create_app(
             samesite="lax",
             path="/",
         )
+        response.delete_cookie(GUEST_COOKIE_NAME, path="/")
+        return response
+
+    @app.post("/guest")
+    async def continue_as_guest(request: Request):
+        form = await _urlencoded_form(request)
+        next_path = _safe_next_path(form.get("next"))
+        response = RedirectResponse(next_path, status_code=303)
+        response.set_cookie(
+            key=GUEST_COOKIE_NAME,
+            value=GUEST_COOKIE_VALUE,
+            max_age=SESSION_DAYS * 24 * 60 * 60,
+            httponly=True,
+            secure=auth_settings.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
         return response
 
     @app.post("/logout")
@@ -259,6 +290,7 @@ def create_app(
         auth_store.delete_session(request.cookies.get(SESSION_COOKIE_NAME))
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        response.delete_cookie(GUEST_COOKIE_NAME, path="/")
         return response
 
     @app.get("/", response_class=HTMLResponse)
