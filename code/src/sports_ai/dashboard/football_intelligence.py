@@ -439,7 +439,7 @@ def _clv(rows: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         if entry_odds <= 1.0 or closing_odds <= 1.0 or closing_snapshot_id in {None, ""}:
             continue
-        clv = (entry_odds / closing_odds) - 1.0
+        clv = (1.0 / closing_odds) - (1.0 / entry_odds)
         samples.append({"row": row, "clv": clv})
 
     by_market: list[dict[str, Any]] = []
@@ -469,7 +469,7 @@ def _clv(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "status": "SUFFICIENT" if len(values) >= MIN_CLV_SAMPLE else "INSUFFICIENT_DATA",
         "minimum_sample": MIN_CLV_SAMPLE,
         "by_market": by_market,
-        "method_note": "CLV uses persisted entry_odds and persisted closing_odds with a real closing snapshot id. Missing closing prices are never reconstructed.",
+        "method_note": "CLV uses the existing Sports Edge implied-probability definition: (1 / closing odds) - (1 / entry odds), using persisted entry and closing snapshots only. Missing closing prices are never reconstructed.",
     }
 
 
