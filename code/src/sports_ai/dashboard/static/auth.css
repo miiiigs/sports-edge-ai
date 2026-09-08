@@ -289,6 +289,86 @@ body.auth-page::before {
   font-size: 16px;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 12px;
+  color: #707873;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+}
+
+.auth-guest-form {
+  margin: 0;
+}
+
+.auth-guest {
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.018);
+  color: var(--text-soft);
+  text-align: left;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.auth-guest:hover {
+  border-color: rgba(230, 179, 87, 0.40);
+  background: rgba(230, 179, 87, 0.055);
+  color: var(--text);
+}
+
+.auth-guest span,
+.auth-guest strong,
+.auth-guest small {
+  display: block;
+}
+
+.auth-guest strong {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.auth-guest small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.auth-guest b {
+  color: var(--amber-strong);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.auth-guest-note {
+  margin: 8px 0 0;
+  color: #747c77;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+}
+
 .auth-footer-copy {
   margin: 18px 0 0;
   color: var(--muted);
@@ -311,6 +391,10 @@ body.auth-page::before {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.018);
+}
+
+.account-card--guest {
+  border-color: rgba(230, 179, 87, 0.20);
 }
 
 .account-card__avatar {
@@ -360,6 +444,9 @@ body.auth-page::before {
 
 .account-card__logout {
   min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 8px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -368,6 +455,7 @@ body.auth-page::before {
   font-family: var(--font-mono);
   font-size: 8px;
   letter-spacing: 0.06em;
+  text-decoration: none;
   text-transform: uppercase;
 }
 
