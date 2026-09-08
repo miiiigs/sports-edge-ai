@@ -1,0 +1,513 @@
+.intel-heading {
+  align-items: flex-end;
+}
+
+.intel-window-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.intel-window-tab {
+  min-width: 58px;
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.intel-window-tab:hover,
+.intel-window-tab.is-active {
+  border-color: rgba(230, 179, 87, 0.34);
+  background: var(--amber-wash);
+  color: var(--amber-strong);
+}
+
+.intel-health-card {
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.018), rgba(0, 0, 0, 0.08));
+}
+
+.intel-health-card--healthy {
+  border-color: rgba(127, 200, 106, 0.30);
+  background: linear-gradient(145deg, rgba(127, 200, 106, 0.07), rgba(0, 0, 0, 0.08));
+}
+
+.intel-health-card--watch {
+  border-color: rgba(230, 179, 87, 0.36);
+  background: linear-gradient(145deg, rgba(230, 179, 87, 0.07), rgba(0, 0, 0, 0.08));
+}
+
+.intel-health-card__main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.intel-health-card__main h2 {
+  margin: 6px 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.intel-health-card__main p:last-child {
+  max-width: 80ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.intel-health-badge {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.intel-health-card--healthy .intel-health-badge {
+  border-color: rgba(127, 200, 106, 0.42);
+  color: var(--green);
+}
+
+.intel-health-card--watch .intel-health-badge {
+  border-color: rgba(230, 179, 87, 0.48);
+  color: var(--amber-strong);
+}
+
+.intel-health-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.intel-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.intel-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.intel-panel {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.intel-metric-strip,
+.intel-clv-hero {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.intel-metric-strip > div,
+.intel-clv-hero > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.016);
+}
+
+.intel-metric-strip span,
+.intel-clv-hero span,
+.intel-method-grid span,
+.intel-league-card__metrics span {
+  display: block;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.intel-metric-strip strong,
+.intel-clv-hero strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.intel-calibration-list {
+  display: grid;
+  gap: 11px;
+}
+
+.intel-calibration-row {
+  display: grid;
+  grid-template-columns: 72px minmax(110px, 1fr) 126px;
+  align-items: center;
+  gap: 10px;
+}
+
+.intel-calibration-row__label strong,
+.intel-calibration-row__label small {
+  display: block;
+}
+
+.intel-calibration-row__label strong {
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.intel-calibration-row__label small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.intel-calibration-track {
+  position: relative;
+  height: 8px;
+  overflow: visible;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.intel-calibration-track__expected {
+  position: absolute;
+  inset: 0 auto 0 0;
+  max-width: 100%;
+  border-radius: inherit;
+  background: rgba(230, 179, 87, 0.32);
+}
+
+.intel-calibration-track__actual {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(127, 200, 106, 0.34);
+}
+
+.intel-calibration-row__values {
+  min-width: 0;
+  text-align: right;
+}
+
+.intel-calibration-row__values span,
+.intel-calibration-row__values strong {
+  display: block;
+  font-size: 10px;
+}
+
+.intel-calibration-row__values span {
+  color: var(--muted);
+}
+
+.intel-calibration-row__values strong {
+  margin-top: 2px;
+  color: var(--text-soft);
+}
+
+.intel-footnote {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.intel-breakdown-list {
+  display: grid;
+  gap: 7px;
+}
+
+.intel-breakdown-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto 92px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.intel-breakdown-row:last-child {
+  border-bottom: 0;
+}
+
+.intel-breakdown-row--four {
+  grid-template-columns: minmax(100px, 1fr) auto auto 82px;
+}
+
+.intel-breakdown-row div strong,
+.intel-breakdown-row div small {
+  display: block;
+}
+
+.intel-breakdown-row div strong {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.intel-breakdown-row div small,
+.intel-breakdown-row > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.intel-breakdown-row > strong {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.intel-positive {
+  color: var(--green) !important;
+}
+
+.intel-negative {
+  color: #e39b96 !important;
+}
+
+.intel-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.intel-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.intel-table th,
+.intel-table td {
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.intel-table th {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.intel-table td {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.intel-sample-pill {
+  display: inline-flex;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.intel-sample-pill.is-ready {
+  border-color: rgba(127, 200, 106, 0.28);
+  color: var(--green);
+}
+
+.intel-league-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.intel-league-card {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.014);
+}
+
+.intel-league-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.intel-league-card__head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intel-league-card__head span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.intel-league-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.intel-league-card__metrics strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.intel-methodology {
+  margin-top: 14px;
+}
+
+.intel-method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.intel-method-grid > div {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.intel-method-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.utility-nav__links a[aria-current="page"] {
+  color: var(--amber-strong);
+  background: rgba(230, 179, 87, 0.06);
+}
+
+@media (max-width: 1220px) {
+  .intel-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .intel-league-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .intel-heading {
+    align-items: flex-start;
+  }
+
+  .intel-two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .intel-health-card__main {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 680px) {
+  .intel-kpi-grid,
+  .intel-league-grid,
+  .intel-method-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .intel-health-card__main {
+    display: grid;
+  }
+
+  .intel-health-badge {
+    justify-self: start;
+  }
+
+  .intel-calibration-row {
+    grid-template-columns: 62px minmax(90px, 1fr);
+  }
+
+  .intel-calibration-row__values {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    text-align: left;
+  }
+
+  .intel-breakdown-row,
+  .intel-breakdown-row--four {
+    grid-template-columns: minmax(100px, 1fr) auto;
+  }
+
+  .intel-breakdown-row > strong {
+    text-align: right;
+  }
+}
+
+@media (max-width: 480px) {
+  .intel-kpi-grid,
+  .intel-league-grid,
+  .intel-method-grid,
+  .intel-metric-strip,
+  .intel-clv-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .intel-window-tabs {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .intel-window-tab {
+    min-width: 0;
+    padding-inline: 6px;
+  }
+}

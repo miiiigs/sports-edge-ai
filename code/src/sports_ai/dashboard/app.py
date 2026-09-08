@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from .auth import AuthSettings, AuthStore, SESSION_COOKIE_NAME, SESSION_DAYS
 from .client_history import build_client_history_payload
 from .fixture_provider import FixtureProvider
+from .football_intelligence import build_football_intelligence_payload
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from .services import DashboardConfig, DashboardServices
 
@@ -163,6 +164,14 @@ def create_app(
                 timezone_name=resolved_services.config.display_timezone,
             ),
         }
+
+    def _football_intelligence(window: str) -> dict:
+        return build_football_intelligence_payload(
+            paper_db_path=resolved_services.config.paper_trading_db_path,
+            dashboard_db_path=resolved_services.config.dashboard_db_path,
+            timezone_name=resolved_services.config.display_timezone,
+            selected_window=window,
+        )
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request, next: str | None = Query(default=None)):
@@ -383,6 +392,18 @@ def create_app(
             context=_context(request, page="performance", payload=payload),
         )
 
+    @app.get("/analysis", response_class=HTMLResponse)
+    def analysis_page(request: Request, window: str = Query(default="30")):
+        payload = {
+            "system_status": resolved_services.get_system_status(),
+            "intelligence": _football_intelligence(window),
+        }
+        return templates.TemplateResponse(
+            request=request,
+            name="analysis.html",
+            context=_context(request, page="analysis", payload=payload),
+        )
+
     @app.get("/member-card", response_class=HTMLResponse)
     def member_card_page(request: Request, page: int = Query(default=1, ge=1)):
         payload = resolved_services.get_member_card_payload(page=page)
@@ -488,6 +509,10 @@ def create_app(
     @app.get("/api/performance")
     def api_performance():
         return JSONResponse(_with_client_history(resolved_services.get_performance_payload()))
+
+    @app.get("/api/analysis")
+    def api_analysis(window: str = Query(default="30")):
+        return JSONResponse(_football_intelligence(window))
 
     @app.get("/api/system/status")
     def api_system_status():

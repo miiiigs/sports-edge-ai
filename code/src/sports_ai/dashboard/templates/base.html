@@ -9,6 +9,8 @@
   {% set page_label = 'Current Portfolio' %}
 {% elif page == 'performance' %}
   {% set page_label = 'History' %}
+{% elif page == 'analysis' %}
+  {% set page_label = 'Analysis' %}
 {% elif page == 'segment_explorer' %}
   {% set page_label = 'Segment Explorer' %}
 {% elif page == 'error_centre' %}
@@ -41,6 +43,7 @@
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='client-clean.css') }}">
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='responsive-fix.css') }}">
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='auth.css') }}">
+  <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='intelligence.css') }}">
 </head>
 <body data-page="{{ page }}">
   <div class="app-shell">
@@ -103,9 +106,10 @@
           </a>
         </div>
 
-        <details class="utility-nav">
+        <details class="utility-nav" {% if page in ['analysis', 'member_card', 'reports', 'no_bet_archive', 'segment_explorer', 'status', 'error_centre'] %}open{% endif %}>
           <summary>Advanced</summary>
           <div class="utility-nav__links">
+            <a href="/analysis" {% if page == 'analysis' %}aria-current="page"{% endif %}>Analysis</a>
             <a href="/member-card">Current Portfolio</a>
             <a href="/reports">Reports</a>
             <a href="/no-bet-archive">No-Bet Archive</a>
