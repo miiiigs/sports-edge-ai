@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ 'Create account' if mode == 'signup' else 'Sign in' }} · Sports Edge AI Football</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Oswald:wght@400;500;600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='dashboard.css') }}">
+  <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='auth.css') }}">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-brand-panel" aria-label="Sports Edge Football">
+      <div class="auth-brand">
+        <span class="auth-brand__mark">SE</span>
+        <span>
+          <strong>SPORTS EDGE</strong>
+          <small>Football intelligence</small>
+        </span>
+      </div>
+
+      <div class="auth-brand-copy">
+        <span class="auth-eyebrow">LIVE FOOTBALL WORKSPACE</span>
+        <h1>Clear decisions.<br>Clean edge.</h1>
+        <p>One focused workspace for matches, valid bets, normalized history, and performance.</p>
+      </div>
+
+      <div class="auth-brand-status">
+        <i></i>
+        <span>Secure client access</span>
+      </div>
+    </section>
+
+    <section class="auth-form-panel">
+      <div class="auth-card">
+        <div class="auth-card__head">
+          <span class="auth-eyebrow">SPORTS EDGE FOOTBALL</span>
+          <h2>{{ 'Create your account' if mode == 'signup' else 'Welcome back' }}</h2>
+          <p>{{ 'Use your email to create a secure Sports Edge account.' if mode == 'signup' else 'Sign in to open your Football dashboard.' }}</p>
+        </div>
+
+        <div class="auth-switch" role="navigation" aria-label="Authentication">
+          <a href="/login{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}" class="{% if mode == 'login' %}is-active{% endif %}">Sign in</a>
+          <a href="/signup{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}" class="{% if mode == 'signup' %}is-active{% endif %}">Sign up</a>
+        </div>
+
+        {% if error %}
+          <div class="auth-alert" role="alert">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="/{{ mode }}" class="auth-form">
+          <input type="hidden" name="next" value="{{ next_path or '/' }}">
+
+          <label class="auth-field">
+            <span>Email</span>
+            <input
+              type="email"
+              name="email"
+              value="{{ email or '' }}"
+              autocomplete="email"
+              inputmode="email"
+              placeholder="you@example.com"
+              required
+            >
+          </label>
+
+          <label class="auth-field">
+            <span>Password</span>
+            <input
+              type="password"
+              name="password"
+              autocomplete="{{ 'new-password' if mode == 'signup' else 'current-password' }}"
+              placeholder="{{ 'At least 8 characters' if mode == 'signup' else 'Enter your password' }}"
+              minlength="8"
+              required
+            >
+          </label>
+
+          {% if mode == 'signup' %}
+            <label class="auth-field">
+              <span>Confirm password</span>
+              <input
+                type="password"
+                name="confirm_password"
+                autocomplete="new-password"
+                placeholder="Repeat your password"
+                minlength="8"
+                required
+              >
+            </label>
+          {% endif %}
+
+          <button type="submit" class="auth-submit">
+            {{ 'Create account' if mode == 'signup' else 'Sign in' }}
+            <span aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <p class="auth-footer-copy">
+          {% if mode == 'signup' %}
+            Already have an account? <a href="/login{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}">Sign in</a>
+          {% else %}
+            New to Sports Edge? <a href="/signup{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}">Create an account</a>
+          {% endif %}
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
