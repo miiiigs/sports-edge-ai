@@ -40,6 +40,7 @@
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='dashboard.css') }}">
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='client-clean.css') }}">
   <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='responsive-fix.css') }}">
+  <link rel="stylesheet" href="{{ request.app.url_path_for('static', path='auth.css') }}">
 </head>
 <body data-page="{{ page }}">
   <div class="app-shell">
@@ -116,6 +117,19 @@
       </nav>
 
       <div class="sidebar-bottom">
+        {% if current_user %}
+          <div class="account-card">
+            <span class="account-card__avatar">{{ current_user.email[:1] | upper }}</span>
+            <span class="account-card__copy">
+              <span>Signed in</span>
+              <strong title="{{ current_user.email }}">{{ current_user.email }}</strong>
+            </span>
+            <form method="post" action="/logout">
+              <button class="account-card__logout" type="submit">Sign out</button>
+            </form>
+          </div>
+        {% endif %}
+
         <div class="pro-card">
           <div class="pro-card-meta">
             <span class="pulse-line {% if fixture_feed_ready %}{% else %}pulse-line-warning{% endif %}"></span>

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .auth import AuthSettings, AuthStore, SESSION_COOKIE_NAME, SESSION_DAYS
 from .client_history import build_client_history_payload
 from .fixture_provider import FixtureProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
@@ -43,6 +44,19 @@ def _build_query_href(request: Request, *, anchor: str | None = None, **updates:
     return href
 
 
+def _safe_next_path(value: str | None) -> str:
+    candidate = (value or "/").strip()
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return "/"
+    return candidate
+
+
+async def _urlencoded_form(request: Request) -> dict[str, str]:
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    parsed = parse_qs(raw, keep_blank_values=True)
+    return {key: values[-1] if values else "" for key, values in parsed.items()}
+
+
 def create_app(
     config: DashboardConfig | None = None,
     *,
@@ -56,10 +70,16 @@ def create_app(
         market_provider=market_provider,
     )
     templates = Jinja2Templates(directory=str(_template_directory()))
+    auth_settings = AuthSettings.from_env()
+    auth_store = AuthStore(auth_settings.db_path)
+    if auth_settings.enabled:
+        auth_store.initialize()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.dashboard_services = resolved_services
+        app.state.auth_store = auth_store
+        app.state.auth_settings = auth_settings
         await resolved_services.initialize()
         yield
         await resolved_services.shutdown()
@@ -67,11 +87,33 @@ def create_app(
     app = FastAPI(title="Sports Edge AI Football Dashboard", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(_static_directory())), name="static")
 
+    @app.middleware("http")
+    async def auth_guard(request: Request, call_next):
+        request.state.user = None
+        if not auth_settings.enabled:
+            return await call_next(request)
+
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        user = auth_store.get_user_for_session(token)
+        request.state.user = user
+        public_path = request.url.path in {"/login", "/signup", "/health"} or request.url.path.startswith("/static/")
+        if public_path or user is not None:
+            return await call_next(request)
+
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "Authentication required"}, status_code=401)
+
+        next_path = request.url.path
+        if request.url.query:
+            next_path = f"{next_path}?{request.url.query}"
+        return RedirectResponse(url=f"/login?{urlencode({'next': next_path})}", status_code=303)
+
     def _context(request: Request, *, page: str, payload: dict) -> dict:
         return {
             "request": request,
             "page": page,
             "payload": payload,
+            "current_user": getattr(request.state, "user", None),
             "query_href": lambda anchor=None, **updates: _build_query_href(request, anchor=anchor, **updates),
             "set_query_param_href": (
                 lambda param_name, param_value=None, anchor=None: _build_query_href(
@@ -80,6 +122,22 @@ def create_app(
                     **{str(param_name): param_value},
                 )
             ),
+        }
+
+    def _auth_context(
+        request: Request,
+        *,
+        mode: str,
+        next_path: str,
+        error: str | None = None,
+        email: str = "",
+    ) -> dict:
+        return {
+            "request": request,
+            "mode": mode,
+            "next_path": next_path,
+            "error": error,
+            "email": email,
         }
 
     def _with_client_history(payload: dict) -> dict:
@@ -92,6 +150,116 @@ def create_app(
                 timezone_name=resolved_services.config.display_timezone,
             ),
         }
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request, next: str | None = Query(default=None)):
+        next_path = _safe_next_path(next)
+        if auth_settings.enabled and getattr(request.state, "user", None) is not None:
+            return RedirectResponse(next_path, status_code=303)
+        return templates.TemplateResponse(
+            request=request,
+            name="auth.html",
+            context=_auth_context(request, mode="login", next_path=next_path),
+        )
+
+    @app.post("/login", response_class=HTMLResponse)
+    async def login_submit(request: Request):
+        form = await _urlencoded_form(request)
+        email = form.get("email", "")
+        password = form.get("password", "")
+        next_path = _safe_next_path(form.get("next"))
+        user = auth_store.authenticate(email, password) if auth_settings.enabled else None
+        if user is None:
+            return templates.TemplateResponse(
+                request=request,
+                name="auth.html",
+                context=_auth_context(
+                    request,
+                    mode="login",
+                    next_path=next_path,
+                    error="Email or password is incorrect.",
+                    email=email,
+                ),
+                status_code=400,
+            )
+        token = auth_store.create_session(user["id"])
+        response = RedirectResponse(next_path, status_code=303)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=token,
+            max_age=SESSION_DAYS * 24 * 60 * 60,
+            httponly=True,
+            secure=auth_settings.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.get("/signup", response_class=HTMLResponse)
+    def signup_page(request: Request, next: str | None = Query(default=None)):
+        next_path = _safe_next_path(next)
+        if auth_settings.enabled and getattr(request.state, "user", None) is not None:
+            return RedirectResponse(next_path, status_code=303)
+        return templates.TemplateResponse(
+            request=request,
+            name="auth.html",
+            context=_auth_context(request, mode="signup", next_path=next_path),
+        )
+
+    @app.post("/signup", response_class=HTMLResponse)
+    async def signup_submit(request: Request):
+        form = await _urlencoded_form(request)
+        email = form.get("email", "")
+        password = form.get("password", "")
+        confirm_password = form.get("confirm_password", "")
+        next_path = _safe_next_path(form.get("next"))
+        if password != confirm_password:
+            return templates.TemplateResponse(
+                request=request,
+                name="auth.html",
+                context=_auth_context(
+                    request,
+                    mode="signup",
+                    next_path=next_path,
+                    error="Passwords do not match.",
+                    email=email,
+                ),
+                status_code=400,
+            )
+        try:
+            user = auth_store.create_user(email, password)
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="auth.html",
+                context=_auth_context(
+                    request,
+                    mode="signup",
+                    next_path=next_path,
+                    error=str(exc),
+                    email=email,
+                ),
+                status_code=400,
+            )
+        token = auth_store.create_session(user["id"])
+        response = RedirectResponse(next_path, status_code=303)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=token,
+            max_age=SESSION_DAYS * 24 * 60 * 60,
+            httponly=True,
+            secure=auth_settings.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.post("/logout")
+    def logout(request: Request):
+        auth_store.delete_session(request.cookies.get(SESSION_COOKIE_NAME))
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     @app.get("/today", response_class=HTMLResponse)
