@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% set intel = payload.intelligence %}
+{% set summary = intel.selected %}
+{% set calibration = intel.calibration %}
+{% set clv = intel.clv %}
+{% set health = intel.health %}
+
+<section class="clean-page-heading intel-heading">
+  <div class="clean-page-heading__copy">
+    <p class="eyebrow">Sports Edge · Football Intelligence</p>
+    <h1>Analysis</h1>
+    <p>Evidence from normalized client positions. This page measures Route B, market performance, calibration and closing-line value without changing any prediction or BET/NO BET rule.</p>
+  </div>
+  <div class="intel-window-tabs" aria-label="Analysis window">
+    {% for option in intel.window_options %}
+      <a href="/analysis?window={{ option.key }}" class="intel-window-tab {% if option.key == intel.selected_window %}is-active{% endif %}">{{ option.label }}</a>
+    {% endfor %}
+  </div>
+</section>
+
+{% if not intel.available %}
+  <div class="clean-empty">{{ intel.reason or 'Football intelligence is not available yet.' }}</div>
+{% else %}
+<section class="intel-health-card intel-health-card--{{ health.state|lower }}">
+  <div class="intel-health-card__main">
+    <div>
+      <p class="eyebrow">Model Health · {{ intel.windows[intel.selected_window].label }}</p>
+      <h2>{{ intel.model_label }}</h2>
+      <p>{{ health.reason }}</p>
+    </div>
+    <span class="intel-health-badge">{{ health.label }}</span>
+  </div>
+  <div class="intel-health-meta">
+    <span>{{ summary.bets }} normalized settled bets</span>
+    <span>{{ calibration.sample }} calibration samples</span>
+    <span>{{ clv.sample }} genuine closing prices</span>
+    <span>As of {{ intel.as_of }}</span>
+  </div>
+</section>
+
+<section class="intel-kpi-grid" aria-label="Selected window performance">
+  <article class="clean-stat">
+    <span class="clean-stat__label">Normalized Bets</span>
+    <strong class="clean-stat__value">{{ summary.bets }}</strong>
+    <span class="clean-stat__note">{{ summary.matches }} matches · one per match + market</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Record</span>
+    <strong class="clean-stat__value">{{ summary.wins }}-{{ summary.losses }}{% if summary.pushes %}-{{ summary.pushes }}P{% endif %}</strong>
+    <span class="clean-stat__note">{% if summary.strike_rate is not none %}{{ "{:.2%}".format(summary.strike_rate|float) }} strike{% else %}strike unavailable{% endif %}</span>
+  </article>
+  <article class="clean-stat clean-stat--primary">
+    <span class="clean-stat__label">P/L</span>
+    <strong class="clean-stat__value">{% if summary.net_units is not none %}{{ "{:+.2f}".format(summary.net_units|float) }}u{% else %}N/A{% endif %}</strong>
+    <span class="clean-stat__note">settled normalized positions</span>
+  </article>
+  <article class="clean-stat clean-stat--primary">
+    <span class="clean-stat__label">ROI</span>
+    <strong class="clean-stat__value">{% if summary.roi is not none %}{{ "{:+.2%}".format(summary.roi|float) }}{% else %}N/A{% endif %}</strong>
+    <span class="clean-stat__note">{% if summary.average_odds is not none %}avg odds {{ "{:.2f}".format(summary.average_odds|float) }}{% else %}avg odds unavailable{% endif %}</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Average Edge</span>
+    <strong class="clean-stat__value">{% if summary.average_edge is not none %}{{ "{:+.2%}".format(summary.average_edge|float) }}{% else %}N/A{% endif %}</strong>
+    <span class="clean-stat__note">persisted entry edge</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Average CLV</span>
+    <strong class="clean-stat__value">{% if clv.average_clv is not none %}{{ "{:+.2%}".format(clv.average_clv|float) }}{% else %}N/A{% endif %}</strong>
+    <span class="clean-stat__note">{% if clv.positive_rate is not none %}{{ "{:.1%}".format(clv.positive_rate|float) }} positive{% else %}closing data insufficient{% endif %}</span>
+  </article>
+</section>
+
+<section class="intel-two-col">
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head">
+      <div>
+        <p class="eyebrow">Probability Calibration</p>
+        <h2>Does 60% behave like 60%?</h2>
+        <p>Only fully decisive WON/LOST normalized positions are used for binary calibration.</p>
+      </div>
+      <span class="clean-section__meta">n={{ calibration.sample }}</span>
+    </div>
+
+    <div class="intel-metric-strip">
+      <div><span>Brier</span><strong>{% if calibration.brier_score is not none %}{{ "{:.4f}".format(calibration.brier_score|float) }}{% else %}N/A{% endif %}</strong></div>
+      <div><span>Log Loss</span><strong>{% if calibration.log_loss is not none %}{{ "{:.4f}".format(calibration.log_loss|float) }}{% else %}N/A{% endif %}</strong></div>
+      <div><span>Calibration Error</span><strong>{% if calibration.expected_calibration_error is not none %}{{ "{:.2%}".format(calibration.expected_calibration_error|float) }}{% else %}N/A{% endif %}</strong></div>
+    </div>
+
+    {% if calibration.buckets %}
+      <div class="intel-calibration-list">
+        {% for bucket in calibration.buckets %}
+          <div class="intel-calibration-row">
+            <div class="intel-calibration-row__label"><strong>{{ bucket.label }}</strong><small>n={{ bucket.sample }}</small></div>
+            <div class="intel-calibration-track" aria-label="Expected {{ bucket.average_probability }} actual {{ bucket.actual_rate }}">
+              <span class="intel-calibration-track__expected" style="width: {{ (bucket.average_probability|float * 100)|round(1) }}%"></span>
+              <i class="intel-calibration-track__actual" style="left: {{ (bucket.actual_rate|float * 100)|round(1) }}%"></i>
+            </div>
+            <div class="intel-calibration-row__values">
+              <span>{{ "{:.1%}".format(bucket.average_probability|float) }} exp.</span>
+              <strong>{{ "{:.1%}".format(bucket.actual_rate|float) }} actual</strong>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="clean-empty">No decisive probability samples in this window.</div>
+    {% endif %}
+    <p class="intel-footnote">{{ calibration.method_note or 'Calibration data is not yet sufficient.' }}</p>
+  </article>
+
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head">
+      <div>
+        <p class="eyebrow">Closing Line Value</p>
+        <h2>Are we beating the market?</h2>
+        <p>Positive CLV means the persisted Sports Edge entry price was better than the stored closing price.</p>
+      </div>
+      <span class="clean-section__meta">{{ clv.status.replace('_', ' ') }}</span>
+    </div>
+
+    <div class="intel-clv-hero">
+      <div>
+        <span>Average CLV</span>
+        <strong class="{% if clv.average_clv is not none and clv.average_clv > 0 %}intel-positive{% elif clv.average_clv is not none %}intel-negative{% endif %}">
+          {% if clv.average_clv is not none %}{{ "{:+.2%}".format(clv.average_clv|float) }}{% else %}N/A{% endif %}
+        </strong>
+      </div>
+      <div>
+        <span>Positive CLV</span>
+        <strong>{% if clv.positive_rate is not none %}{{ "{:.1%}".format(clv.positive_rate|float) }}{% else %}N/A{% endif %}</strong>
+      </div>
+      <div>
+        <span>Coverage</span>
+        <strong>{% if clv.coverage is not none %}{{ "{:.1%}".format(clv.coverage|float) }}{% else %}N/A{% endif %}</strong>
+      </div>
+    </div>
+
+    {% if clv.by_market %}
+      <div class="intel-breakdown-list">
+        {% for row in clv.by_market %}
+          <div class="intel-breakdown-row">
+            <div><strong>{{ row.label }}</strong><small>n={{ row.sample }}</small></div>
+            <span>{% if row.positive_rate is not none %}{{ "{:.0%}".format(row.positive_rate|float) }} positive{% endif %}</span>
+            <strong class="{% if row.average_clv > 0 %}intel-positive{% else %}intel-negative{% endif %}">{{ "{:+.2%}".format(row.average_clv|float) }}</strong>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="clean-empty">No genuine persisted closing-price pairs are available in this window.</div>
+    {% endif %}
+    <p class="intel-footnote">{{ clv.method_note }}</p>
+  </article>
+</section>
+
+<section class="clean-section intel-panel">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Market Evidence</p>
+      <h2>Performance by Market</h2>
+      <p>Do not treat small samples as proof. Segments need at least {{ intel.sample_thresholds.segment }} settled normalized bets before leader/weakness labels are used.</p>
+    </div>
+    <span class="clean-section__meta">{% if intel.best_market %}Best: {{ intel.best_market }}{% else %}No mature segment yet{% endif %}</span>
+  </div>
+  <div class="intel-table-wrap">
+    <table class="intel-table">
+      <thead><tr><th>Market</th><th>Bets</th><th>Record</th><th>P/L</th><th>ROI</th><th>Avg Odds</th><th>Avg Edge</th><th>Sample</th></tr></thead>
+      <tbody>
+        {% for row in intel.by_market %}
+          <tr>
+            <td><strong>{{ row.label }}</strong></td>
+            <td>{{ row.bets }}</td>
+            <td>{{ row.wins }}-{{ row.losses }}{% if row.pushes %}-{{ row.pushes }}P{% endif %}</td>
+            <td class="{% if row.net_units is not none and row.net_units >= 0 %}intel-positive{% else %}intel-negative{% endif %}">{% if row.net_units is not none %}{{ "{:+.2f}".format(row.net_units|float) }}u{% else %}N/A{% endif %}</td>
+            <td>{% if row.roi is not none %}{{ "{:+.2%}".format(row.roi|float) }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.average_odds is not none %}{{ "{:.2f}".format(row.average_odds|float) }}{% else %}N/A{% endif %}</td>
+            <td>{% if row.average_edge is not none %}{{ "{:+.2%}".format(row.average_edge|float) }}{% else %}N/A{% endif %}</td>
+            <td><span class="intel-sample-pill {% if row.sample_state == 'SUFFICIENT' %}is-ready{% endif %}">{{ 'Ready' if row.sample_state == 'SUFFICIENT' else 'Need more' }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="intel-two-col">
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head">
+      <div><p class="eyebrow">Edge Buckets</p><h2>Does larger model edge perform better?</h2></div>
+    </div>
+    <div class="intel-breakdown-list">
+      {% for row in intel.by_edge %}
+        <div class="intel-breakdown-row intel-breakdown-row--four">
+          <div><strong>{{ row.label }}</strong><small>{{ row.bets }} bets</small></div>
+          <span>{{ row.wins }}W-{{ row.losses }}L</span>
+          <span>{% if row.roi is not none %}{{ "{:+.1%}".format(row.roi|float) }} ROI{% else %}N/A{% endif %}</span>
+          <strong class="{% if row.net_units is not none and row.net_units >= 0 %}intel-positive{% else %}intel-negative{% endif %}">{% if row.net_units is not none %}{{ "{:+.2f}".format(row.net_units|float) }}u{% else %}N/A{% endif %}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="clean-section intel-panel">
+    <div class="clean-section__head">
+      <div><p class="eyebrow">Odds Buckets</p><h2>Where are prices performing?</h2></div>
+    </div>
+    <div class="intel-breakdown-list">
+      {% for row in intel.by_odds %}
+        <div class="intel-breakdown-row intel-breakdown-row--four">
+          <div><strong>{{ row.label }}</strong><small>{{ row.bets }} bets</small></div>
+          <span>{{ row.wins }}W-{{ row.losses }}L</span>
+          <span>{% if row.roi is not none %}{{ "{:+.1%}".format(row.roi|float) }} ROI{% else %}N/A{% endif %}</span>
+          <strong class="{% if row.net_units is not none and row.net_units >= 0 %}intel-positive{% else %}intel-negative{% endif %}">{% if row.net_units is not none %}{{ "{:+.2f}".format(row.net_units|float) }}u{% else %}N/A{% endif %}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="clean-section intel-panel">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">League Evidence</p>
+      <h2>Performance by Competition</h2>
+      <p>League splits are observational until each row reaches the minimum segment sample.</p>
+    </div>
+  </div>
+  <div class="intel-league-grid">
+    {% for row in intel.by_league %}
+      <article class="intel-league-card">
+        <div class="intel-league-card__head"><strong>{{ row.label }}</strong><span>{{ row.bets }} bets</span></div>
+        <div class="intel-league-card__metrics">
+          <div><span>Record</span><strong>{{ row.wins }}-{{ row.losses }}{% if row.pushes %}-{{ row.pushes }}P{% endif %}</strong></div>
+          <div><span>P/L</span><strong class="{% if row.net_units is not none and row.net_units >= 0 %}intel-positive{% else %}intel-negative{% endif %}">{% if row.net_units is not none %}{{ "{:+.2f}".format(row.net_units|float) }}u{% else %}N/A{% endif %}</strong></div>
+          <div><span>ROI</span><strong>{% if row.roi is not none %}{{ "{:+.1%}".format(row.roi|float) }}{% else %}N/A{% endif %}</strong></div>
+        </div>
+        <span class="intel-sample-pill {% if row.sample_state == 'SUFFICIENT' %}is-ready{% endif %}">{{ 'Sample ready' if row.sample_state == 'SUFFICIENT' else 'Insufficient sample' }}</span>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<details class="clean-details intel-methodology">
+  <summary>Methodology and safeguards</summary>
+  <div class="clean-details__body">
+    <p>{{ intel.methodology }}</p>
+    <div class="intel-method-grid">
+      <div><span>Raw line-level positions</span><strong>{{ intel.raw_line_count }}</strong></div>
+      <div><span>Normalized client positions</span><strong>{{ intel.normalized_count }}</strong></div>
+      <div><span>Collapsed alternatives</span><strong>{{ intel.collapsed_line_count }}</strong></div>
+      <div><span>Global health threshold</span><strong>{{ intel.sample_thresholds.global }}</strong></div>
+      <div><span>Segment threshold</span><strong>{{ intel.sample_thresholds.segment }}</strong></div>
+      <div><span>CLV threshold</span><strong>{{ intel.sample_thresholds.clv }}</strong></div>
+    </div>
+    <p class="intel-footnote">A HEALTHY or WATCH label is withheld until the global performance, calibration and genuine CLV sample thresholds are all met. No missing closing price is reconstructed from current odds.</p>
+  </div>
+</details>
+{% endif %}
+{% endblock %}
