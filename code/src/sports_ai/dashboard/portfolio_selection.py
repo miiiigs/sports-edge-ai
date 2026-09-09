@@ -12,6 +12,7 @@ PORTFOLIO_STATE_SELECTED = "SELECTED"
 PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER = "NOT_SELECTED_SAME_MARKET_CLUSTER"
 PORTFOLIO_STATE_NOT_SELECTED_MARKET_FAMILY_LIMIT = "NOT_SELECTED_MARKET_FAMILY_LIMIT"
 PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT = "NOT_SELECTED_FIXTURE_LIMIT"
+PORTFOLIO_STATE_NOT_SELECTED_CONFLICT = "NOT_SELECTED_CONFLICT"
 PORTFOLIO_STATE_PENDING = "QUALIFIED_PENDING_PORTFOLIO_SELECTION"
 PORTFOLIO_STATE_POLICY_INACTIVE = "PORTFOLIO_POLICY_INACTIVE"
 PORTFOLIO_STATE_NOT_APPLICABLE = "NOT_APPLICABLE"
@@ -108,7 +109,38 @@ def _selection_reason(*, state: str, candidate: PortfolioCandidate) -> str:
         )
     if state == PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT:
         return "Not selected because the fixture portfolio already reached the three-position cap."
+    if state == PORTFOLIO_STATE_NOT_SELECTED_CONFLICT:
+        return "Not selected because it conflicts with a higher-ranked portfolio position."
     raise ValueError(f"Unsupported portfolio selection state: {state}")
+
+
+def _is_negative_handicap(candidate: PortfolioCandidate) -> bool:
+    if candidate.market != "asian_handicap" or candidate.line is None:
+        return False
+    line = float(candidate.line)
+    if candidate.selection == "HOME":
+        return line < 0.0
+    if candidate.selection == "AWAY":
+        return line > 0.0
+    return False
+
+
+def _directional_side(candidate: PortfolioCandidate) -> str | None:
+    if candidate.market == "1x2" and candidate.selection in {"HOME", "DRAW", "AWAY"}:
+        return candidate.selection
+    if candidate.market == "asian_handicap" and _is_negative_handicap(candidate):
+        return candidate.selection
+    return None
+
+
+def _is_directly_conflicting(candidate: PortfolioCandidate, selected: PortfolioCandidate) -> bool:
+    candidate_side = _directional_side(candidate)
+    selected_side = _directional_side(selected)
+    if candidate_side is None or selected_side is None:
+        return False
+    if candidate_side == selected_side:
+        return False
+    return candidate.market == "1x2" or selected.market == "1x2"
 
 
 def select_fixture_portfolio(
@@ -129,6 +161,7 @@ def select_fixture_portfolio(
     cluster_blocked: set[str] = set()
     family_blocked: set[str] = set()
     fixture_blocked: set[str] = set()
+    conflict_blocked: set[str] = set()
 
     for candidate in candidates:
         cluster_key = (str(candidate.market), str(candidate.selection))
@@ -146,11 +179,15 @@ def select_fixture_portfolio(
         selected_by_market[market_key] = candidate
 
     market_winners = tuple(sorted(selected_by_market.values(), key=_ranking_key))
+    selected_candidates: list[PortfolioCandidate] = []
     for index, candidate in enumerate(market_winners):
-        if index < MAX_SELECTED_PER_FIXTURE:
-            selected_trade_ids.add(candidate.paper_trade_id)
-        else:
+        if len(selected_trade_ids) >= MAX_SELECTED_PER_FIXTURE:
             fixture_blocked.add(candidate.paper_trade_id)
+        elif any(_is_directly_conflicting(candidate, selected) for selected in selected_candidates):
+            conflict_blocked.add(candidate.paper_trade_id)
+        else:
+            selected_trade_ids.add(candidate.paper_trade_id)
+            selected_candidates.append(candidate)
 
     dispositions = []
     for candidate in candidates:
@@ -162,6 +199,8 @@ def select_fixture_portfolio(
             state = PORTFOLIO_STATE_NOT_SELECTED_MARKET_FAMILY_LIMIT
         elif candidate.paper_trade_id in fixture_blocked:
             state = PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT
+        elif candidate.paper_trade_id in conflict_blocked:
+            state = PORTFOLIO_STATE_NOT_SELECTED_CONFLICT
         else:
             state = PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT
         dispositions.append(
