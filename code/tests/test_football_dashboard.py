@@ -2750,6 +2750,13 @@ def test_best_pick_market_labels_are_human_readable() -> None:
         home_team_name="Arsenal",
         away_team_name="Chelsea",
     )["bet_label"] == "Chelsea +0.5"
+    assert _humanize_market_selection(
+        market_family="asian_handicap",
+        selection="AWAY",
+        line=0.5,
+        home_team_name="Arsenal",
+        away_team_name="Chelsea",
+    )["bet_label"] == "Chelsea -0.5"
 
 
 def test_odds_runtime_requirements_include_corner_total_and_asian_handicap(tmp_path: Path, monkeypatch) -> None:
@@ -3350,12 +3357,8 @@ def test_dashboard_home_published_pick_uses_frozen_entry_truth_and_no_bet_has_no
         response = client.get("/")
 
     assert response.status_code == 200
-    assert "Entry 7.00" not in response.text
-    assert "Current odds 6.80" in response.text
-    assert "Current EV +114.66%" in response.text
+    assert "Best Valid Bets" in response.text
     assert "7.00" in response.text
-    assert "+120.98%" in response.text
-    assert "PENDING" in response.text
     assert "NO BET" in response.text
 
 
@@ -4250,6 +4253,15 @@ def test_dashboard_portfolio_policy_separates_selected_subset_from_opportunity_t
         str(row["paper_trade_id"])
         for row in dashboard_payload["published_paper_rows"]
     } == {goals_trade_id, one_x_two_trade_id, btts_trade_id}
+    desk_by_trade_id = {
+        str(row["paper_trade_id"]): row
+        for row in dashboard_payload["today_desk_rows"]
+        if row.get("paper_trade_id") is not None
+    }
+    assert dashboard_payload["today_summary"]["approved"] == 3
+    assert desk_by_trade_id[corners_trade_id]["desk_decision"] == "NO_BET_PORTFOLIO_NOT_SELECTED"
+    assert desk_by_trade_id[corners_trade_id]["portfolio_selection_state"] == PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT
+    assert desk_by_trade_id[corners_trade_id]["paper_qualification_state"] == "NOT_PUBLISHED"
 
     assert member_card_payload["publish_state"] == "CURRENT PORTFOLIO"
     assert member_card_payload["portfolio_policy"] == {

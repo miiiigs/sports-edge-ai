@@ -422,6 +422,12 @@ def _decision_group(state: str) -> str:
     return "blocked"
 
 
+def _portfolio_enforced_decision_state(row: dict[str, Any]) -> str:
+    if row.get("portfolio_selected"):
+        return "BET"
+    return "NO_BET_PORTFOLIO_NOT_SELECTED"
+
+
 def _decision_state_detail(state: str) -> str:
     return state.replace("_", " ").title()
 
@@ -1770,6 +1776,42 @@ class DashboardServices:
                 }
             )
         return annotated_rows
+
+    def _enforce_portfolio_recommendation_truth(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        records: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if records.get("policy") is None:
+            return rows
+        enforced_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if str(row.get("current_decision_state") or row.get("desk_decision") or "") != "BET":
+                enforced_rows.append(row)
+                continue
+            if row.get("portfolio_selected"):
+                enforced_rows.append({**row, "actual_recommendation_state": "BET"})
+                continue
+            state = _portfolio_enforced_decision_state(row)
+            reason = str(row.get("portfolio_selection_reason") or "Not selected by current portfolio policy.")
+            enforced_rows.append(
+                {
+                    **row,
+                    "actual_recommendation_state": state,
+                    "current_decision_state": state,
+                    "current_decision_group": _decision_group(state),
+                    "desk_decision": state,
+                    "decision_group": _decision_group(state),
+                    "desk_label": "NO BET",
+                    "is_actionable": False,
+                    "is_featured": False,
+                    "paper_qualification_state": "NOT_PUBLISHED",
+                    "reason": reason,
+                    "desk_note": reason,
+                }
+            )
+        return enforced_rows
 
     def _paper_fixture_identity_map_from_rows(
         self,
@@ -5702,8 +5744,22 @@ class DashboardServices:
             best_picks = list(today_published_rows)
         else:
             best_picks = current_best_picks
-        current_slate_rows = self._build_current_slate_working_rows(fixture_rows)
-        today_working_rows = self._build_today_working_rows(fixture_rows)
+        current_slate_rows = self._enforce_portfolio_recommendation_truth(
+            self._annotate_rows_with_portfolio(
+                self._build_current_slate_working_rows(fixture_rows),
+                records=portfolio_context,
+                qualified_predicate=lambda row: str(row.get("current_decision_state") or "") == "BET",
+            ),
+            records=portfolio_context,
+        )
+        today_working_rows = self._enforce_portfolio_recommendation_truth(
+            self._annotate_rows_with_portfolio(
+                self._build_today_working_rows(fixture_rows),
+                records=portfolio_context,
+                qualified_predicate=lambda row: str(row.get("current_decision_state") or "") == "BET",
+            ),
+            records=portfolio_context,
+        )
         client_match_cards = self._build_client_match_cards(
             self._future_fixture_rows(fixture_rows),
             portfolio_context=portfolio_context,
@@ -5718,7 +5774,7 @@ class DashboardServices:
         )
         paper_performance = paper_status.get("performance", {})
         analysed_count = len({str(row["fixture_id"]) for row in today_working_rows})
-        approved_count = sum(1 for row in today_working_rows if str(row.get("current_decision_state") or "") == "BET")
+        approved_count = sum(1 for row in today_working_rows if str(row.get("actual_recommendation_state") or row.get("current_decision_state") or "") == "BET")
         no_bet_count = sum(1 for row in today_working_rows if str(row.get("current_decision_state") or "") == "NO BET")
         blocking_reasons = self._blocking_reason_counts(today_working_rows)
         client_blocking_reasons = self._client_blocking_reasons(blocking_reasons)
@@ -6011,12 +6067,16 @@ class DashboardServices:
             str(row["fixture_id"]): self.serialize_fixture_row(row)
             for row in desk_fixture_rows
         }
-        desk_rows = self._annotate_rows_with_portfolio(
-            self._build_betting_desk_rows_for_fixture_map(fixture_map),
-            records=self._portfolio_selection_records(),
-            qualified_predicate=lambda row: str(row.get("desk_decision") or "") == "BET",
+        portfolio_records = self._portfolio_selection_records()
+        desk_rows = self._enforce_portfolio_recommendation_truth(
+            self._annotate_rows_with_portfolio(
+                self._build_betting_desk_rows_for_fixture_map(fixture_map),
+                records=portfolio_records,
+                qualified_predicate=lambda row: str(row.get("desk_decision") or "") == "BET",
+            ),
+            records=portfolio_records,
         )
-        preliminary = [row for row in desk_rows if row["desk_decision"] == "BET"]
+        preliminary = [row for row in desk_rows if row.get("portfolio_selected") or (portfolio_records.get("policy") is None and row["desk_decision"] == "BET")]
         no_bets = [row for row in desk_rows if row["decision_group"] == "no_bet"]
         blocked = [row for row in desk_rows if row["decision_group"] in {"blocked", "unsupported"}]
 

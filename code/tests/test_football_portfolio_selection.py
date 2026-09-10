@@ -4,6 +4,7 @@ import sqlite3
 
 from sports_ai.dashboard.portfolio_selection import (
     PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT,
+    PORTFOLIO_STATE_NOT_SELECTED_CONFLICT,
     PORTFOLIO_STATE_NOT_SELECTED_MARKET_FAMILY_LIMIT,
     PORTFOLIO_STATE_NOT_SELECTED_SAME_MARKET_CLUSTER,
     PORTFOLIO_STATE_SELECTED,
@@ -190,6 +191,42 @@ def test_fixture_limit_caps_selection_at_three() -> None:
     assert by_trade_id["paper_btts"].selection_state == PORTFOLIO_STATE_SELECTED
     assert by_trade_id["paper_corners"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_FIXTURE_LIMIT
     assert len(result.selected_positions) == 3
+
+
+def test_home_win_blocks_opposing_away_negative_handicap() -> None:
+    result = select_fixture_portfolio(
+        [
+            _candidate("paper_home_win", market="1x2", selection="HOME", line=None, edge=0.12),
+            # Asian-handicap line uses the home-handicap convention; AWAY with
+            # raw +0.5 is displayed as Away -0.5 and conflicts with HOME 1X2.
+            _candidate("paper_away_minus_half", market="asian_handicap", selection="AWAY", line=0.5, edge=0.10),
+            _candidate("paper_under", market="goals_total", selection="UNDER", line=2.5, edge=0.08),
+        ],
+        policy=_policy(),
+    )
+
+    by_trade_id = {row.paper_trade_id: row for row in result.dispositions}
+    assert by_trade_id["paper_home_win"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_away_minus_half"].selection_state == PORTFOLIO_STATE_NOT_SELECTED_CONFLICT
+    assert by_trade_id["paper_under"].selection_state == PORTFOLIO_STATE_SELECTED
+
+
+def test_home_win_allows_away_positive_handicap() -> None:
+    result = select_fixture_portfolio(
+        [
+            _candidate("paper_home_win", market="1x2", selection="HOME", line=None, edge=0.12),
+            # AWAY with raw -1.0 is displayed as Away +1.0; a narrow home-win
+            # thesis can coexist with it, so this is not a direct contradiction.
+            _candidate("paper_away_plus_one", market="asian_handicap", selection="AWAY", line=-1.0, edge=0.10),
+            _candidate("paper_under", market="goals_total", selection="UNDER", line=2.5, edge=0.08),
+        ],
+        policy=_policy(),
+    )
+
+    by_trade_id = {row.paper_trade_id: row for row in result.dispositions}
+    assert by_trade_id["paper_home_win"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_away_plus_one"].selection_state == PORTFOLIO_STATE_SELECTED
+    assert by_trade_id["paper_under"].selection_state == PORTFOLIO_STATE_SELECTED
 
 
 def test_fixture_with_twenty_three_qualified_positions_still_selects_only_three() -> None:

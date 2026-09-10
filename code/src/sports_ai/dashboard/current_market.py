@@ -18,6 +18,7 @@ from ..experiments.football_day11_manager_core import (
     apply_day11_manager_rules,
     build_reference_market_booksum,
     canonical_market_identity,
+    collapse_latest_bookmaker_quotes,
     normalize_market_snapshot,
     validate_reference_market_rows,
 )
@@ -217,7 +218,9 @@ def build_fixture_market_evaluation(
             },
         }
 
-    current_rows = [current_snapshot_to_day11_row(snapshot, fixture_context=fixture_context) for snapshot in snapshots]
+    current_rows = collapse_latest_bookmaker_quotes(
+        [current_snapshot_to_day11_row(snapshot, fixture_context=fixture_context) for snapshot in snapshots]
+    )
     grouped_current_rows = _group_current_rows(current_rows)
     model_rows = list(prediction.get("market_rows") or [])
     model_index = _index_model_rows(model_rows)

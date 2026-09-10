@@ -16,6 +16,7 @@ from sports_ai.experiments.football_day11_manager_core import (
     REASON_INCOMPLETE_REFERENCE_MARKET,
     build_reference_market_booksum,
     canonical_market_identity,
+    collapse_latest_bookmaker_quotes,
 )
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
 from sports_ai.storage.football_paper_trading import (
@@ -53,13 +54,14 @@ def _ah_snapshot(
     line,
     reference,
     source_timestamp,
+    captured_at=EVAL,
     freshness="FRESH",
 ):
     return NormalizedMarketSnapshot(
         provider="the-odds-api",
         fixture_id=FIXTURE_ID,
         provider_fixture_id="odds_event_1",
-        captured_at=EVAL,
+        captured_at=captured_at,
         source_timestamp=source_timestamp,
         market="asian_handicap",
         selection=selection,
@@ -216,6 +218,24 @@ def _candidate(evaluation, *, selection, line):
     return None
 
 
+def _line_minus_one_prediction():
+    prediction = _prediction()
+    prediction["market_rows"].extend(
+        [
+            _market_row("HOME", 0.34, 0.66, 2.94, line=-1.0),
+            _market_row("AWAY", 0.66, 0.34, 1.52, line=-1.0),
+        ]
+    )
+    return prediction
+
+
+def _line_minus_one_reference_rows():
+    return [
+        _ah_snapshot("pinnacle", "HOME", 1.38, line=-1.0, reference=True, source_timestamp=FRESH_SOURCE),
+        _ah_snapshot("pinnacle", "AWAY", 3.18, line=-1.0, reference=True, source_timestamp=FRESH_SOURCE),
+    ]
+
+
 def test_provider_ah_canonical_identity_matches_day10_row():
     snapshot = _ah_snapshot(
         "pinnacle",
@@ -288,6 +308,135 @@ def test_day11_evaluates_exact_ah_line_and_keeps_reference_separate_from_entry(m
     assert reference["reference_bookmaker"] == "pinnacle"
     assert reference["raw_implied_probabilities"]["HOME"] == pytest.approx(1 / 1.95)
     assert reference["raw_implied_probabilities"]["AWAY"] == pytest.approx(1 / 1.91)
+
+
+def test_current_ah_uses_latest_same_bookmaker_quote_when_price_decreases(monkeypatch):
+    snapshots = [
+        *_line_minus_one_reference_rows(),
+        _ah_snapshot(
+            "Betano",
+            "AWAY",
+            3.25,
+            line=-1.0,
+            reference=False,
+            source_timestamp="2026-08-23T08:40:00+00:00",
+            captured_at="2026-08-23T08:45:00+00:00",
+        ),
+        _ah_snapshot(
+            "Betano",
+            "AWAY",
+            3.15,
+            line=-1.0,
+            reference=False,
+            source_timestamp="2026-08-23T08:50:00+00:00",
+            captured_at="2026-08-23T08:55:00+00:00",
+        ),
+    ]
+
+    evaluation = _evaluate(monkeypatch, source_timestamp=FRESH_SOURCE, prediction=_line_minus_one_prediction(), snapshots=snapshots)
+    away = _candidate(evaluation, selection="AWAY", line=-1.0)
+
+    assert away is not None
+    assert away["best_available_bookmaker"] == "Betano"
+    assert away["best_available_price"] == pytest.approx(3.15)
+    assert away["best_available_source_timestamp"] == "2026-08-23T08:50:00+00:00"
+
+
+def test_current_ah_uses_latest_same_bookmaker_quote_when_price_increases(monkeypatch):
+    snapshots = [
+        *_line_minus_one_reference_rows(),
+        _ah_snapshot("Betano", "AWAY", 3.15, line=-1.0, reference=False, source_timestamp="2026-08-23T08:40:00+00:00"),
+        _ah_snapshot("Betano", "AWAY", 3.25, line=-1.0, reference=False, source_timestamp="2026-08-23T08:50:00+00:00"),
+    ]
+
+    evaluation = _evaluate(monkeypatch, source_timestamp=FRESH_SOURCE, prediction=_line_minus_one_prediction(), snapshots=snapshots)
+    away = _candidate(evaluation, selection="AWAY", line=-1.0)
+
+    assert away is not None
+    assert away["best_available_bookmaker"] == "Betano"
+    assert away["best_available_price"] == pytest.approx(3.25)
+
+
+def test_current_ah_chooses_best_price_after_bookmaker_quote_collapse(monkeypatch):
+    snapshots = [
+        *_line_minus_one_reference_rows(),
+        _ah_snapshot("Betano", "AWAY", 3.25, line=-1.0, reference=False, source_timestamp="2026-08-23T08:40:00+00:00"),
+        _ah_snapshot("Betano", "AWAY", 3.15, line=-1.0, reference=False, source_timestamp="2026-08-23T08:50:00+00:00"),
+        _ah_snapshot("Bookmaker B", "AWAY", 3.20, line=-1.0, reference=False, source_timestamp="2026-08-23T08:45:00+00:00"),
+    ]
+
+    evaluation = _evaluate(monkeypatch, source_timestamp=FRESH_SOURCE, prediction=_line_minus_one_prediction(), snapshots=snapshots)
+    away = _candidate(evaluation, selection="AWAY", line=-1.0)
+
+    assert away is not None
+    assert away["best_available_bookmaker"] == "Bookmaker B"
+    assert away["best_available_price"] == pytest.approx(3.20)
+
+
+def test_current_ah_old_high_quote_cannot_win_inside_fresh_window(monkeypatch):
+    snapshots = [
+        *_line_minus_one_reference_rows(),
+        _ah_snapshot("Betano", "AWAY", 4.00, line=-1.0, reference=False, source_timestamp="2026-08-23T08:40:00+00:00"),
+        _ah_snapshot("Betano", "AWAY", 3.15, line=-1.0, reference=False, source_timestamp="2026-08-23T08:50:00+00:00"),
+    ]
+
+    evaluation = _evaluate(monkeypatch, source_timestamp=FRESH_SOURCE, prediction=_line_minus_one_prediction(), snapshots=snapshots)
+    away = _candidate(evaluation, selection="AWAY", line=-1.0)
+
+    assert away is not None
+    assert away["best_available_price"] == pytest.approx(3.15)
+
+
+def test_reference_bookmaker_uses_latest_superseding_quotes_for_devig():
+    rows = [
+        current_snapshot_to_day11_row(
+            _ah_snapshot("pinnacle", "HOME", 1.50, line=-1.0, reference=True, source_timestamp="2026-08-23T08:40:00+00:00"),
+            fixture_context=FIXTURE_CONTEXT,
+        ),
+        current_snapshot_to_day11_row(
+            _ah_snapshot("pinnacle", "AWAY", 2.80, line=-1.0, reference=True, source_timestamp="2026-08-23T08:40:00+00:00"),
+            fixture_context=FIXTURE_CONTEXT,
+        ),
+        current_snapshot_to_day11_row(
+            _ah_snapshot("pinnacle", "HOME", 1.38, line=-1.0, reference=True, source_timestamp="2026-08-23T08:50:00+00:00"),
+            fixture_context=FIXTURE_CONTEXT,
+        ),
+        current_snapshot_to_day11_row(
+            _ah_snapshot("pinnacle", "AWAY", 3.18, line=-1.0, reference=True, source_timestamp="2026-08-23T08:50:00+00:00"),
+            fixture_context=FIXTURE_CONTEXT,
+        ),
+    ]
+
+    reference = build_reference_market_booksum(collapse_latest_bookmaker_quotes(rows), final_method="shin")
+
+    assert reference["reference_bookmaker"] == "pinnacle"
+    assert reference["market_as_of"] == "2026-08-23T08:50:00+00:00"
+    assert reference["raw_implied_probabilities"]["HOME"] == pytest.approx(1 / 1.38)
+    assert reference["raw_implied_probabilities"]["AWAY"] == pytest.approx(1 / 3.18)
+
+
+def test_selection_time_truth_remains_separate_from_current_ah_quote(monkeypatch):
+    historical_selection = {
+        "bookmaker": "Betano",
+        "selection_time_odds": 3.25,
+        "edge_at_selection": 1.30,
+    }
+    snapshots = [
+        *_line_minus_one_reference_rows(),
+        _ah_snapshot("Betano", "AWAY", 3.15, line=-1.0, reference=False, source_timestamp=FRESH_SOURCE),
+    ]
+
+    evaluation = _evaluate(monkeypatch, source_timestamp=FRESH_SOURCE, prediction=_line_minus_one_prediction(), snapshots=snapshots)
+    away = _candidate(evaluation, selection="AWAY", line=-1.0)
+
+    assert away is not None
+    assert historical_selection == {
+        "bookmaker": "Betano",
+        "selection_time_odds": 3.25,
+        "edge_at_selection": 1.30,
+    }
+    assert away["best_available_price"] == pytest.approx(3.15)
+    assert away["settlement_aware_edge"] != pytest.approx(historical_selection["edge_at_selection"])
 
 
 def test_no_cross_match_between_different_ah_lines(monkeypatch):

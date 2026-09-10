@@ -540,6 +540,41 @@ def build_reference_market_booksum(
     }
 
 
+def _quote_source_timestamp(row: dict[str, Any]) -> str:
+    return str(row.get("source_timestamp") or row.get("market_as_of") or "")
+
+
+def collapse_latest_bookmaker_quotes(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only the latest quote for each bookmaker/canonical market selection."""
+    latest_by_key: dict[tuple[str, str, str, str, float | None, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            str(row["source"]),
+            str(row["bookmaker"]),
+            str(row["fixture_id"]),
+            str(row["market_family"]),
+            row["normalized_line"],
+            str(row["normalized_selection"]),
+        )
+        current = latest_by_key.get(key)
+        if current is None:
+            latest_by_key[key] = row
+            continue
+        row_order = (
+            _quote_source_timestamp(row),
+            str(row.get("captured_at") or ""),
+            str(row.get("market_snapshot_id") or ""),
+        )
+        current_order = (
+            _quote_source_timestamp(current),
+            str(current.get("captured_at") or ""),
+            str(current.get("market_snapshot_id") or ""),
+        )
+        if row_order > current_order:
+            latest_by_key[key] = row
+    return [latest_by_key[key] for key in sorted(latest_by_key)]
+
+
 def _serialize_devig_result(result: DevigResult, rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {
         "method": result.method,
