@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from .auth import AuthSettings, AuthStore, SESSION_COOKIE_NAME, SESSION_DAYS
 from .client_history import build_client_history_payload
 from .fixture_provider import FixtureProvider
+from .football_daily_brief import build_daily_brief_payload
 from .football_intelligence import build_football_intelligence_payload
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from .services import DashboardConfig, DashboardServices
@@ -171,6 +172,17 @@ def create_app(
             dashboard_db_path=resolved_services.config.dashboard_db_path,
             timezone_name=resolved_services.config.display_timezone,
             selected_window=window,
+        )
+
+    def _daily_brief(dashboard_payload: dict | None = None) -> dict:
+        resolved_dashboard_payload = dashboard_payload
+        if resolved_dashboard_payload is None:
+            resolved_dashboard_payload = resolved_services.get_dashboard_payload()
+        return build_daily_brief_payload(
+            paper_db_path=resolved_services.config.paper_trading_db_path,
+            dashboard_db_path=resolved_services.config.dashboard_db_path,
+            dashboard_payload=resolved_dashboard_payload,
+            model_snapshot=getattr(resolved_services, "snapshot", None),
         )
 
     @app.get("/login", response_class=HTMLResponse)
@@ -394,9 +406,11 @@ def create_app(
 
     @app.get("/analysis", response_class=HTMLResponse)
     def analysis_page(request: Request, window: str = Query(default="30")):
+        dashboard_payload = resolved_services.get_dashboard_payload()
         payload = {
-            "system_status": resolved_services.get_system_status(),
+            "system_status": dashboard_payload.get("system_status") or resolved_services.get_system_status(),
             "intelligence": _football_intelligence(window),
+            "daily_brief": _daily_brief(dashboard_payload),
         }
         return templates.TemplateResponse(
             request=request,
@@ -513,6 +527,10 @@ def create_app(
     @app.get("/api/analysis")
     def api_analysis(window: str = Query(default="30")):
         return JSONResponse(_football_intelligence(window))
+
+    @app.get("/api/analysis/daily-brief")
+    def api_analysis_daily_brief():
+        return JSONResponse(_daily_brief())
 
     @app.get("/api/system/status")
     def api_system_status():

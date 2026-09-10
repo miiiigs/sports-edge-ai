@@ -7,6 +7,10 @@
 {% set clv = intel.clv %}
 {% set health = intel.health %}
 {% set shadow = intel.shadow_calibration or {} %}
+{% set brief = payload.daily_brief or {} %}
+{% set previous = brief.previous_day or {} %}
+{% set selected_perf = previous.selected_recommendation_performance or {} %}
+{% set slate = brief.current_slate or {} %}
 
 <section class="clean-page-heading intel-heading">
   <div class="clean-page-heading__copy">
@@ -19,6 +23,135 @@
       <a href="/analysis?window={{ option.key }}" class="intel-window-tab {% if option.key == intel.selected_window %}is-active{% endif %}">{{ option.label }}</a>
     {% endfor %}
   </div>
+</section>
+
+<section class="clean-section intel-panel">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Daily Brief</p>
+      <h2>Previous Football Day</h2>
+      <p>Football days use the {{ brief.football_day_cutoff or '03:00 UTC' }} cutoff. Selected recommendation results are separated from model evaluation diagnostics.</p>
+    </div>
+    <span class="clean-section__meta">{{ previous.date or previous.previous_football_day or 'N/A' }}</span>
+  </div>
+
+  <div class="intel-kpi-grid">
+    <article class="clean-stat">
+      <span class="clean-stat__label">Record</span>
+      <strong class="clean-stat__value">{{ selected_perf.wins or 0 }}-{{ selected_perf.losses or 0 }}{% if selected_perf.pushes %}-{{ selected_perf.pushes }}P{% endif %}</strong>
+      <span class="clean-stat__note">{{ selected_perf.sample_state or 'INSUFFICIENT_SAMPLE' }}</span>
+    </article>
+    <article class="clean-stat clean-stat--primary">
+      <span class="clean-stat__label">P/L</span>
+      <strong class="clean-stat__value">{% if selected_perf.net_units is not none %}{{ "{:+.2f}".format(selected_perf.net_units|float) }}u{% else %}N/A{% endif %}</strong>
+      <span class="clean-stat__note">real ledger P/L</span>
+    </article>
+    <article class="clean-stat clean-stat--primary">
+      <span class="clean-stat__label">ROI</span>
+      <strong class="clean-stat__value">{% if selected_perf.roi is not none %}{{ "{:+.2%}".format(selected_perf.roi|float) }}{% else %}N/A{% endif %}</strong>
+      <span class="clean-stat__note">settled selected stake only</span>
+    </article>
+    <article class="clean-stat">
+      <span class="clean-stat__label">Selected Bets</span>
+      <strong class="clean-stat__value">{{ selected_perf.selected_bets or 0 }}</strong>
+      <span class="clean-stat__note">{{ selected_perf.pending_bets or 0 }} pending</span>
+    </article>
+    <article class="clean-stat">
+      <span class="clean-stat__label">Average CLV</span>
+      <strong class="clean-stat__value">{% if selected_perf.average_clv is not none %}{{ "{:+.2%}".format(selected_perf.average_clv|float) }}{% else %}N/A{% endif %}</strong>
+      <span class="clean-stat__note">{{ selected_perf.clv_sample or 0 }} closing samples</span>
+    </article>
+    <article class="clean-stat">
+      <span class="clean-stat__label">Closing Coverage</span>
+      <strong class="clean-stat__value">{% if selected_perf.clv_coverage is not none %}{{ "{:.1%}".format(selected_perf.clv_coverage|float) }}{% else %}N/A{% endif %}</strong>
+      <span class="clean-stat__note">persisted closing snapshots only</span>
+    </article>
+  </div>
+
+  {% if selected_perf.rows %}
+    <div class="intel-table-wrap">
+      <table class="intel-table">
+        <thead><tr><th>Fixture</th><th>Bet</th><th>Entry Odds</th><th>Result</th><th>P/L</th><th>Closing Odds</th><th>CLV</th></tr></thead>
+        <tbody>
+          {% for row in selected_perf.rows %}
+            <tr>
+              <td><strong>{{ row.fixture }}</strong><br><small>{{ row.competition }}</small></td>
+              <td>{{ row.bet }}</td>
+              <td>{% if row.entry_odds is not none %}{{ "{:.2f}".format(row.entry_odds|float) }}{% else %}N/A{% endif %}</td>
+              <td>{{ row.result.replace('_', ' ') }}</td>
+              <td class="{% if row.net_pnl is not none and row.net_pnl >= 0 %}intel-positive{% else %}intel-negative{% endif %}">{% if row.net_pnl is not none %}{{ "{:+.2f}".format(row.net_pnl|float) }}u{% else %}N/A{% endif %}</td>
+              <td>{% if row.closing_odds is not none %}{{ "{:.2f}".format(row.closing_odds|float) }}{% else %}N/A{% endif %}</td>
+              <td>{% if row.clv is not none %}{{ "{:+.2%}".format(row.clv|float) }}{% else %}N/A{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="clean-empty">No selected recommendations were settled or pending for the previous football day.</div>
+  {% endif %}
+</section>
+
+<section class="clean-section intel-panel">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Current Slate</p>
+      <h2>Qualified Bets</h2>
+      <p>BET means the current portfolio has selected the market and the fixture is still pre-match.</p>
+    </div>
+    <span class="clean-section__meta">{{ slate.selected_bets or 0 }} qualified</span>
+  </div>
+
+  <div class="intel-kpi-grid">
+    <article class="clean-stat"><span class="clean-stat__label">Upcoming Fixtures</span><strong class="clean-stat__value">{{ slate.total_upcoming_fixtures or 0 }}</strong><span class="clean-stat__note">future kickoff only</span></article>
+    <article class="clean-stat"><span class="clean-stat__label">Prediction Ready</span><strong class="clean-stat__value">{{ slate.prediction_ready_fixtures or 0 }}</strong><span class="clean-stat__note">model opinion available</span></article>
+    <article class="clean-stat"><span class="clean-stat__label">Blocked</span><strong class="clean-stat__value">{{ slate.blocked_fixtures or 0 }}</strong><span class="clean-stat__note">not prediction-ready</span></article>
+    <article class="clean-stat clean-stat--primary"><span class="clean-stat__label">Qualified Bets</span><strong class="clean-stat__value">{{ slate.selected_bets or 0 }}</strong><span class="clean-stat__note">{{ slate.fixtures_with_selected_bets or 0 }} fixtures</span></article>
+  </div>
+
+  {% if slate.rows %}
+    <div class="intel-table-wrap">
+      <table class="intel-table">
+        <thead><tr><th>Kickoff UTC</th><th>Fixture</th><th>Bet</th><th>Model</th><th>Odds</th><th>Edge</th><th>Bookmaker</th></tr></thead>
+        <tbody>
+          {% for row in slate.rows %}
+            <tr>
+              <td>{{ row.kickoff_utc }}</td>
+              <td><strong>{{ row.fixture }}</strong><br><small>{{ row.competition }}</small></td>
+              <td>{{ row.selection }}</td>
+              <td>{% if row.model_probability is not none %}{{ "{:.1%}".format(row.model_probability|float) }}{% else %}N/A{% endif %}</td>
+              <td>{% if row.current_odds is not none %}{{ "{:.2f}".format(row.current_odds|float) }}{% else %}N/A{% endif %}</td>
+              <td>{% if row.current_edge is not none %}{{ "{:+.2%}".format(row.current_edge|float) }}{% else %}N/A{% endif %}</td>
+              <td>{{ row.bookmaker or 'N/A' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="clean-empty">{{ slate.empty_message or 'No current qualified bets. Sports Edge is waiting for sufficient verified value.' }}</div>
+  {% endif %}
+
+  <details class="clean-details intel-methodology">
+    <summary>Match Outlook</summary>
+    <div class="clean-details__body">
+      {% for match in slate.match_outlook %}
+        <div class="intel-breakdown-list">
+          <div class="intel-breakdown-row"><div><strong>{{ match.fixture }}</strong><small>{{ match.competition }} · {{ match.kickoff_utc }}</small></div><span>{{ match.markets|length }} markets</span></div>
+          {% for row in match.markets %}
+            <div class="intel-breakdown-row intel-breakdown-row--four">
+              <div><strong>{{ row.market_label }}</strong><small>{{ row.selection or 'Market unavailable' }}</small></div>
+              <span>{{ row.decision }}</span>
+              <span>{% if row.current_best_valid_odds is not none %}{{ "{:.2f}".format(row.current_best_valid_odds|float) }}{% else %}N/A{% endif %}</span>
+              <strong>{{ row.reason }}</strong>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="clean-empty">No prediction-ready upcoming fixture outlook is available.</div>
+      {% endfor %}
+    </div>
+  </details>
 </section>
 
 {% if not intel.available %}
