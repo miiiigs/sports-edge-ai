@@ -43,9 +43,17 @@ async def _allow(_request: Request):
 
 
 def _render_login() -> str:
-    template = owner_access.templates.get_template("auth.html")
-    return template.render(
-        request=_request("/login"),
+    request = _request("/login")
+    request.state.owner_signup_allowed = signup_allowed()
+    request.state.owner_guest_allowed = guest_allowed()
+    template = owner_access.app.state if False else None  # keep render independent of app startup
+    del template
+    from sports_ai.dashboard.app import _template_directory
+    from fastapi.templating import Jinja2Templates
+
+    templates = Jinja2Templates(directory=str(_template_directory()))
+    return templates.get_template("auth.html").render(
+        request=request,
         mode="login",
         next_path="/",
         error=None,
