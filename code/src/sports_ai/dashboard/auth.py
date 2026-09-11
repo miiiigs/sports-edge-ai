@@ -16,6 +16,7 @@ from typing import Any
 SESSION_COOKIE_NAME = "sports_edge_session"
 PASSWORD_ITERATIONS = 310_000
 SESSION_DAYS = 30
+ALLOWED_EMAILS_ENV_VAR = "SPORTS_AI_AUTH_ALLOWED_EMAILS"
 
 
 def _utcnow() -> datetime:
@@ -32,6 +33,15 @@ def _parse_iso(value: str) -> datetime:
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _allowed_signup_emails() -> frozenset[str]:
+    raw = os.getenv(ALLOWED_EMAILS_ENV_VAR, "")
+    return frozenset(
+        normalized
+        for normalized in (_normalize_email(value) for value in raw.split(","))
+        if normalized
+    )
 
 
 def _hash_password(password: str, salt: bytes) -> bytes:
@@ -99,6 +109,9 @@ class AuthStore:
         normalized = _normalize_email(email)
         if not normalized or "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
             raise ValueError("Enter a valid email address.")
+        allowed_emails = _allowed_signup_emails()
+        if allowed_emails and normalized not in allowed_emails:
+            raise ValueError("This email is not authorized to create a Sports Edge account.")
         if len(password) < 8:
             raise ValueError("Password must be at least 8 characters.")
 
