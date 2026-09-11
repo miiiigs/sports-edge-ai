@@ -43,7 +43,9 @@
 
         <div class="auth-switch" role="navigation" aria-label="Authentication">
           <a href="/login{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}" class="{% if mode == 'login' %}is-active{% endif %}">Sign in</a>
+          {% if owner_signup_allowed() %}
           <a href="/signup{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}" class="{% if mode == 'signup' %}is-active{% endif %}">Sign up</a>
+          {% endif %}
         </div>
 
         {% if error %}
@@ -85,7 +87,7 @@
                 type="password"
                 name="confirm_password"
                 autocomplete="new-password"
-                placeholder="Repeat your password"
+                placeholder="Repeat password"
                 minlength="8"
                 required
               >
@@ -98,6 +100,7 @@
           </button>
         </form>
 
+        {% if owner_guest_allowed() %}
         <div class="auth-divider"><span>or</span></div>
 
         <form method="post" action="/guest" class="auth-guest-form">
@@ -111,14 +114,17 @@
           </button>
         </form>
         <p class="auth-guest-note">Guest access is view-only. Sign in later when account access is required.</p>
+        {% endif %}
 
+        {% if mode == 'signup' %}
         <p class="auth-footer-copy">
-          {% if mode == 'signup' %}
-            Already have an account? <a href="/login{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}">Sign in</a>
-          {% else %}
-            New to Sports Edge? <a href="/signup{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}">Create an account</a>
-          {% endif %}
+          Already have an account? <a href="/login{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}">Sign in</a>
         </p>
+        {% elif owner_signup_allowed() %}
+        <p class="auth-footer-copy">
+          New to Sports Edge? <a href="/signup{% if next_path and next_path != '/' %}?next={{ next_path | urlencode }}{% endif %}">Create an account</a>
+        </p>
+        {% endif %}
       </div>
     </section>
   </main>
