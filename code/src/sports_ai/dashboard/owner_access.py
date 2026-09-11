@@ -13,8 +13,7 @@ import os
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from .app import GUEST_COOKIE_NAME, GUEST_COOKIE_VALUE, app
-from .auth import SESSION_COOKIE_NAME
+from .app import GUEST_COOKIE_NAME, GUEST_COOKIE_VALUE, app, templates
 
 ALLOW_SIGNUP_ENV_VAR = "SPORTS_AI_AUTH_ALLOW_SIGNUP"
 ALLOW_GUEST_ENV_VAR = "SPORTS_AI_AUTH_ALLOW_GUEST"
@@ -33,6 +32,12 @@ def signup_allowed() -> bool:
 
 def guest_allowed() -> bool:
     return _flag(ALLOW_GUEST_ENV_VAR, default=True)
+
+
+# The auth template calls these functions at render time, so changing the
+# deployment flags updates both route policy and visible controls together.
+templates.env.globals["owner_signup_allowed"] = signup_allowed
+templates.env.globals["owner_guest_allowed"] = guest_allowed
 
 
 @app.middleware("http")
