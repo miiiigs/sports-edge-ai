@@ -8,6 +8,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from sports_ai.dashboard.auth import AuthStore
+import sports_ai.dashboard.owner_access as owner_access
 from sports_ai.dashboard.owner_access import (
     guest_allowed,
     owner_access_policy,
@@ -32,12 +33,24 @@ def _request(path: str, *, method: str = "GET", cookie: str | None = None) -> Re
             "headers": headers,
             "client": ("127.0.0.1", 12345),
             "server": ("testserver", 443),
+            "app": owner_access.app,
         }
     )
 
 
 async def _allow(_request: Request):
     return PlainTextResponse("ok")
+
+
+def _render_login() -> str:
+    template = owner_access.templates.get_template("auth.html")
+    return template.render(
+        request=_request("/login"),
+        mode="login",
+        next_path="/",
+        error=None,
+        email="",
+    )
 
 
 def test_auth_store_optional_owner_email_allowlist(tmp_path, monkeypatch):
@@ -75,6 +88,29 @@ def test_owner_access_policy_flags_can_lock_signup_and_guest(monkeypatch):
 
     assert signup_allowed() is False
     assert guest_allowed() is False
+
+
+def test_locked_owner_mode_hides_signup_and_guest_controls(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_AUTH_ALLOW_SIGNUP", "0")
+    monkeypatch.setenv("SPORTS_AI_AUTH_ALLOW_GUEST", "0")
+
+    html = _render_login()
+
+    assert "Continue as guest" not in html
+    assert ">Sign up<" not in html
+    assert "Create an account" not in html
+    assert ">Sign in<" in html
+
+
+def test_default_auth_ui_preserves_signup_and_guest_controls(monkeypatch):
+    monkeypatch.delenv("SPORTS_AI_AUTH_ALLOW_SIGNUP", raising=False)
+    monkeypatch.delenv("SPORTS_AI_AUTH_ALLOW_GUEST", raising=False)
+
+    html = _render_login()
+
+    assert "Continue as guest" in html
+    assert ">Sign up<" in html
+    assert "Create an account" in html
 
 
 def test_disabled_signup_redirects_get_and_rejects_post(monkeypatch):
