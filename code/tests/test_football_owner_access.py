@@ -4,9 +4,11 @@ import asyncio
 import json
 
 import pytest
+from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
+from sports_ai.dashboard.app import _template_directory
 from sports_ai.dashboard.auth import AuthStore
 import sports_ai.dashboard.owner_access as owner_access
 from sports_ai.dashboard.owner_access import (
@@ -46,11 +48,6 @@ def _render_login() -> str:
     request = _request("/login")
     request.state.owner_signup_allowed = signup_allowed()
     request.state.owner_guest_allowed = guest_allowed()
-    template = owner_access.app.state if False else None  # keep render independent of app startup
-    del template
-    from sports_ai.dashboard.app import _template_directory
-    from fastapi.templating import Jinja2Templates
-
     templates = Jinja2Templates(directory=str(_template_directory()))
     return templates.get_template("auth.html").render(
         request=request,
