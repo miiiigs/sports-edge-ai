@@ -36,7 +36,7 @@ def build_child_specs(*, port: str | None = None) -> list[ChildSpec]:
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "sports_ai.dashboard.app:app",
+                "sports_ai.dashboard.owner_access:app",
                 "--host",
                 "0.0.0.0",
                 "--port",
