@@ -13,7 +13,7 @@ import os
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from .app import GUEST_COOKIE_NAME, GUEST_COOKIE_VALUE, app, templates
+from .app import GUEST_COOKIE_NAME, GUEST_COOKIE_VALUE, app
 
 ALLOW_SIGNUP_ENV_VAR = "SPORTS_AI_AUTH_ALLOW_SIGNUP"
 ALLOW_GUEST_ENV_VAR = "SPORTS_AI_AUTH_ALLOW_GUEST"
@@ -34,25 +34,24 @@ def guest_allowed() -> bool:
     return _flag(ALLOW_GUEST_ENV_VAR, default=True)
 
 
-# The auth template calls these functions at render time, so changing the
-# deployment flags updates both route policy and visible controls together.
-templates.env.globals["owner_signup_allowed"] = signup_allowed
-templates.env.globals["owner_guest_allowed"] = guest_allowed
-
-
 @app.middleware("http")
 async def owner_access_policy(request: Request, call_next):
     """Apply deployment policy outside the existing authentication middleware.
 
     Defaults preserve the pre-existing signup + guest behavior. Owner-only
     production can explicitly disable either surface through environment flags.
+    The resolved policy is placed on request.state so the existing auth template
+    can hide controls that the server will reject, without global Jinja mutation.
     """
     auth_enabled = _flag("SPORTS_AI_AUTH_ENABLED", default=False)
+    allow_signup = signup_allowed()
+    allow_guest = guest_allowed()
+    request.state.owner_signup_allowed = allow_signup
+    request.state.owner_guest_allowed = allow_guest
+
     if not auth_enabled:
         return await call_next(request)
 
-    allow_signup = signup_allowed()
-    allow_guest = guest_allowed()
     path = request.url.path
 
     if path == "/signup" and not allow_signup:
