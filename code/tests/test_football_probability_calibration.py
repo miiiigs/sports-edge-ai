@@ -65,7 +65,7 @@ def test_shadow_payload_never_promotes_itself_to_runtime():
             index,
             probability=0.25 if index % 4 == 0 else 0.45 if index % 4 == 1 else 0.60 if index % 4 == 2 else 0.75,
             won=(index * 7) % 10 < (2 if index % 4 == 0 else 5 if index % 4 == 1 else 6 if index % 4 == 2 else 7),
-            market=("1x2", "btts", "goals_total", "corners_total", "asian_handicap")[index % 5],
+            market=("1x2", "btts", "goals_total", "corner_total", "asian_handicap")[index % 5],
         )
         for index in range(180)
     ]
@@ -81,6 +81,15 @@ def test_shadow_payload_never_promotes_itself_to_runtime():
     assert payload["candidate"] is not None
     assert payload["candidate"]["effective_from"] is None
     assert payload["walk_forward"]["sample"] > 0
+    market_segments = {row["key"]: row for row in payload["by_market"]}
+    assert market_segments["corner_total"]["label"] == "Corners"
+    assert [row["key"] for row in payload["by_market"]] == [
+        "1x2",
+        "btts",
+        "goals_total",
+        "corner_total",
+        "asian_handicap",
+    ]
 
 
 def test_non_decisive_rows_are_excluded_from_calibration():
