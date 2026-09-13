@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from ..experiments.football_day11_manager_core import (
     DECISION_MISSING_REQUIRED_MARKET_DATA,
@@ -40,9 +40,16 @@ from ..locking import canonical_hash
 from ..market_data.freshness import classify_freshness_state, resolve_market_max_age_minutes_for_provider
 from ..market_data.providers import NormalizedMarketSnapshot
 from .day12_rolling_xg import XgRowsByRole, missing_xg_inspection
+from .football_context_veto import (
+    CONTEXT_BLOCKED,
+    CONTEXT_FLAG,
+    CONTEXT_VETO,
+    evaluate_football_context_veto,
+)
 from .models import utc_now_iso
 
 XgProfileProvider = Callable[[], tuple[XgRowsByRole, dict[str, Any]]]
+ContextSignalsProvider = Callable[[dict[str, Any]], Mapping[str, Any] | None]
 
 CURRENT_INPUT_LABEL = "CURRENT MARKET INPUT"
 CURRENT_DECISION_SCHEMA_VERSION = "football_current_market_decision_v1"
@@ -176,6 +183,65 @@ def _best_display_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     )[:12]
 
 
+def _context_evaluation_for_candidate(
+    *,
+    context_signals_provider: ContextSignalsProvider,
+    strict_context_evidence: bool,
+    fixture_context: dict[str, Any],
+    prediction: dict[str, Any],
+    model_row: dict[str, Any],
+    decision_payload: dict[str, Any],
+    best_offer: dict[str, Any] | None,
+    market_freshness: str,
+    xg_rule: dict[str, Any] | None,
+) -> dict[str, Any]:
+    provider_error: str | None = None
+    try:
+        supplied = context_signals_provider(
+            {
+                "fixture_context": fixture_context,
+                "prediction": prediction,
+                "model_row": model_row,
+                "decision_payload": decision_payload,
+                "best_offer": best_offer,
+                "market_freshness": market_freshness,
+                "xg_rule": xg_rule,
+            }
+        )
+        signals = dict(supplied or {})
+        if supplied is None and strict_context_evidence:
+            signals = {
+                "required_evidence": ["context_provider"],
+                "available_evidence": {"context_provider": False},
+            }
+    except Exception as exc:
+        provider_error = f"{type(exc).__name__}: {exc}"
+        signals = {
+            "required_evidence": ["context_provider"],
+            "available_evidence": {"context_provider": False},
+        }
+        strict_context_evidence = True
+
+    source_states = dict(signals.get("source_states") or {})
+    source_states.setdefault("odds", market_freshness)
+    signals["source_states"] = source_states
+    if xg_rule is not None and str(xg_rule.get("status") or "") == XG_STATUS_VETO:
+        signals.setdefault("xg_divergence_failed", True)
+    if signals.get("baseline_odds") is not None and signals.get("current_odds") is None and best_offer is not None:
+        signals["current_odds"] = best_offer.get("decimal_odds")
+
+    result = evaluate_football_context_veto(
+        signals,
+        strict_required_evidence=strict_context_evidence,
+    )
+    if provider_error is not None:
+        result = dict(result)
+        diagnostics = dict(result.get("diagnostics") or {})
+        diagnostics["context_provider_error"] = provider_error
+        result["diagnostics"] = diagnostics
+    return result
+
+
 def build_fixture_market_evaluation(
     *,
     fixture_context: dict[str, Any],
@@ -186,6 +252,8 @@ def build_fixture_market_evaluation(
     xg_max_abs_gap_per_team: float = DEFAULT_XG_MAX_ABS_GAP_PER_TEAM,
     xg_min_window_matches: int = DEFAULT_XG_MIN_WINDOW_MATCHES,
     market_freshness_evaluated_at: str | None = None,
+    context_signals_provider: ContextSignalsProvider | None = None,
+    strict_context_evidence: bool = False,
 ) -> dict[str, Any]:
     if str(prediction.get("prediction_status")) != "READY":
         return {
@@ -278,6 +346,9 @@ def build_fixture_market_evaluation(
             day12_state = "NOT_APPLICABLE"
             paper_entry_eligible = False
             xg_rule = None
+            context_veto = None
+            context_threshold_gate_passed: bool | None = None
+            context_adjusted_threshold: float | None = None
             if decision_payload["decision"] == DECISION_PRELIMINARY_CANDIDATE:
                 if fixture_competition_id not in XG_APPLICABLE_COMPETITIONS:
                     day12_state = "PASSED"
@@ -312,6 +383,34 @@ def build_fixture_market_evaluation(
                 # market data fails closed regardless of Day 12 outcome.
                 if not freshness_gate_passed:
                     paper_entry_eligible = False
+
+                if context_signals_provider is not None:
+                    context_veto = _context_evaluation_for_candidate(
+                        context_signals_provider=context_signals_provider,
+                        strict_context_evidence=strict_context_evidence,
+                        fixture_context=fixture_context,
+                        prediction=prediction,
+                        model_row=model_row,
+                        decision_payload=decision_payload,
+                        best_offer=best_offer,
+                        market_freshness=market_freshness,
+                        xg_rule=xg_rule,
+                    )
+                    context_status = str(context_veto.get("status") or "")
+                    if context_status in {CONTEXT_VETO, CONTEXT_BLOCKED}:
+                        paper_entry_eligible = False
+                    threshold_adjustment = float(context_veto.get("threshold_adjustment") or 0.0)
+                    if context_status == CONTEXT_FLAG and threshold_adjustment > 0.0:
+                        base_threshold = decision_payload.get("competition_threshold")
+                        edge = decision_payload.get("settlement_aware_edge")
+                        if base_threshold is not None:
+                            context_adjusted_threshold = float(base_threshold) + threshold_adjustment
+                        if context_adjusted_threshold is None or edge is None:
+                            context_threshold_gate_passed = False if strict_context_evidence else None
+                        else:
+                            context_threshold_gate_passed = float(edge) >= (context_adjusted_threshold - 1e-12)
+                        if context_threshold_gate_passed is False:
+                            paper_entry_eligible = False
             decision_rows.append(
                 {
                     "current_decision_schema_version": CURRENT_DECISION_SCHEMA_VERSION,
@@ -344,6 +443,7 @@ def build_fixture_market_evaluation(
                     "reference_market_snapshot_id": None
                     if reference_market is None
                     else str(reference_market["reference_market_snapshot_id"]),
+                    "competition_threshold": decision_payload.get("competition_threshold"),
                     "minimum_acceptable_price": decision_payload.get("minimum_acceptable_price"),
                     "settlement_aware_edge": decision_payload.get("settlement_aware_edge"),
                     "decision": str(decision_payload["decision"]),
@@ -368,6 +468,14 @@ def build_fixture_market_evaluation(
                     "xg_away_recent_for_per_match": None
                     if xg_rule is None
                     else xg_rule.get("away_recent_xg_for_per_match"),
+                    "context_status": "NOT_CONNECTED" if context_veto is None else str(context_veto.get("status") or "UNKNOWN"),
+                    "context_reason_codes": [] if context_veto is None else list(context_veto.get("reason_codes") or []),
+                    "context_threshold_adjustment": 0.0
+                    if context_veto is None
+                    else float(context_veto.get("threshold_adjustment") or 0.0),
+                    "context_adjusted_threshold": context_adjusted_threshold,
+                    "context_threshold_gate_passed": context_threshold_gate_passed,
+                    "context_diagnostics": {} if context_veto is None else dict(context_veto.get("diagnostics") or {}),
                 }
             )
 
@@ -381,6 +489,8 @@ def build_fixture_market_evaluation(
             if row["decision"] in {DECISION_MISSING_REQUIRED_MARKET_DATA, DECISION_REJECTED_RULE, DECISION_STALE_MARKET}
             or row["day12_state"] == DAY12_BLOCKED_MISSING_XG_DATA
             or (row["decision"] == DECISION_PRELIMINARY_CANDIDATE and not row["freshness_gate_passed"])
+            or row["context_status"] in {CONTEXT_VETO, CONTEXT_BLOCKED}
+            or row["context_threshold_gate_passed"] is False
         ),
         "passed_safeguards": sum(1 for row in decision_rows if row["paper_entry_eligible"]),
     }
