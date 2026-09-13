@@ -67,6 +67,27 @@ def _summarize_prediction_rows(
     }
 
 
+def _enforce_transition_maturity_from_shadow(row: dict[str, Any]) -> bool:
+    """Promote only the deterministic <8-match transition veto out of shadow mode."""
+    shadow_reason_codes = list(row.get("context_shadow_reason_codes") or [])
+    if REASON_NEWLY_PROMOTED_RELEGATED not in shadow_reason_codes:
+        return False
+
+    shadow_diagnostics = dict(row.get("context_shadow_diagnostics") or {})
+    diagnostics = dict(row.get("context_diagnostics") or {})
+    row["context_status"] = "VETO"
+    row["context_reason_codes"] = [REASON_NEWLY_PROMOTED_RELEGATED]
+    row["context_threshold_adjustment"] = 0.0
+    row["context_threshold_gate_passed"] = None
+    row["context_enforced"] = True
+    row["context_enforcement_scope"] = "transition_maturity"
+    row["paper_entry_eligible"] = False
+    row["current_decision_state"] = "NO_BET_CONTEXT_VETO"
+    diagnostics["enforced_transition_maturity"] = shadow_diagnostics
+    row["context_diagnostics"] = diagnostics
+    return True
+
+
 class LiveProductionDashboardServices(ProductionDashboardServices):
     """Keep live safeguards fresh while preserving Route B model truth."""
 
@@ -120,23 +141,8 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
                     "threshold_gate_passed": row.get("context_shadow_threshold_gate_passed"),
                     "diagnostics": shadow_diagnostics,
                 }
-
-                # Promotion/relegation maturity is deterministic internal sports
-                # evidence, not a best-effort external context feed.  The build
-                # specification requires this veto unconditionally for <8 current-
-                # competition matches, so enforce only this reason even while the
-                # rest of external context remains in shadow rollout.
-                if REASON_NEWLY_PROMOTED_RELEGATED in shadow_reason_codes:
-                    row["context_status"] = "VETO"
-                    row["context_reason_codes"] = [REASON_NEWLY_PROMOTED_RELEGATED]
-                    row["context_threshold_adjustment"] = 0.0
-                    row["context_threshold_gate_passed"] = None
-                    row["context_enforced"] = True
-                    row["context_enforcement_scope"] = "transition_maturity"
-                    row["paper_entry_eligible"] = False
-                    row["current_decision_state"] = "NO_BET_CONTEXT_VETO"
-                    diagnostics["enforced_transition_maturity"] = shadow_diagnostics
                 row["context_diagnostics"] = diagnostics
+                _enforce_transition_maturity_from_shadow(row)
         return result
 
     def _context_signals(self, candidate_context: dict[str, Any]) -> dict[str, Any]:
