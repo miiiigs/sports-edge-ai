@@ -2,12 +2,65 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone
-from typing import Any
+import logging
+from typing import Any, Callable
 
 from ..storage import football_candidate_evidence, football_paper_trading
 from .models import parse_iso_datetime
 from .production_services import ProductionDashboardServices
+
+logger = logging.getLogger(__name__)
+
+
+def _summarize_prediction_rows(
+    rows: list[dict[str, Any]],
+    *,
+    eligibility_resolver: Callable[[dict[str, Any] | None], str],
+) -> dict[str, Any]:
+    """Summarize eligibility and blocker reasons for an already-scoped fixture set."""
+    eligibility_counts: Counter[str] = Counter()
+    blocker_reasons: Counter[str] = Counter()
+    blocked_examples: list[dict[str, Any]] = []
+
+    for row in rows:
+        prediction = row.get("prediction")
+        eligibility = str(eligibility_resolver(prediction))
+        eligibility_counts[eligibility] += 1
+        if eligibility in {"PREDICTION_READY", "PREDICTION_PENDING"}:
+            continue
+
+        blockers = [] if prediction is None else [str(value) for value in (prediction.get("blockers") or []) if str(value)]
+        if not blockers:
+            blockers = [eligibility or "UNKNOWN_BLOCKER"]
+        blocker_reasons.update(blockers)
+        if len(blocked_examples) < 5:
+            blocked_examples.append(
+                {
+                    "fixture_id": str(row.get("fixture_id") or ""),
+                    "competition_id": str(row.get("competition_id") or ""),
+                    "kickoff_utc": row.get("kickoff_utc"),
+                    "eligibility": eligibility,
+                    "blockers": blockers,
+                }
+            )
+
+    return {
+        "fixtures": len(rows),
+        "ready": int(eligibility_counts.get("PREDICTION_READY", 0)),
+        "pending": int(eligibility_counts.get("PREDICTION_PENDING", 0)),
+        "blocked": int(
+            sum(
+                count
+                for status, count in eligibility_counts.items()
+                if status not in {"PREDICTION_READY", "PREDICTION_PENDING"}
+            )
+        ),
+        "eligibility": dict(sorted(eligibility_counts.items())),
+        "blocker_reasons": dict(sorted(blocker_reasons.items(), key=lambda item: (-item[1], item[0]))),
+        "blocked_examples": blocked_examples,
+    }
 
 
 class LiveProductionDashboardServices(ProductionDashboardServices):
@@ -17,7 +70,33 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
         # Never let an empty/missing lineup result live for the whole process.
         # The shared provider budget remains the authoritative short-TTL cache.
         self._context_fixture_cache.clear()
-        return await super().sync_once(sync_kind=sync_kind, include_schedule=include_schedule)
+        result = await super().sync_once(sync_kind=sync_kind, include_schedule=include_schedule)
+        self._log_current_prediction_diagnostics(sync_kind=sync_kind)
+        return result
+
+    def _log_current_prediction_diagnostics(self, *, sync_kind: str) -> None:
+        """Log current/future blocker truth separately from historical persisted rows."""
+        try:
+            persisted_rows = self._all_fixtures_with_predictions()
+            future_rows = self._future_fixture_rows(persisted_rows)
+            diagnostics = _summarize_prediction_rows(
+                future_rows,
+                eligibility_resolver=self._prediction_eligibility_status,
+            )
+            logger.info(
+                "football current prediction diagnostics: kind=%s persisted=%s future=%s ready=%s pending=%s blocked=%s blocker_reasons=%s blocked_examples=%s",
+                sync_kind,
+                len(persisted_rows),
+                diagnostics["fixtures"],
+                diagnostics["ready"],
+                diagnostics["pending"],
+                diagnostics["blocked"],
+                diagnostics["blocker_reasons"],
+                diagnostics["blocked_examples"],
+            )
+        except Exception:
+            # Diagnostics must never affect prediction generation or fixture sync.
+            logger.exception("football current prediction diagnostics failed")
 
     def _production_market_evaluator(self, **kwargs: Any) -> dict[str, Any]:
         result = super()._production_market_evaluator(**kwargs)
