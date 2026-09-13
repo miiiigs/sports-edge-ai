@@ -10,6 +10,7 @@ from starlette.responses import PlainTextResponse
 
 from sports_ai.dashboard.app import _template_directory
 from sports_ai.dashboard.auth import AuthStore
+import sports_ai.dashboard.low_memory_app as low_memory_app
 import sports_ai.dashboard.owner_access as owner_access
 from sports_ai.dashboard.owner_access import guest_allowed, owner_access_policy, signup_allowed
 from sports_ai.dashboard.runtime_supervisor import build_child_specs
@@ -112,5 +113,4 @@ def test_supervisor_keeps_low_memory_web_through_owner_wrapper(monkeypatch):
     assert specs[0].name == "web"
     assert "sports_ai.dashboard.owner_access:app" in specs[0].argv
     assert specs[1].name == "scheduler"
-    # owner_access imports its app from low_memory_app, preserving web-process isolation.
-    assert owner_access.app.state.services.__class__.__name__ == "LowMemoryWebDashboardServices"
+    assert owner_access.app is low_memory_app.app
