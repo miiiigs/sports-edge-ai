@@ -9,9 +9,12 @@ import signal
 import time
 from dataclasses import replace
 
+from . import storage
+from .models import utc_now_iso
 from .services import DashboardConfig, DashboardServices, RUNTIME_ROLE_SCHEDULER
 
 logger = logging.getLogger(__name__)
+MODEL_SNAPSHOT_STATE_KEY = "model_snapshot_state"
 
 
 def _test_block_seconds() -> float:
@@ -23,6 +26,32 @@ def _test_block_seconds() -> float:
     except ValueError:
         return 0.0
     return max(0.0, value)
+
+
+def _persist_model_snapshot_state(services: DashboardServices) -> None:
+    """Publish exact scheduler-owned model metadata for the read-only web child."""
+    snapshot = services.snapshot
+    if snapshot is None:
+        return
+    route_a = dict(snapshot.diagnostics.get("route_a") or {})
+    payload = {
+        "snapshot_id": snapshot.snapshot_id,
+        "model_as_of": snapshot.model_as_of,
+        "supported_competitions": list(snapshot.supported_competitions),
+        "source_match_cutoff": snapshot.diagnostics.get("model_as_of"),
+        "model_version": snapshot.model_version,
+        "route_a_status": route_a.get("overall_status"),
+        "route_a_artifact_id": route_a.get("artifact_id"),
+    }
+    updated_at = utc_now_iso()
+    with storage.connect(services.config.dashboard_db_path) as conn:
+        storage.put_runtime_state(
+            conn,
+            state_key=MODEL_SNAPSHOT_STATE_KEY,
+            state_value=payload,
+            updated_at=updated_at,
+            initialize_schema=False,
+        )
 
 
 async def run_worker() -> int:
@@ -37,6 +66,7 @@ async def run_worker() -> int:
     config = replace(DashboardConfig.default(), runtime_role=RUNTIME_ROLE_SCHEDULER)
     services = DashboardServices(config=config)
     await services.initialize()
+    _persist_model_snapshot_state(services)
 
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
