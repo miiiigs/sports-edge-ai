@@ -107,9 +107,29 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
             }
         )
 
+    def _latest_future_prediction_rows(self) -> list[dict[str, Any]]:
+        """Reload current fixtures through the canonical latest-prediction selector."""
+        return self._future_fixture_rows(self._all_fixtures_with_predictions())
+
     def _update_prediction_state(self, rows_with_predictions: list[dict[str, Any]]) -> None:
-        """Production health describes current/future pre-match fixtures, not archive rows."""
-        super()._update_prediction_state(self._future_fixture_rows(rows_with_predictions))
+        """Production health uses latest current/future predictions, never stale versions."""
+        del rows_with_predictions
+        latest_future_rows = self._latest_future_prediction_rows()
+        super()._update_prediction_state(latest_future_rows)
+
+        # The base sync builds provider counters before this hook. Keep those
+        # persisted counters aligned with the same latest/future truth used by
+        # prediction health and market evaluation.
+        last_counts = self._provider_state.get("last_counts")
+        if isinstance(last_counts, dict):
+            last_counts["predictions_ready"] = int(self._prediction_state["ready_fixture_count"])
+            last_counts["predictions_blocked"] = int(self._prediction_state["blocked_fixture_count"])
+            last_counts["predictions_pending"] = int(self._prediction_state["pending_fixture_count"])
+
+    def _run_market_sync(self, rows_with_predictions: list[dict[str, Any]], conn: Any) -> None:
+        """Never let an older persisted prediction suppress current market evaluation."""
+        del rows_with_predictions
+        super()._run_market_sync(self._latest_future_prediction_rows(), conn)
 
     async def sync_once(self, *, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, Any]:
         # Never let an empty/missing lineup result live for the whole process.
