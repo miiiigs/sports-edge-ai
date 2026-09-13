@@ -64,11 +64,15 @@ SCHEMA_STATEMENTS = (
         current_decision_state TEXT,
         day12_state TEXT,
         xg_status TEXT,
+        context_mode TEXT,
         context_status TEXT,
         context_reason_codes_json TEXT NOT NULL,
         context_threshold_adjustment REAL,
         context_adjusted_threshold REAL,
         context_threshold_gate_passed INTEGER,
+        shadow_context_status TEXT,
+        shadow_context_reason_codes_json TEXT NOT NULL DEFAULT '[]',
+        shadow_context_threshold_gate_passed INTEGER,
         diagnostics_json TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         FOREIGN KEY(observation_id) REFERENCES football_candidate_observations(observation_id)
@@ -89,10 +93,30 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _ensure_audit_columns(conn: sqlite3.Connection) -> None:
+    existing = {
+        str(row["name"])
+        for row in conn.execute("PRAGMA table_info(football_candidate_observation_audit)").fetchall()
+    }
+    columns = {
+        "context_mode": "TEXT",
+        "shadow_context_status": "TEXT",
+        "shadow_context_reason_codes_json": "TEXT NOT NULL DEFAULT '[]'",
+        "shadow_context_threshold_gate_passed": "INTEGER",
+    }
+    with conn:
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(
+                    f"ALTER TABLE football_candidate_observation_audit ADD COLUMN {name} {definition}"
+                )
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     with conn:
         for statement in SCHEMA_STATEMENTS:
             conn.execute(statement)
+    _ensure_audit_columns(conn)
 
 
 def observation_id_for_row(row: dict[str, Any]) -> str:
@@ -104,6 +128,24 @@ def observation_id_for_row(row: dict[str, Any]) -> str:
             "line": None if row.get("line") is None else float(row["line"]),
         }
     )
+
+
+def _shadow_context(row: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = dict(row.get("context_diagnostics") or {})
+    nested = diagnostics.get("shadow_context")
+    if isinstance(nested, dict):
+        return dict(nested)
+    status = row.get("context_shadow_status")
+    if status is None:
+        return {}
+    return {
+        "status": status,
+        "reason_codes": list(row.get("context_shadow_reason_codes") or []),
+        "threshold_adjustment": row.get("context_shadow_threshold_adjustment"),
+        "adjusted_threshold": row.get("context_shadow_adjusted_threshold"),
+        "threshold_gate_passed": row.get("context_shadow_threshold_gate_passed"),
+        "diagnostics": dict(row.get("context_shadow_diagnostics") or {}),
+    }
 
 
 def _audit_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -119,11 +161,13 @@ def _audit_payload(row: dict[str, Any]) -> dict[str, Any]:
         "day12_state": row.get("day12_state"),
         "xg_status": row.get("xg_status"),
         "xg_reason_codes": list(row.get("xg_reason_codes") or []),
+        "context_mode": row.get("context_mode"),
         "context_status": row.get("context_status"),
         "context_reason_codes": list(row.get("context_reason_codes") or []),
         "context_threshold_adjustment": row.get("context_threshold_adjustment"),
         "context_adjusted_threshold": row.get("context_adjusted_threshold"),
         "context_threshold_gate_passed": row.get("context_threshold_gate_passed"),
+        "shadow_context": _shadow_context(row),
         "context_diagnostics": dict(row.get("context_diagnostics") or {}),
         "paper_entry_eligible": bool(row.get("paper_entry_eligible")),
         "current_decision_state": row.get("current_decision_state"),
@@ -194,6 +238,7 @@ def record_candidate_observation(
         )
 
         audit_payload = _audit_payload(decision_row)
+        shadow = dict(audit_payload.get("shadow_context") or {})
         audit_id = "audit_" + canonical_hash(
             {
                 "observation_id": observation_id,
@@ -206,10 +251,12 @@ def record_candidate_observation(
             INSERT OR IGNORE INTO football_candidate_observation_audit (
                 audit_id, observation_id, schema_version, observed_at,
                 action_eligible, current_decision_state, day12_state, xg_status,
-                context_status, context_reason_codes_json,
+                context_mode, context_status, context_reason_codes_json,
                 context_threshold_adjustment, context_adjusted_threshold,
-                context_threshold_gate_passed, diagnostics_json, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                context_threshold_gate_passed, shadow_context_status,
+                shadow_context_reason_codes_json, shadow_context_threshold_gate_passed,
+                diagnostics_json, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 audit_id,
@@ -220,6 +267,7 @@ def record_candidate_observation(
                 None if decision_row.get("current_decision_state") is None else str(decision_row["current_decision_state"]),
                 None if decision_row.get("day12_state") is None else str(decision_row["day12_state"]),
                 None if decision_row.get("xg_status") is None else str(decision_row["xg_status"]),
+                None if decision_row.get("context_mode") is None else str(decision_row["context_mode"]),
                 None if decision_row.get("context_status") is None else str(decision_row["context_status"]),
                 json.dumps(list(decision_row.get("context_reason_codes") or []), sort_keys=True),
                 None
@@ -231,6 +279,11 @@ def record_candidate_observation(
                 None
                 if decision_row.get("context_threshold_gate_passed") is None
                 else (1 if bool(decision_row["context_threshold_gate_passed"]) else 0),
+                None if shadow.get("status") is None else str(shadow["status"]),
+                json.dumps(list(shadow.get("reason_codes") or []), sort_keys=True),
+                None
+                if shadow.get("threshold_gate_passed") is None
+                else (1 if bool(shadow["threshold_gate_passed"]) else 0),
                 json.dumps(dict(decision_row.get("context_diagnostics") or {}), sort_keys=True, default=str),
                 json.dumps(audit_payload, sort_keys=True, default=str),
             ),
@@ -265,10 +318,14 @@ def fetch_observations(conn: sqlite3.Connection, *, active_only: bool = False) -
         if audit is not None:
             item["latest_audit"] = dict(audit)
             item["latest_context_reason_codes"] = json.loads(str(audit["context_reason_codes_json"]))
+            item["latest_shadow_context_reason_codes"] = json.loads(
+                str(audit["shadow_context_reason_codes_json"] or "[]")
+            )
             item["latest_diagnostics"] = json.loads(str(audit["diagnostics_json"]))
         else:
             item["latest_audit"] = None
             item["latest_context_reason_codes"] = []
+            item["latest_shadow_context_reason_codes"] = []
             item["latest_diagnostics"] = {}
         result.append(item)
     return result
@@ -349,6 +406,61 @@ def update_trade_state(
         )
 
 
+def _cohort_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    settled = [row for row in rows if str(row.get("trade_state") or "") in FINAL_STATES]
+    net_units = sum(float(row.get("net_pnl") or 0.0) for row in settled)
+    clv_values: list[float] = []
+    for row in rows:
+        try:
+            entry = float(row["entry_odds"])
+            closing = float(row["closing_odds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if entry <= 1.0 or closing <= 1.0 or row.get("closing_snapshot_id") in {None, ""}:
+            continue
+        clv_values.append((1.0 / closing) - (1.0 / entry))
+    return {
+        "observations": len(rows),
+        "settled": len(settled),
+        "net_units": net_units,
+        "roi": None if not settled else net_units / len(settled),
+        "clv_sample": len(clv_values),
+        "average_clv": None if not clv_values else sum(clv_values) / len(clv_values),
+        "positive_clv_rate": None
+        if not clv_values
+        else sum(1 for value in clv_values if value > 0.0) / len(clv_values),
+    }
+
+
+def evidence_cohort_metrics(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Compare all, actionable, actual-veto and shadow-veto candidate cohorts."""
+    rows = fetch_observations(conn)
+    actionable: list[dict[str, Any]] = []
+    actual_veto: list[dict[str, Any]] = []
+    shadow_veto: list[dict[str, Any]] = []
+    for row in rows:
+        audit = dict(row.get("latest_audit") or {})
+        if int(audit.get("action_eligible") or 0) == 1:
+            actionable.append(row)
+        if (
+            str(audit.get("context_status") or "") == "VETO"
+            or str(audit.get("day12_state") or "")
+            in {"REJECTED_BY_XG_VETO", "REJECTED_BY_MULTIPLE_VETOES"}
+        ):
+            actual_veto.append(row)
+        shadow_status = str(audit.get("shadow_context_status") or "")
+        shadow_threshold_failed = audit.get("shadow_context_threshold_gate_passed") == 0
+        if shadow_status == "VETO" or (shadow_status == "FLAG" and shadow_threshold_failed):
+            shadow_veto.append(row)
+    return {
+        "all_candidates": _cohort_metrics(rows),
+        "actionable": _cohort_metrics(actionable),
+        "actual_veto": _cohort_metrics(actual_veto),
+        "shadow_veto": _cohort_metrics(shadow_veto),
+        "clv_definition": "(1 / closing odds) - (1 / entry odds)",
+    }
+
+
 def evidence_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     ensure_schema(conn)
     total = int(conn.execute("SELECT COUNT(*) FROM football_candidate_observations").fetchone()[0])
@@ -367,6 +479,16 @@ def evidence_summary(conn: sqlite3.Connection) -> dict[str, Any]:
             """
         ).fetchone()[0]
     )
+    shadow_vetoed = int(
+        conn.execute(
+            """
+            SELECT COUNT(DISTINCT observation_id)
+            FROM football_candidate_observation_audit
+            WHERE shadow_context_status = 'VETO'
+               OR (shadow_context_status = 'FLAG' AND shadow_context_threshold_gate_passed = 0)
+            """
+        ).fetchone()[0]
+    )
     actionable = int(
         conn.execute(
             "SELECT COUNT(DISTINCT observation_id) FROM football_candidate_observation_audit WHERE action_eligible = 1"
@@ -377,5 +499,7 @@ def evidence_summary(conn: sqlite3.Connection) -> dict[str, Any]:
         "observations": total,
         "settled": settled,
         "vetoed_observations": vetoed,
+        "shadow_vetoed_observations": shadow_vetoed,
         "ever_actionable_observations": actionable,
+        "cohorts": evidence_cohort_metrics(conn),
     }
