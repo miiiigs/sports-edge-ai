@@ -177,12 +177,15 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
             "current_odds": best_offer.get("decimal_odds"),
         }
 
-        transition = transition_maturity_for_fixture(
-            research_db_path=self.config.research_db_path,
-            competition_id=str(fixture.get("competition_id") or ""),
-            home_team_name=str(fixture.get("home_team_name") or ""),
-            away_team_name=str(fixture.get("away_team_name") or ""),
-        )
+        research_db_path = getattr(self.config, "research_db_path", None)
+        transition = None
+        if research_db_path is not None:
+            transition = transition_maturity_for_fixture(
+                research_db_path=research_db_path,
+                competition_id=str(fixture.get("competition_id") or ""),
+                home_team_name=str(fixture.get("home_team_name") or ""),
+                away_team_name=str(fixture.get("away_team_name") or ""),
+            )
         if transition is not None:
             signals["promoted_or_relegated"] = True
             signals["season_matches_played"] = transition["season_matches_played"]
