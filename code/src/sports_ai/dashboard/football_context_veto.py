@@ -162,6 +162,11 @@ def evaluate_football_context_veto(
     promoted_or_relegated = bool(normalized.get("promoted_or_relegated"))
     season_matches = _safe_int(normalized.get("season_matches_played"))
     diagnostics["season_matches_played"] = season_matches
+    diagnostics["transition_baseline_version"] = normalized.get("transition_baseline_version")
+    diagnostics["transition_minimum_required_matches"] = _safe_int(
+        normalized.get("transition_minimum_required_matches")
+    )
+    diagnostics["transition_teams"] = list(normalized.get("transition_teams") or [])
     if promoted_or_relegated and season_matches is not None and season_matches < 8:
         veto_reasons.append(REASON_NEWLY_PROMOTED_RELEGATED)
 
