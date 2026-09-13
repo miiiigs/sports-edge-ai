@@ -10,6 +10,7 @@ import time
 from dataclasses import replace
 
 from . import storage
+from .live_production_services import LiveProductionDashboardServices
 from .models import utc_now_iso
 from .production_services import ProductionDashboardServices
 from .services import DashboardConfig, DashboardServices, RUNTIME_ROLE_SCHEDULER
@@ -69,7 +70,7 @@ async def run_worker() -> int:
             signal.signal(signum, lambda _signum, _frame: loop.call_soon_threadsafe(stop_event.set))
 
     config = replace(DashboardConfig.default(), runtime_role=RUNTIME_ROLE_SCHEDULER)
-    services = ProductionDashboardServices(config=config)
+    services = LiveProductionDashboardServices(config=config)
     await services.initialize()
     _persist_model_snapshot_state(services)
 
