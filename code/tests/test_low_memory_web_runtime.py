@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from sports_ai.dashboard import runtime_supervisor, scheduler_worker
+from sports_ai.dashboard import low_memory_app, owner_access, runtime_supervisor, scheduler_worker
 from sports_ai.dashboard import storage as dashboard_storage
 from sports_ai.dashboard.app import create_app
 from sports_ai.dashboard.low_memory_app import (
@@ -212,5 +212,6 @@ def test_scheduler_publishes_full_snapshot_metadata_without_prediction_changes(t
 def test_supervisor_uses_low_memory_web_entrypoint():
     specs = runtime_supervisor.build_child_specs(port="9129")
     assert specs[0].name == "web"
-    assert "sports_ai.dashboard.low_memory_app:app" in specs[0].argv
+    assert "sports_ai.dashboard.owner_access:app" in specs[0].argv
+    assert owner_access.app is low_memory_app.app
     assert specs[1].name == "scheduler"
