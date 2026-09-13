@@ -1,4 +1,9 @@
-"""Minimal email/password authentication for the Sports Edge dashboard."""
+"""Minimal authentication for the Sports Edge dashboard.
+
+The original local account store remains available for development and future
+migration. Production can opt into a temporary single shared username/password
+gate using environment variables without committing credentials to Git.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +21,9 @@ from typing import Any
 SESSION_COOKIE_NAME = "sports_edge_session"
 PASSWORD_ITERATIONS = 310_000
 SESSION_DAYS = 30
+ALLOWED_EMAILS_ENV_VAR = "SPORTS_AI_AUTH_ALLOWED_EMAILS"
+SHARED_USERNAME_ENV_VAR = "SPORTS_AI_AUTH_USERNAME"
+SHARED_PASSWORD_ENV_VAR = "SPORTS_AI_AUTH_PASSWORD"
 
 
 def _utcnow() -> datetime:
@@ -32,6 +40,31 @@ def _parse_iso(value: str) -> datetime:
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _normalize_identifier(value: str) -> str:
+    return value.strip().lower()
+
+
+def _allowed_signup_emails() -> frozenset[str]:
+    raw = os.getenv(ALLOWED_EMAILS_ENV_VAR, "")
+    return frozenset(
+        normalized
+        for normalized in (_normalize_email(value) for value in raw.split(","))
+        if normalized
+    )
+
+
+def _shared_credentials() -> tuple[str, str] | None:
+    username = _normalize_identifier(os.getenv(SHARED_USERNAME_ENV_VAR, ""))
+    password = os.getenv(SHARED_PASSWORD_ENV_VAR, "")
+    if not username or not password:
+        return None
+    return username, password
+
+
+def shared_login_enabled() -> bool:
+    return _shared_credentials() is not None
 
 
 def _hash_password(password: str, salt: bytes) -> bytes:
@@ -93,12 +126,33 @@ class AuthStore:
                 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
                 """
             )
+
+            shared = _shared_credentials()
+            if shared is not None:
+                username, password = shared
+                salt = secrets.token_bytes(16)
+                password_hash = _hash_password(password, salt)
+                created_at = _iso(_utcnow())
+                row = conn.execute("SELECT id FROM users WHERE email = ?", (username,)).fetchone()
+                if row is None:
+                    conn.execute(
+                        "INSERT INTO users (email, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                        (username, salt, password_hash, created_at),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?",
+                        (salt, password_hash, int(row[0])),
+                    )
             conn.commit()
 
     def create_user(self, email: str, password: str) -> dict[str, Any]:
         normalized = _normalize_email(email)
         if not normalized or "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
             raise ValueError("Enter a valid email address.")
+        allowed_emails = _allowed_signup_emails()
+        if allowed_emails and normalized not in allowed_emails:
+            raise ValueError("This email is not authorized to create a Sports Edge account.")
         if len(password) < 8:
             raise ValueError("Password must be at least 8 characters.")
 
@@ -118,6 +172,23 @@ class AuthStore:
         return {"id": user_id, "email": normalized, "created_at": created_at}
 
     def authenticate(self, email: str, password: str) -> dict[str, Any] | None:
+        shared = _shared_credentials()
+        if shared is not None:
+            expected_username, expected_password = shared
+            supplied_username = _normalize_identifier(email)
+            username_matches = hmac.compare_digest(supplied_username, expected_username)
+            password_matches = hmac.compare_digest(password, expected_password)
+            if not (username_matches and password_matches):
+                return None
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute(
+                    "SELECT id, email, created_at FROM users WHERE email = ?",
+                    (expected_username,),
+                ).fetchone()
+            if row is None:
+                return None
+            return {"id": int(row[0]), "email": str(row[1]), "created_at": str(row[2])}
+
         normalized = _normalize_email(email)
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
@@ -164,6 +235,11 @@ class AuthStore:
             if row is None:
                 return None
             if _parse_iso(str(row[3])) <= now:
+                conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+                conn.commit()
+                return None
+            shared = _shared_credentials()
+            if shared is not None and _normalize_identifier(str(row[1])) != shared[0]:
                 conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
                 conn.commit()
                 return None
