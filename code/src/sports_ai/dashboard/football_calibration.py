@@ -35,14 +35,14 @@ MARKET_LABELS = {
     "1x2": "1X2",
     "btts": "BTTS",
     "goals_total": "Goals",
-    "corners_total": "Corners",
+    "corner_total": "Corners",
     "asian_handicap": "Asian Handicap",
 }
 MARKET_ORDER = {
     "1x2": 0,
     "btts": 1,
     "goals_total": 2,
-    "corners_total": 3,
+    "corner_total": 3,
     "asian_handicap": 4,
 }
 EDGE_ORDER = {"<0%": 0, "0-2%": 1, "2-5%": 2, "5-10%": 3, "10%+": 4, "Unknown": 5}
