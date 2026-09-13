@@ -11,6 +11,7 @@ from dataclasses import replace
 
 from . import storage
 from .models import utc_now_iso
+from .production_services import ProductionDashboardServices
 from .services import DashboardConfig, DashboardServices, RUNTIME_ROLE_SCHEDULER
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,10 @@ def _test_block_seconds() -> float:
 
 def _persist_model_snapshot_state(services: DashboardServices) -> None:
     """Publish exact scheduler-owned model metadata for the read-only web child."""
+    production_persist = getattr(services, "_persist_model_snapshot_state", None)
+    if callable(production_persist) and isinstance(services, ProductionDashboardServices):
+        production_persist()
+        return
     snapshot = services.snapshot
     if snapshot is None:
         return
@@ -64,7 +69,7 @@ async def run_worker() -> int:
             signal.signal(signum, lambda _signum, _frame: loop.call_soon_threadsafe(stop_event.set))
 
     config = replace(DashboardConfig.default(), runtime_role=RUNTIME_ROLE_SCHEDULER)
-    services = DashboardServices(config=config)
+    services = ProductionDashboardServices(config=config)
     await services.initialize()
     _persist_model_snapshot_state(services)
 
