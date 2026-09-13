@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 import logging
 from typing import Any, Callable
 
+from ..locking import canonical_hash
 from ..storage import football_candidate_evidence, football_paper_trading
+from .football_context_veto import REASON_NEWLY_PROMOTED_RELEGATED
+from .football_transition_maturity import (
+    TRANSITION_BASELINE_VERSION,
+    transition_maturity_for_fixture,
+)
 from .models import parse_iso_datetime
 from .production_services import ProductionDashboardServices
 
@@ -40,6 +46,8 @@ def _summarize_prediction_rows(
                 {
                     "fixture_id": str(row.get("fixture_id") or ""),
                     "competition_id": str(row.get("competition_id") or ""),
+                    "home_team_name": row.get("home_team_name"),
+                    "away_team_name": row.get("away_team_name"),
                     "kickoff_utc": row.get("kickoff_utc"),
                     "eligibility": eligibility,
                     "blockers": blockers,
@@ -63,8 +71,45 @@ def _summarize_prediction_rows(
     }
 
 
+def _enforce_transition_maturity_from_shadow(row: dict[str, Any]) -> bool:
+    """Promote only the deterministic <8-match transition veto out of shadow mode."""
+    shadow_reason_codes = list(row.get("context_shadow_reason_codes") or [])
+    if REASON_NEWLY_PROMOTED_RELEGATED not in shadow_reason_codes:
+        return False
+
+    shadow_diagnostics = dict(row.get("context_shadow_diagnostics") or {})
+    diagnostics = dict(row.get("context_diagnostics") or {})
+    row["context_status"] = "VETO"
+    row["context_reason_codes"] = [REASON_NEWLY_PROMOTED_RELEGATED]
+    row["context_threshold_adjustment"] = 0.0
+    row["context_threshold_gate_passed"] = None
+    row["context_enforced"] = True
+    row["context_enforcement_scope"] = "transition_maturity"
+    row["paper_entry_eligible"] = False
+    row["current_decision_state"] = "NO_BET_CONTEXT_VETO"
+    diagnostics["enforced_transition_maturity"] = shadow_diagnostics
+    row["context_diagnostics"] = diagnostics
+    return True
+
+
 class LiveProductionDashboardServices(ProductionDashboardServices):
-    """Keep context evidence fresh without over-polling lineup endpoints."""
+    """Keep live safeguards fresh while preserving Route B model truth."""
+
+    @staticmethod
+    def _prediction_version_key(fixture: Any, snapshot: Any) -> str:
+        """Refresh persisted predictions when deterministic identity policy changes."""
+        return canonical_hash(
+            {
+                "fixture_id": fixture.fixture_id,
+                "model_snapshot_id": snapshot.snapshot_id,
+                "kickoff_utc": fixture.kickoff_utc,
+                "live_identity_policy_version": TRANSITION_BASELINE_VERSION,
+            }
+        )
+
+    def _update_prediction_state(self, rows_with_predictions: list[dict[str, Any]]) -> None:
+        """Production health describes current/future pre-match fixtures, not archive rows."""
+        super()._update_prediction_state(self._future_fixture_rows(rows_with_predictions))
 
     async def sync_once(self, *, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, Any]:
         # Never let an empty/missing lineup result live for the whole process.
@@ -105,16 +150,19 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
                 shadow_status = row.get("context_shadow_status")
                 if shadow_status is None:
                     continue
+                shadow_reason_codes = list(row.get("context_shadow_reason_codes") or [])
+                shadow_diagnostics = dict(row.get("context_shadow_diagnostics") or {})
                 diagnostics = dict(row.get("context_diagnostics") or {})
                 diagnostics["shadow_context"] = {
                     "status": shadow_status,
-                    "reason_codes": list(row.get("context_shadow_reason_codes") or []),
+                    "reason_codes": shadow_reason_codes,
                     "threshold_adjustment": row.get("context_shadow_threshold_adjustment"),
                     "adjusted_threshold": row.get("context_shadow_adjusted_threshold"),
                     "threshold_gate_passed": row.get("context_shadow_threshold_gate_passed"),
-                    "diagnostics": dict(row.get("context_shadow_diagnostics") or {}),
+                    "diagnostics": shadow_diagnostics,
                 }
                 row["context_diagnostics"] = diagnostics
+                _enforce_transition_maturity_from_shadow(row)
         return result
 
     def _context_signals(self, candidate_context: dict[str, Any]) -> dict[str, Any]:
@@ -128,6 +176,22 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
             "source_states": {},
             "current_odds": best_offer.get("decimal_odds"),
         }
+
+        research_db_path = getattr(self.config, "research_db_path", None)
+        transition = None
+        if research_db_path is not None:
+            transition = transition_maturity_for_fixture(
+                research_db_path=research_db_path,
+                competition_id=str(fixture.get("competition_id") or ""),
+                home_team_name=str(fixture.get("home_team_name") or ""),
+                away_team_name=str(fixture.get("away_team_name") or ""),
+            )
+        if transition is not None:
+            signals["promoted_or_relegated"] = True
+            signals["season_matches_played"] = transition["season_matches_played"]
+            signals["transition_baseline_version"] = transition["baseline_version"]
+            signals["transition_teams"] = list(transition["teams"])
+            signals["transition_minimum_required_matches"] = transition["minimum_required_matches"]
 
         europe_hours = self._european_congestion_hours(fixture)
         if europe_hours is not None:
@@ -146,6 +210,12 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
             signals["baseline_odds"] = existing.get("entry_odds")
 
         if hours_to_kickoff <= 0:
+            return signals
+
+        # A deterministic transition-maturity veto is already sufficient.  Do
+        # not spend paid injury/lineup quota on a fixture that cannot become
+        # actionable until the eight-match threshold is reached.
+        if transition is not None and bool(transition.get("under_maturity_threshold")):
             return signals
 
         lineup_window_hours = self._lineup_window_minutes / 60.0

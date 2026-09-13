@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Iterable
 
+from .football_transition_maturity import identify_transition_team
 from .models import normalize_text_key
 
 
@@ -106,6 +107,24 @@ def resolve_provider_team_alias(
     provider_team_id: str | None,
     provider_team_name: str,
 ) -> dict[str, str] | None:
+    # API-Football is the live production fixture provider.  For clubs that
+    # changed division in 2026/27, use the versioned transition baseline rather
+    # than fuzzy matching.  This maps identity only; the independent maturity
+    # gate still vetoes the club until it has eight matches in the competition.
+    if provider == "api-football":
+        transition_team = identify_transition_team(
+            competition_id=competition_id,
+            team_name=provider_team_name,
+        )
+        if transition_team is not None:
+            return {
+                "canonical_team_name": transition_team.canonical_name,
+                "resolution_kind": "api_football_transition_alias",
+                "diagnostic_category": "E",
+                "reason": "versioned 2026/27 transition baseline provides deterministic club identity",
+            }
+        return None
+
     if provider != "football-data.org":
         return None
 
