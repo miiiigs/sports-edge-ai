@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 from sports_ai.dashboard.football_context_veto import (
     CONTEXT_VETO,
@@ -13,8 +14,12 @@ from sports_ai.dashboard.football_transition_maturity import (
     identify_transition_team,
     transition_maturity_for_fixture,
 )
-from sports_ai.dashboard.live_production_services import _enforce_transition_maturity_from_shadow
+from sports_ai.dashboard.live_production_services import (
+    LiveProductionDashboardServices,
+    _enforce_transition_maturity_from_shadow,
+)
 from sports_ai.dashboard.team_aliases import resolve_provider_team_alias
+from sports_ai.locking import canonical_hash
 
 
 def _research_db(path: Path, *, santander_matches: int) -> Path:
@@ -171,3 +176,30 @@ def test_non_transition_shadow_veto_remains_shadow_only():
     assert changed is False
     assert row["paper_entry_eligible"] is True
     assert "context_status" not in row
+
+
+def test_transition_baseline_versions_live_prediction_identity():
+    fixture = SimpleNamespace(
+        fixture_id="api-football:example",
+        kickoff_utc="2026-09-16T19:30:00+00:00",
+    )
+    snapshot = SimpleNamespace(snapshot_id="snapshot-current")
+
+    version_key = LiveProductionDashboardServices._prediction_version_key(fixture, snapshot)
+    old_key = canonical_hash(
+        {
+            "fixture_id": fixture.fixture_id,
+            "model_snapshot_id": snapshot.snapshot_id,
+            "kickoff_utc": fixture.kickoff_utc,
+        }
+    )
+
+    assert version_key == canonical_hash(
+        {
+            "fixture_id": fixture.fixture_id,
+            "model_snapshot_id": snapshot.snapshot_id,
+            "kickoff_utc": fixture.kickoff_utc,
+            "live_identity_policy_version": TRANSITION_BASELINE_VERSION,
+        }
+    )
+    assert version_key != old_key
