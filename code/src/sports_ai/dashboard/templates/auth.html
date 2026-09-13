@@ -31,7 +31,7 @@
 
       <div class="auth-brand-status">
         <i></i>
-        <span>Secure client access</span>
+        <span>Private dashboard access</span>
       </div>
     </section>
 
@@ -40,7 +40,7 @@
         <div class="auth-card__head">
           <span class="auth-eyebrow">SPORTS EDGE FOOTBALL</span>
           <h2>{{ 'Create your account' if mode == 'signup' else 'Welcome back' }}</h2>
-          <p>{{ 'Use your email to create a secure Sports Edge account.' if mode == 'signup' else 'Sign in to open your Football dashboard.' }}</p>
+          <p>{{ 'Use your email to create a secure Sports Edge account.' if mode == 'signup' else 'Enter the private dashboard credentials to continue.' }}</p>
         </div>
 
         <div class="auth-switch" role="navigation" aria-label="Authentication">
@@ -58,14 +58,14 @@
           <input type="hidden" name="next" value="{{ next_path or '/' }}">
 
           <label class="auth-field">
-            <span>Email</span>
+            <span>{{ 'Email' if mode == 'signup' else 'Username' }}</span>
             <input
-              type="email"
+              type="{{ 'email' if mode == 'signup' else 'text' }}"
               name="email"
               value="{{ email or '' }}"
-              autocomplete="email"
-              inputmode="email"
-              placeholder="you@example.com"
+              autocomplete="{{ 'email' if mode == 'signup' else 'username' }}"
+              {% if mode == 'signup' %}inputmode="email"{% endif %}
+              placeholder="{{ 'you@example.com' if mode == 'signup' else 'Enter username' }}"
               required
             >
           </label>
@@ -76,7 +76,7 @@
               type="password"
               name="password"
               autocomplete="{{ 'new-password' if mode == 'signup' else 'current-password' }}"
-              placeholder="{{ 'At least 8 characters' if mode == 'signup' else 'Enter your password' }}"
+              placeholder="{{ 'At least 8 characters' if mode == 'signup' else 'Enter password' }}"
               minlength="8"
               required
             >
