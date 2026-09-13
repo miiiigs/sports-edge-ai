@@ -7,9 +7,13 @@ from datetime import datetime, timezone
 import logging
 from typing import Any, Callable
 
+from ..locking import canonical_hash
 from ..storage import football_candidate_evidence, football_paper_trading
 from .football_context_veto import REASON_NEWLY_PROMOTED_RELEGATED
-from .football_transition_maturity import transition_maturity_for_fixture
+from .football_transition_maturity import (
+    TRANSITION_BASELINE_VERSION,
+    transition_maturity_for_fixture,
+)
 from .models import parse_iso_datetime
 from .production_services import ProductionDashboardServices
 
@@ -90,6 +94,18 @@ def _enforce_transition_maturity_from_shadow(row: dict[str, Any]) -> bool:
 
 class LiveProductionDashboardServices(ProductionDashboardServices):
     """Keep live safeguards fresh while preserving Route B model truth."""
+
+    @staticmethod
+    def _prediction_version_key(fixture: Any, snapshot: Any) -> str:
+        """Refresh persisted predictions when deterministic identity policy changes."""
+        return canonical_hash(
+            {
+                "fixture_id": fixture.fixture_id,
+                "model_snapshot_id": snapshot.snapshot_id,
+                "kickoff_utc": fixture.kickoff_utc,
+                "live_identity_policy_version": TRANSITION_BASELINE_VERSION,
+            }
+        )
 
     async def sync_once(self, *, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, Any]:
         # Never let an empty/missing lineup result live for the whole process.
