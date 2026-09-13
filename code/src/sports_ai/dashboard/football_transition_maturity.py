@@ -151,8 +151,10 @@ def transition_maturity_for_fixture(
     )
     teams: list[dict[str, Any]] = []
     for side, team in identified:
-        observed = [match_counts.get(alias, 0) for alias in team.normalized_aliases]
-        matches_played = max(observed) if observed else 0
+        # A provider/source may change between approved name variants during a
+        # season.  Sum all approved aliases so that a harmless naming change does
+        # not reset maturity back to zero.
+        matches_played = sum(match_counts.get(alias, 0) for alias in team.normalized_aliases)
         teams.append(
             {
                 "side": side,
