@@ -107,6 +107,10 @@ class LiveProductionDashboardServices(ProductionDashboardServices):
             }
         )
 
+    def _update_prediction_state(self, rows_with_predictions: list[dict[str, Any]]) -> None:
+        """Production health describes current/future pre-match fixtures, not archive rows."""
+        super()._update_prediction_state(self._future_fixture_rows(rows_with_predictions))
+
     async def sync_once(self, *, sync_kind: str = "manual", include_schedule: bool = True) -> dict[str, Any]:
         # Never let an empty/missing lineup result live for the whole process.
         # The shared provider budget remains the authoritative short-TTL cache.
