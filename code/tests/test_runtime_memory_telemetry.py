@@ -56,6 +56,6 @@ def test_log_child_memory_skips_exited_and_unavailable_children(monkeypatch, cap
 
     messages = [record.getMessage() for record in caplog.records]
     assert len(messages) == 1
-    assert "child=web" in messages[0]
+    assert "process=web" in messages[0]
     assert "rss_mib=100.0" in messages[0]
     assert "hwm_mib=120.0" in messages[0]
