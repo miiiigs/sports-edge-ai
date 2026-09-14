@@ -97,6 +97,12 @@ async def run_worker() -> int:
 
 def main() -> int:
     logging.basicConfig(level=os.environ.get("SPORTS_AI_LOG_LEVEL", "INFO"))
+    # httpx logs the full request URL at INFO. Some provider APIs require
+    # credentials in query parameters, so allowing those records into production
+    # logs can disclose secrets. Keep transport internals at WARNING while leaving
+    # application-level provider diagnostics at the configured log level.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     return asyncio.run(run_worker())
 
 
