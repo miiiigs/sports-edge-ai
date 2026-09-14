@@ -197,14 +197,11 @@ def _default_fixture_provider() -> FixtureProvider:
 
 
 def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
-    provider = ApiFootballOddsProvider()
-    if provider.configured():
-        return provider
     provider = TheOddsApiProvider()
     if provider.configured():
         return provider
     return NotConfiguredMarketProvider(
-        provider_label="api-football-not-configured" if config.current_odds_connected else "waiting-for-approved-odds-provider"
+        provider_label="no-odds-provider-key" if config.current_odds_connected else "waiting-for-approved-odds-provider"
     )
 
 
