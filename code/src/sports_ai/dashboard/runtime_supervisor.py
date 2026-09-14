@@ -139,6 +139,7 @@ def _log_child_memory(children: list[tuple[str, subprocess.Popen]]) -> None:
 
 
 def main() -> int:
+    logging.basicConfig(level=os.environ.get("SPORTS_AI_LOG_LEVEL", "INFO"))
     specs = build_child_specs()
     children: list[subprocess.Popen] = []
     named_children: list[tuple[str, subprocess.Popen]] = []
