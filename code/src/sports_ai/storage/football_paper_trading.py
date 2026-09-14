@@ -6,11 +6,13 @@ import json
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from ..experiments.football_day10_market_pricing import _aggregate_component_results, _component_lines, _component_result
 from ..locking import canonical_hash
+from ..staking import quarter_kelly_stake_fraction
 
 PAPER_TRADE_STATE_VALUES = {
     "PENDING",
@@ -82,6 +84,12 @@ SCHEMA_STATEMENTS = (
         closing_odds REAL,
         closing_captured_at TEXT,
         closing_snapshot_id INTEGER,
+        staking_rule_version TEXT,
+        staking_probability REAL,
+        staking_decimal_price REAL,
+        full_kelly_fraction REAL,
+        quarter_kelly_fraction REAL,
+        suggested_stake_fraction REAL,
         entry_signature TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
     )
@@ -191,6 +199,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         columns={
             "business_key_signature": "TEXT",
             "canonical_business_key_signature": "TEXT",
+            "staking_rule_version": "TEXT",
+            "staking_probability": "REAL",
+            "staking_decimal_price": "REAL",
+            "full_kelly_fraction": "REAL",
+            "quarter_kelly_fraction": "REAL",
+            "suggested_stake_fraction": "REAL",
         },
     )
     _backfill_paper_trade_business_keys(conn)
@@ -322,6 +336,12 @@ class PaperTradeEntry:
     closing_odds: float | None = None
     closing_captured_at: str | None = None
     closing_snapshot_id: int | None = None
+    staking_rule_version: str | None = None
+    staking_probability: float | None = None
+    staking_decimal_price: float | None = None
+    full_kelly_fraction: float | None = None
+    quarter_kelly_fraction: float | None = None
+    suggested_stake_fraction: float | None = None
     paper_trade_id: str = field(init=False)
     business_key_signature: str = field(init=False)
     entry_signature: str = field(init=False)
@@ -352,6 +372,28 @@ class PaperTradeEntry:
         object.__setattr__(self, "business_key_signature", business_key_signature)
         object.__setattr__(self, "entry_signature", signature)
         object.__setattr__(self, "paper_trade_id", f"paper_{business_key_signature}")
+        if (
+            self.staking_rule_version is None
+            and self.decision == "PAPER_CANDIDATE"
+            and self.entry_eligibility == "ELIGIBLE"
+            and self.model_probability is not None
+        ):
+            stake = quarter_kelly_stake_fraction(
+                probability=Decimal(str(self.model_probability)),
+                decimal_price=Decimal(str(self.available_market_price)),
+            )
+            object.__setattr__(self, "staking_rule_version", stake.staking_rule_version)
+            object.__setattr__(self, "staking_probability", float(stake.staking_probability))
+            object.__setattr__(self, "staking_decimal_price", float(stake.staking_decimal_price))
+            object.__setattr__(self, "full_kelly_fraction", float(stake.full_kelly_fraction))
+            object.__setattr__(self, "quarter_kelly_fraction", float(stake.quarter_kelly_fraction))
+            object.__setattr__(self, "suggested_stake_fraction", float(stake.suggested_stake_fraction))
+        if (
+            (self.decision != "PAPER_CANDIDATE" or self.entry_eligibility != "ELIGIBLE")
+            and self.suggested_stake_fraction is not None
+            and self.suggested_stake_fraction > 0
+        ):
+            raise ValueError("non-eligible paper entries cannot carry a positive suggested stake")
 
 
 @dataclass(frozen=True)
@@ -499,8 +541,10 @@ def record_paper_trade_entry(
                 minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
                 safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
                 closing_odds, closing_captured_at, closing_snapshot_id, business_key_signature,
-                canonical_business_key_signature, entry_signature, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                canonical_business_key_signature, staking_rule_version, staking_probability,
+                staking_decimal_price, full_kelly_fraction, quarter_kelly_fraction,
+                suggested_stake_fraction, entry_signature, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.paper_trade_id,
@@ -531,6 +575,12 @@ def record_paper_trade_entry(
                 entry.closing_snapshot_id,
                 entry.business_key_signature,
                 entry.canonical_business_key_signature,
+                entry.staking_rule_version,
+                entry.staking_probability,
+                entry.staking_decimal_price,
+                entry.full_kelly_fraction,
+                entry.quarter_kelly_fraction,
+                entry.suggested_stake_fraction,
                 entry.entry_signature,
                 entry.created_at,
             ),
