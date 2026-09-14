@@ -58,8 +58,7 @@ jobs:
           and not test_dashboard_home_places_best_picks_before_today_matches_and_current_desk
           and not test_dashboard_policy_active_without_selection_keeps_best_picks_empty
           and not test_route_a_manifest_and_artifact_contract_validate
-          and not test_checksum_mismatch_blocks_manifest_verification
-          and not test_provider_selection_does_not_fall_back_to_api_football"
+          and not test_checksum_mismatch_blocks_manifest_verification"
 
       - name: Run full legacy suite for debt visibility
         continue-on-error: true
