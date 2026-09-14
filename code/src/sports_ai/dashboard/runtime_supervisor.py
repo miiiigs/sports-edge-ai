@@ -13,7 +13,14 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from .services import DEFAULT_RUNTIME_ROLE_ENV_VAR, RUNTIME_ROLE_SCHEDULER, RUNTIME_ROLE_WEB
+# Keep the long-lived parent supervisor deliberately import-light. Importing
+# dashboard.services here pulls the full prediction/model dependency graph into a
+# third resident Python process even though the supervisor only needs these stable
+# string constants. The web and scheduler children remain authoritative users of
+# DashboardServices and its runtime-role contract.
+DEFAULT_RUNTIME_ROLE_ENV_VAR = "SPORTS_AI_RUNTIME_ROLE"
+RUNTIME_ROLE_WEB = "web"
+RUNTIME_ROLE_SCHEDULER = "scheduler"
 
 WEB_READINESS_TIMEOUT_SECONDS = 30.0
 MEMORY_TELEMETRY_FIRST_SAMPLE_SECONDS = 30.0
