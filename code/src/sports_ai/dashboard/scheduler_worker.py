@@ -13,6 +13,7 @@ from . import storage
 from .live_production_services import LiveProductionDashboardServices
 from .models import utc_now_iso
 from .production_services import ProductionDashboardServices
+from .scoped_fixture_provider import ScopedApiFootballFixtureProvider
 from .services import DashboardConfig, DashboardServices, RUNTIME_ROLE_SCHEDULER
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,11 @@ def _persist_model_snapshot_state(services: DashboardServices) -> None:
         )
 
 
+def _production_fixture_provider() -> ScopedApiFootballFixtureProvider | None:
+    provider = ScopedApiFootballFixtureProvider()
+    return provider if provider.configured() else None
+
+
 async def run_worker() -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -70,7 +76,10 @@ async def run_worker() -> int:
             signal.signal(signum, lambda _signum, _frame: loop.call_soon_threadsafe(stop_event.set))
 
     config = replace(DashboardConfig.default(), runtime_role=RUNTIME_ROLE_SCHEDULER)
-    services = LiveProductionDashboardServices(config=config)
+    services = LiveProductionDashboardServices(
+        config=config,
+        fixture_provider=_production_fixture_provider(),
+    )
     await services.initialize()
     _persist_model_snapshot_state(services)
 
