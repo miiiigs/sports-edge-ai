@@ -122,7 +122,60 @@ def test_paper_trading_store_appends_snapshots_and_settles_entries(tmp_path):
     assert len(rows) == 1
     assert rows[0]["trade_state"] == "WON"
     assert rows[0]["net_pnl"] == pytest.approx(0.9)
+    assert rows[0]["staking_rule_version"] == "QUARTER_KELLY_CAP_2_V1"
+    assert rows[0]["staking_probability"] == pytest.approx(0.74)
+    assert rows[0]["staking_decimal_price"] == pytest.approx(1.9)
+    assert rows[0]["suggested_stake_fraction"] == pytest.approx(0.02)
     assert paper_trading_status(rows)["ledger_state"] == "READY"
+
+
+def test_paper_trading_store_keeps_rejected_entries_stake_free(tmp_path):
+    db_path = tmp_path / "football_paper_trading.sqlite"
+    with connect(db_path) as conn:
+        paper_trade_id = record_paper_trade_entry(
+            conn,
+            PaperTradeEntry(
+                prediction_id="pred_rejected",
+                fixture_id="evt_fixture_rejected",
+                model_snapshot_id="snapshot_rejected",
+                model_version="football_day11_manager_core_v1",
+                market="1x2",
+                selection="HOME",
+                model_probability=0.60,
+                model_fair_price=1.67,
+                available_market_price=2.20,
+                decision="NO_BET",
+                decision_timestamp="2026-08-20T09:00:00+00:00",
+                kickoff="2026-08-20T12:00:00+00:00",
+                safeguard_state="READY",
+                entry_eligibility="INELIGIBLE",
+            ),
+        )
+        rows = fetch_paper_trade_rows(conn)
+
+    assert rows[0]["paper_trade_id"] == paper_trade_id
+    assert rows[0]["suggested_stake_fraction"] is None
+
+
+def test_paper_trading_store_rejects_positive_stake_on_non_candidate():
+    with pytest.raises(ValueError, match="positive suggested stake"):
+        PaperTradeEntry(
+            prediction_id="pred_bad_stake",
+            fixture_id="evt_fixture_bad_stake",
+            model_snapshot_id="snapshot_bad_stake",
+            model_version="football_day11_manager_core_v1",
+            market="1x2",
+            selection="HOME",
+            model_probability=0.60,
+            model_fair_price=1.67,
+            available_market_price=2.20,
+            decision="NO_BET",
+            decision_timestamp="2026-08-20T09:00:00+00:00",
+            kickoff="2026-08-20T12:00:00+00:00",
+            safeguard_state="READY",
+            entry_eligibility="INELIGIBLE",
+            suggested_stake_fraction=0.02,
+        )
 
 
 def test_market_snapshot_queries_use_indexes_for_identity_lookup_and_fixture_history(tmp_path):
