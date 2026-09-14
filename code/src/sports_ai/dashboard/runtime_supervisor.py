@@ -100,10 +100,10 @@ def _wait_for_web_readiness(
 
 
 def _read_linux_process_memory_kib(pid: int) -> dict[str, int] | None:
-    """Read a small, side-effect-free Linux memory snapshot for one child process.
+    """Read a small, side-effect-free Linux memory snapshot for one process.
 
     Railway containers expose Linux ``/proc``. Returning ``None`` on other platforms
-    or after a child exits keeps this diagnostic strictly optional. Values are kept
+    or after a process exits keeps this diagnostic strictly optional. Values are kept
     in KiB to match the kernel source without rounding during collection.
     """
     status_path = Path(f"/proc/{pid}/status")
@@ -126,23 +126,31 @@ def _read_linux_process_memory_kib(pid: int) -> dict[str, int] | None:
     return result or None
 
 
+def _log_memory_row(name: str, pid: int, memory: dict[str, int]) -> None:
+    logger.info(
+        "runtime process memory: process=%s pid=%s rss_mib=%.1f hwm_mib=%.1f anon_mib=%.1f file_mib=%.1f shmem_mib=%.1f",
+        name,
+        pid,
+        memory.get("VmRSS", 0) / 1024.0,
+        memory.get("VmHWM", 0) / 1024.0,
+        memory.get("RssAnon", 0) / 1024.0,
+        memory.get("RssFile", 0) / 1024.0,
+        memory.get("RssShmem", 0) / 1024.0,
+    )
+
+
 def _log_child_memory(children: list[tuple[str, subprocess.Popen]]) -> None:
+    supervisor_pid = os.getpid()
+    supervisor_memory = _read_linux_process_memory_kib(supervisor_pid)
+    if supervisor_memory is not None:
+        _log_memory_row("supervisor", supervisor_pid, supervisor_memory)
     for name, child in children:
         if child.poll() is not None:
             continue
         memory = _read_linux_process_memory_kib(child.pid)
         if memory is None:
             continue
-        logger.info(
-            "runtime child memory: child=%s pid=%s rss_mib=%.1f hwm_mib=%.1f anon_mib=%.1f file_mib=%.1f shmem_mib=%.1f",
-            name,
-            child.pid,
-            memory.get("VmRSS", 0) / 1024.0,
-            memory.get("VmHWM", 0) / 1024.0,
-            memory.get("RssAnon", 0) / 1024.0,
-            memory.get("RssFile", 0) / 1024.0,
-            memory.get("RssShmem", 0) / 1024.0,
-        )
+        _log_memory_row(name, child.pid, memory)
 
 
 def main() -> int:
