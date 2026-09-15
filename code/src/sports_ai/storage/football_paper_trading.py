@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -84,6 +85,8 @@ SCHEMA_STATEMENTS = (
         closing_odds REAL,
         closing_captured_at TEXT,
         closing_snapshot_id INTEGER,
+        closing_margin REAL,
+        clv_pct REAL,
         staking_rule_version TEXT,
         staking_probability REAL,
         staking_decimal_price REAL,
@@ -199,6 +202,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         columns={
             "business_key_signature": "TEXT",
             "canonical_business_key_signature": "TEXT",
+            "closing_margin": "REAL",
+            "clv_pct": "REAL",
             "staking_rule_version": "TEXT",
             "staking_probability": "REAL",
             "staking_decimal_price": "REAL",
@@ -336,6 +341,8 @@ class PaperTradeEntry:
     closing_odds: float | None = None
     closing_captured_at: str | None = None
     closing_snapshot_id: int | None = None
+    closing_margin: float | None = None
+    clv_pct: float | None = None
     staking_rule_version: str | None = None
     staking_probability: float | None = None
     staking_decimal_price: float | None = None
@@ -525,6 +532,97 @@ def fetch_market_snapshots(
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
 
+_EXPECTED_SELECTIONS_BY_MARKET = {
+    "1x2": frozenset({"HOME", "DRAW", "AWAY"}),
+    "btts": frozenset({"YES", "NO"}),
+    "goals_total": frozenset({"OVER", "UNDER"}),
+    "corner_total": frozenset({"OVER", "UNDER"}),
+    "asian_handicap": frozenset({"HOME", "AWAY"}),
+}
+
+
+def margin_adjusted_clv(*, entry_odds: float, closing_odds: float, closing_margin: float) -> float:
+    """Return spec CLV: entry / close / (1 + closing margin) - 1."""
+    values = (float(entry_odds), float(closing_odds), float(closing_margin))
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("CLV inputs must be finite")
+    if values[0] <= 1.0 or values[1] <= 1.0:
+        raise ValueError("entry and closing odds must be > 1")
+    if values[2] < 0.0:
+        raise ValueError("closing margin must be >= 0")
+    return values[0] / values[1] / (1.0 + values[2]) - 1.0
+
+
+def closing_market_margin_for_snapshot(
+    conn: sqlite3.Connection,
+    closing_snapshot_id: int,
+    *,
+    initialize_schema: bool = True,
+) -> float | None:
+    """Derive overround from the exact persisted bookmaker closing book.
+
+    The calculation intentionally fails closed unless every expected outcome for
+    the anchor snapshot's exact fixture/provider/bookmaker/market/line/capture
+    batch is present and valid. No external price reconstruction is performed.
+    """
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    anchor = conn.execute(
+        """
+        SELECT fixture_id, provider, bookmaker, market, line, captured_at, is_pre_match
+        FROM market_snapshots
+        WHERE snapshot_id = ?
+        """,
+        (int(closing_snapshot_id),),
+    ).fetchone()
+    if anchor is None or not bool(anchor["is_pre_match"]):
+        return None
+    market = str(anchor["market"]).lower()
+    expected = _EXPECTED_SELECTIONS_BY_MARKET.get(market)
+    if expected is None:
+        return None
+    rows = conn.execute(
+        """
+        SELECT selection, odds, snapshot_id
+        FROM market_snapshots
+        WHERE fixture_id = ?
+          AND provider = ?
+          AND bookmaker = ?
+          AND market = ?
+          AND line IS ?
+          AND captured_at = ?
+          AND is_pre_match = ?
+        ORDER BY snapshot_id
+        """,
+        (
+            anchor["fixture_id"],
+            anchor["provider"],
+            anchor["bookmaker"],
+            anchor["market"],
+            anchor["line"],
+            anchor["captured_at"],
+            anchor["is_pre_match"],
+        ),
+    ).fetchall()
+    prices: dict[str, float] = {}
+    for row in rows:
+        selection = str(row["selection"]).upper()
+        try:
+            odds = float(row["odds"])
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(odds) or odds <= 1.0:
+            return None
+        if selection in expected:
+            prices[selection] = odds
+    if set(prices) != set(expected):
+        return None
+    booksum = sum(1.0 / prices[selection] for selection in expected)
+    margin = booksum - 1.0
+    if not math.isfinite(margin) or margin < 0.0:
+        return None
+    return margin
+
+
 def record_paper_trade_entry(
     conn: sqlite3.Connection,
     entry: PaperTradeEntry,
@@ -540,11 +638,11 @@ def record_paper_trade_entry(
                 selection, line, model_probability, model_fair_price, available_market_price, edge,
                 minimum_acceptable_price, decision, decision_timestamp, kickoff, bookmaker, provider,
                 safeguard_state, entry_eligibility, entry_odds, entry_captured_at, entry_snapshot_id,
-                closing_odds, closing_captured_at, closing_snapshot_id, business_key_signature,
-                canonical_business_key_signature, staking_rule_version, staking_probability,
+                closing_odds, closing_captured_at, closing_snapshot_id, closing_margin, clv_pct,
+                business_key_signature, canonical_business_key_signature, staking_rule_version, staking_probability,
                 staking_decimal_price, full_kelly_fraction, quarter_kelly_fraction,
                 suggested_stake_fraction, entry_signature, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.paper_trade_id,
@@ -573,6 +671,8 @@ def record_paper_trade_entry(
                 entry.closing_odds,
                 entry.closing_captured_at,
                 entry.closing_snapshot_id,
+                entry.closing_margin,
+                entry.clv_pct,
                 entry.business_key_signature,
                 entry.canonical_business_key_signature,
                 entry.staking_rule_version,
@@ -628,16 +728,68 @@ def attach_closing_snapshot(
     initialize_schema: bool = True,
 ) -> None:
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    trade = conn.execute(
+        """
+        SELECT fixture_id, market, selection, line, entry_odds
+        FROM paper_trade_entries
+        WHERE paper_trade_id = ?
+        """,
+        (paper_trade_id,),
+    ).fetchone()
+    closing_margin: float | None = None
+    clv_pct: float | None = None
+    if trade is not None and closing_snapshot_id is not None:
+        anchor = conn.execute(
+            """
+            SELECT fixture_id, market, selection, line, odds
+            FROM market_snapshots
+            WHERE snapshot_id = ?
+            """,
+            (int(closing_snapshot_id),),
+        ).fetchone()
+        same_identity = bool(
+            anchor is not None
+            and str(anchor["fixture_id"]) == str(trade["fixture_id"])
+            and str(anchor["market"]).lower() == str(trade["market"]).lower()
+            and str(anchor["selection"]).upper() == str(trade["selection"]).upper()
+            and anchor["line"] == trade["line"]
+            and math.isclose(float(anchor["odds"]), float(closing_odds), rel_tol=0.0, abs_tol=1e-12)
+        )
+        if same_identity:
+            closing_margin = closing_market_margin_for_snapshot(
+                conn,
+                int(closing_snapshot_id),
+                initialize_schema=False,
+            )
+            entry_odds = trade["entry_odds"]
+            if entry_odds is not None and closing_margin is not None:
+                try:
+                    clv_pct = margin_adjusted_clv(
+                        entry_odds=float(entry_odds),
+                        closing_odds=float(closing_odds),
+                        closing_margin=closing_margin,
+                    )
+                except (TypeError, ValueError):
+                    clv_pct = None
     with conn:
         conn.execute(
             """
             UPDATE paper_trade_entries
             SET closing_odds = ?,
                 closing_captured_at = ?,
-                closing_snapshot_id = ?
+                closing_snapshot_id = ?,
+                closing_margin = ?,
+                clv_pct = ?
             WHERE paper_trade_id = ?
             """,
-            (closing_odds, closing_captured_at, closing_snapshot_id, paper_trade_id),
+            (
+                closing_odds,
+                closing_captured_at,
+                closing_snapshot_id,
+                closing_margin,
+                clv_pct,
+                paper_trade_id,
+            ),
         )
 
 

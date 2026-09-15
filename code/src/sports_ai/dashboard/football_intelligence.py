@@ -429,17 +429,18 @@ def _calibration(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _clv(rows: list[dict[str, Any]]) -> dict[str, Any]:
     samples: list[dict[str, Any]] = []
     for row in rows:
-        entry = row.get("entry_odds")
-        closing = row.get("closing_odds")
         closing_snapshot_id = row.get("closing_snapshot_id")
+        closing_margin = row.get("closing_margin")
+        clv_pct = row.get("clv_pct")
+        if closing_snapshot_id in {None, ""} or closing_margin is None or clv_pct is None:
+            continue
         try:
-            entry_odds = float(entry)
-            closing_odds = float(closing)
+            margin = float(closing_margin)
+            clv = float(clv_pct)
         except (TypeError, ValueError):
             continue
-        if entry_odds <= 1.0 or closing_odds <= 1.0 or closing_snapshot_id in {None, ""}:
+        if not math.isfinite(margin) or margin < 0.0 or not math.isfinite(clv):
             continue
-        clv = (1.0 / closing_odds) - (1.0 / entry_odds)
         samples.append({"row": row, "clv": clv})
 
     by_market: list[dict[str, Any]] = []
@@ -469,7 +470,7 @@ def _clv(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "status": "SUFFICIENT" if len(values) >= MIN_CLV_SAMPLE else "INSUFFICIENT_DATA",
         "minimum_sample": MIN_CLV_SAMPLE,
         "by_market": by_market,
-        "method_note": "CLV uses the existing Sports Edge implied-probability definition: (1 / closing odds) - (1 / entry odds), using persisted entry and closing snapshots only. Missing closing prices are never reconstructed.",
+        "method_note": "CLV uses the Football build-spec definition: entry_odds / closing_odds / (1 + closing_margin) - 1. Only persisted complete closing books are counted; missing closing margin evidence fails closed.",
     }
 
 

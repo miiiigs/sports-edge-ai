@@ -26,6 +26,8 @@ def _row(**updates):
         "model_probability": 0.60,
         "closing_odds": 1.80,
         "closing_snapshot_id": 10,
+        "closing_margin": 0.04,
+        "clv_pct": (2.0 / 1.80 / 1.04) - 1.0,
     }
     row.update(updates)
     return row
@@ -66,21 +68,52 @@ def test_calibration_excludes_push_half_and_void_states():
     assert result["status"] == "INSUFFICIENT_SAMPLE"
 
 
-def test_clv_requires_persisted_closing_snapshot_and_rewards_better_entry_price():
+def test_clv_requires_margin_adjusted_persisted_clv_and_complete_evidence():
+    positive_clv = (2.50 / 2.00 / 1.05) - 1.0
+    negative_clv = (1.80 / 2.00 / 1.05) - 1.0
     rows = [
-        _row(paper_trade_id="positive", entry_odds=2.50, closing_odds=2.00, closing_snapshot_id=1),
-        _row(paper_trade_id="negative", fixture_id="fixture-2", entry_odds=1.80, closing_odds=2.00, closing_snapshot_id=2),
-        _row(paper_trade_id="missing", fixture_id="fixture-3", entry_odds=3.00, closing_odds=2.00, closing_snapshot_id=None),
+        _row(
+            paper_trade_id="positive",
+            entry_odds=2.50,
+            closing_odds=2.00,
+            closing_snapshot_id=1,
+            closing_margin=0.05,
+            clv_pct=positive_clv,
+        ),
+        _row(
+            paper_trade_id="negative",
+            fixture_id="fixture-2",
+            entry_odds=1.80,
+            closing_odds=2.00,
+            closing_snapshot_id=2,
+            closing_margin=0.05,
+            clv_pct=negative_clv,
+        ),
+        _row(
+            paper_trade_id="missing-margin",
+            fixture_id="fixture-3",
+            entry_odds=3.00,
+            closing_odds=2.00,
+            closing_snapshot_id=3,
+            closing_margin=None,
+            clv_pct=None,
+        ),
+        _row(
+            paper_trade_id="missing-snapshot",
+            fixture_id="fixture-4",
+            closing_snapshot_id=None,
+            closing_margin=0.05,
+            clv_pct=0.10,
+        ),
     ]
 
     result = _clv(rows)
 
-    positive = (1.0 / 2.00) - (1.0 / 2.50)
-    negative = (1.0 / 2.00) - (1.0 / 1.80)
     assert result["sample"] == 2
-    assert result["average_clv"] == pytest.approx((positive + negative) / 2)
+    assert result["average_clv"] == pytest.approx((positive_clv + negative_clv) / 2)
     assert result["positive_rate"] == pytest.approx(0.5)
     assert result["status"] == "INSUFFICIENT_DATA"
+    assert "closing_margin" in result["method_note"]
 
 
 def test_buckets_are_deterministic():
