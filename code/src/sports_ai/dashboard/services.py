@@ -3266,6 +3266,14 @@ class DashboardServices:
             self._prediction_state["ready_fixture_count"],
             self._prediction_state["blocked_fixture_count"],
         )
+        provider_error = self._provider_state.get("last_error")
+        if self._provider_state.get("state") != "CONNECTED" and provider_error:
+            logger.warning(
+                "fixture sync provider issue: kind=%s state=%s reason=%s",
+                sync_kind,
+                self._provider_state.get("state"),
+                provider_error,
+            )
         return self._provider_state
 
     def _latest_closing_snapshot(
