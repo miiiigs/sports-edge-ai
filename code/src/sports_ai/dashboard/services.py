@@ -3266,6 +3266,14 @@ class DashboardServices:
             self._prediction_state["ready_fixture_count"],
             self._prediction_state["blocked_fixture_count"],
         )
+        provider_error = self._provider_state.get("last_error")
+        if self._provider_state.get("state") != "CONNECTED" and provider_error:
+            logger.warning(
+                "fixture sync provider issue: kind=%s state=%s reason=%s",
+                sync_kind,
+                self._provider_state.get("state"),
+                provider_error,
+            )
         return self._provider_state
 
     def _latest_closing_snapshot(
@@ -4570,6 +4578,30 @@ class DashboardServices:
             return "PREDICTION_AFTER_KICKOFF_BLOCKED"
         return "PREDICTION_PENDING"
 
+    @staticmethod
+    def _is_fresh_live_fixture(row: dict[str, Any], *, now_utc: datetime) -> bool:
+        """Fail closed when a persisted live status has gone stale.
+
+        Live fixture payloads are normalized with last_provider_update set to the
+        ingestion time. If provider synchronization stops, an old LIVE/HALFTIME
+        row must not remain visible forever. Six hours leaves ample room for
+        unusually long matches while preventing multi-day stale live states.
+        """
+        stale_after = timedelta(hours=6)
+        future_tolerance = timedelta(hours=2)
+        kickoff = parse_iso_datetime(str(row["kickoff_utc"]))
+        if kickoff > now_utc + future_tolerance:
+            return False
+        raw_update = str(row.get("last_provider_update") or "").strip()
+        if raw_update:
+            try:
+                last_update = parse_iso_datetime(raw_update)
+            except ValueError:
+                last_update = None
+            if last_update is not None:
+                return now_utc - stale_after <= last_update <= now_utc + future_tolerance
+        return now_utc - stale_after <= kickoff <= now_utc + future_tolerance
+
     def _filter_fixture_rows(
         self,
         *,
@@ -4584,7 +4616,11 @@ class DashboardServices:
             kickoff = parse_iso_datetime(str(row["kickoff_utc"]))
             local_kickoff_date = kickoff.astimezone(ZoneInfo(self.config.display_timezone)).date()
             status = str(row["status"])
-            if bucket == "live" and status in FIXTURE_LIVE_STATUSES:
+            if (
+                bucket == "live"
+                and status in FIXTURE_LIVE_STATUSES
+                and self._is_fresh_live_fixture(row, now_utc=now_utc)
+            ):
                 filtered.append(row)
             elif bucket == "today" and local_kickoff_date == today_local and status not in FIXTURE_LIVE_STATUSES:
                 filtered.append(row)
