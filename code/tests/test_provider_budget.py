@@ -206,6 +206,7 @@ def test_burst_limiter_waits_for_short_slot_instead_of_dropping(tmp_path, monkey
         params={"date": "2026-09-26", "league": 40},
         ttl_seconds=60,
         priority=PRIORITY_NORMAL,
+        wait_for_rate_slot=True,
     )
     elapsed = time.monotonic() - started
 
