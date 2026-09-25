@@ -77,6 +77,7 @@ RATE_MINUTE_LIMIT = 240
 RATE_SECOND_LIMIT = 4
 RATE_MINUTE_WINDOW_SECONDS = 60
 RATE_SECOND_WINDOW_SECONDS = 1
+RATE_SLOT_MAX_WAIT_SECONDS = 2.0
 
 # Default cache TTLs (seconds) used when a caller has no lifecycle context.
 DEFAULT_TTL_LIVE = 90
@@ -903,33 +904,39 @@ class ProviderRequestBudget:
                 provider=provider,
             )
 
-        if not self._rate_allows():
-            self._bump("requests_blocked_rate")
-            return BudgetDecision(
-                allow=False,
-                action=ACTION_BLOCKED_RATE,
-                reason="burst rate protection reached (deferring until next scheduler tick)",
-                quota_state=quota_state,
-                request_key=key,
-                provider=provider,
-            )
-
         if self._inflight_begin(key):
-            if self._needs_quota_probe() and not self._probe_acquire(now_iso):
-                # Another application path owns the single post-reset probe.
-                # Defer instead of creating a request burst.
+            probe_owned = False
+            if self._needs_quota_probe():
+                if not self._probe_acquire(now_iso):
+                    # Another application path owns the single post-reset probe.
+                    # Defer instead of creating a request burst.
+                    self._inflight_finish(key)
+                    self._bump("requests_blocked_reset_probe")
+                    return BudgetDecision(
+                        allow=False,
+                        action=ACTION_BLOCKED_RESET_PROBE,
+                        reason="quota reset probe already in flight (deferring until fresh provider headers captured)",
+                        quota_state=quota_state,
+                        request_key=key,
+                        provider=provider,
+                    )
+                probe_owned = True
+
+            if not self._acquire_rate_slot():
                 self._inflight_finish(key)
-                self._bump("requests_blocked_reset_probe")
+                if probe_owned:
+                    self._probe_release()
+                self._bump("requests_blocked_rate")
                 return BudgetDecision(
                     allow=False,
-                    action=ACTION_BLOCKED_RESET_PROBE,
-                    reason="quota reset probe already in flight (deferring until fresh provider headers captured)",
+                    action=ACTION_BLOCKED_RATE,
+                    reason="burst rate protection reached after bounded wait",
                     quota_state=quota_state,
                     request_key=key,
                     provider=provider,
                 )
+
             self._bump("requests_inflight_owner")
-            self._rate_record()
             return BudgetDecision(
                 allow=True,
                 action=ACTION_ALLOW,
@@ -1039,6 +1046,40 @@ class ProviderRequestBudget:
             if recent_second >= RATE_SECOND_LIMIT:
                 return False
             return True
+
+    def _acquire_rate_slot(self, *, max_wait_seconds: float = RATE_SLOT_MAX_WAIT_SECONDS) -> bool:
+        """Reserve a provider request slot, briefly waiting for burst capacity.
+
+        The old path rejected the fifth concurrent startup request immediately.
+        That was acceptable only while a background scheduler guaranteed another
+        tick. In serverless mode there may be no second tick, so a bounded wait is
+        safer than silently dropping part of the startup fixture batch.
+        """
+        deadline = time.monotonic() + max(0.0, float(max_wait_seconds))
+        while True:
+            now = time.monotonic()
+            with self._rate_lock:
+                cutoff = now - RATE_MINUTE_WINDOW_SECONDS
+                while self._rate_times and self._rate_times[0] <= cutoff:
+                    self._rate_times.popleft()
+
+                recent_second = [t for t in self._rate_times if t > now - RATE_SECOND_WINDOW_SECONDS]
+                minute_blocked = len(self._rate_times) >= RATE_MINUTE_LIMIT
+                second_blocked = len(recent_second) >= RATE_SECOND_LIMIT
+
+                if not minute_blocked and not second_blocked:
+                    self._rate_times.append(now)
+                    return True
+
+                if minute_blocked:
+                    wait_seconds = (self._rate_times[0] + RATE_MINUTE_WINDOW_SECONDS) - now
+                else:
+                    wait_seconds = (recent_second[0] + RATE_SECOND_WINDOW_SECONDS) - now
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or wait_seconds > remaining:
+                return False
+            time.sleep(max(0.001, min(wait_seconds + 0.005, remaining)))
 
     def _rate_record(self) -> None:
         with self._rate_lock:
