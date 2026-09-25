@@ -174,6 +174,38 @@ def test_inflight_coalescing_prevents_double_fetch(tmp_path):
     assert budget.metrics()["http_requests"] == 1
 
 
+def test_api_football_schedule_fanout_is_capped_below_burst_limit(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_API_FOOTBALL_TOKEN", "test-token")
+    league_map = tmp_path / "league_map.json"
+    league_map.write_text(
+        json.dumps({"E0": 39, "E1": 40, "E2": 41, "E3": 42, "SP1": 140}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SPORTS_AI_API_FOOTBALL_LEAGUE_MAP", str(league_map))
+
+    observed: dict[str, int] = {}
+
+    class RecordingExecutor:
+        def __init__(self, *, max_workers):
+            observed["max_workers"] = int(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def map(self, fn, items):
+            return [fn(item) for item in items]
+
+    monkeypatch.setattr(fp_module, "ThreadPoolExecutor", RecordingExecutor)
+    provider = fp_module.ApiFootballFixtureProvider()
+    monkeypatch.setattr(provider, "_request_fixtures", lambda *, params: [])
+
+    assert provider.get_fixtures_for_date(date(2026, 9, 26)) == []
+    assert observed["max_workers"] == 3
+
+
 # --------------------------------------------------------- adaptive lifecycle
 def test_burst_limiter_waits_for_short_slot_instead_of_dropping(tmp_path, monkeypatch):
     monkeypatch.setattr("sports_ai.dashboard.provider_budget.RATE_SECOND_LIMIT", 1)
