@@ -1150,7 +1150,11 @@ class ApiFootballFixtureProvider(FixtureProvider):
             return division_code, query_date, rows
 
         fetch_items = [(division_code, league_id, query_date) for division_code, league_id in league_items for query_date in utc_dates]
-        with ThreadPoolExecutor(max_workers=min(5, max(1, len(fetch_items)))) as executor:
+        # Keep schedule fan-out below the provider budget's 4 req/sec safety
+        # ceiling. A live-fixtures request may already occupy one slot when the
+        # cold-start schedule batch begins, so at most three league/date fetches
+        # should contend concurrently.
+        with ThreadPoolExecutor(max_workers=min(3, max(1, len(fetch_items)))) as executor:
             for division_code, _, rows in executor.map(fetch_league_rows, fetch_items):
                 for row in rows:
                     normalized = self._normalize_fixture(row)

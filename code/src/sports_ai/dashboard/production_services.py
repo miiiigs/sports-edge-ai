@@ -152,6 +152,7 @@ class ProductionDashboardServices(DashboardServices):
         self._refresh_research_if_due(force=False, rebuild_snapshot=False)
         await super().initialize()
         self._refresh_competition_freshness()
+        self._log_production_freshness()
         self._persist_production_runtime_state()
 
     def _restore_persisted_research_refresh_state(self) -> None:
@@ -642,6 +643,28 @@ class ProductionDashboardServices(DashboardServices):
                 updated_at=utc_now_iso(),
                 initialize_schema=self._read_requires_schema_init(),
             )
+
+    def _log_production_freshness(self) -> None:
+        stale = {
+            competition: {
+                "latest_complete_match_date": row.get("latest_complete_match_date"),
+                "age_days": row.get("age_days"),
+                "max_age_days": row.get("max_age_days"),
+            }
+            for competition, row in sorted(self._competition_model_freshness.items())
+            if row.get("state") != "FRESH"
+        }
+        logger.info(
+            "football production freshness: research_state=%s last_attempt=%s last_success=%s "
+            "latest_refresh_match=%s successful_divisions=%s failed_divisions=%s stale_competitions=%s",
+            self._research_refresh_state.get("state"),
+            self._research_refresh_state.get("last_attempt_at"),
+            self._research_refresh_state.get("last_success_at"),
+            self._research_refresh_state.get("latest_match_date"),
+            self._research_refresh_state.get("successful_divisions"),
+            sorted((self._research_refresh_state.get("failed_divisions") or {}).keys()),
+            stale,
+        )
 
     def _persist_production_runtime_state(self) -> None:
         evidence_summary: dict[str, Any]
