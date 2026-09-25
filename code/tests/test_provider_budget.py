@@ -175,6 +175,46 @@ def test_inflight_coalescing_prevents_double_fetch(tmp_path):
 
 
 # --------------------------------------------------------- adaptive lifecycle
+def test_burst_limiter_waits_for_short_slot_instead_of_dropping(tmp_path, monkeypatch):
+    monkeypatch.setattr("sports_ai.dashboard.provider_budget.RATE_SECOND_LIMIT", 1)
+    monkeypatch.setattr("sports_ai.dashboard.provider_budget.RATE_SECOND_WINDOW_SECONDS", 0.05)
+    budget = _budget(tmp_path, daily_budget=1000)
+
+    first_params = {"date": "2026-09-26", "league": 39}
+    first = budget.issue(
+        provider=PROVIDER_API_FOOTBALL,
+        endpoint="fixtures",
+        params=first_params,
+        ttl_seconds=60,
+        priority=PRIORITY_NORMAL,
+    )
+    assert first.action == ACTION_ALLOW
+    budget.finish_success(
+        provider=PROVIDER_API_FOOTBALL,
+        endpoint="fixtures",
+        params=first_params,
+        payload=_payload([]),
+        provider_timestamp=None,
+        ttl_seconds=60,
+        response_headers=None,
+    )
+
+    started = time.monotonic()
+    second = budget.issue(
+        provider=PROVIDER_API_FOOTBALL,
+        endpoint="fixtures",
+        params={"date": "2026-09-26", "league": 40},
+        ttl_seconds=60,
+        priority=PRIORITY_NORMAL,
+        wait_for_rate_slot=True,
+    )
+    elapsed = time.monotonic() - started
+
+    assert second.action == ACTION_ALLOW
+    assert elapsed >= 0.04
+    assert budget.metrics().get("requests_blocked_rate", 0) == 0
+
+
 def test_far_future_fixture_obeys_long_polling_interval():
     today = date(2026, 8, 30)
     ttl, priority = schedule_fixture_policy(today + timedelta(days=3), today)

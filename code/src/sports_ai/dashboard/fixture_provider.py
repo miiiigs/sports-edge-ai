@@ -767,6 +767,7 @@ class ApiFootballFixtureProvider(FixtureProvider):
                 params=params,
                 ttl_seconds=ttl_seconds,
                 priority=priority,
+                wait_for_rate_slot=True,
             )
             if decision.action == ACTION_CACHE_HIT and decision.cached_payload is not None:
                 self._record_fixture_query(
