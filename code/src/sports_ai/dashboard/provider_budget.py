@@ -853,6 +853,7 @@ class ProviderRequestBudget:
         params: Mapping[str, Any] | None,
         ttl_seconds: int,
         priority: str,
+        wait_for_rate_slot: bool = False,
     ) -> BudgetDecision:
         key = request_key(provider, endpoint, params)
         now_iso = utc_now_iso()
@@ -904,6 +905,17 @@ class ProviderRequestBudget:
                 provider=provider,
             )
 
+        if not wait_for_rate_slot and not self._rate_allows():
+            self._bump("requests_blocked_rate")
+            return BudgetDecision(
+                allow=False,
+                action=ACTION_BLOCKED_RATE,
+                reason="burst rate protection reached (deferring until next scheduler tick)",
+                quota_state=quota_state,
+                request_key=key,
+                provider=provider,
+            )
+
         if self._inflight_begin(key):
             probe_owned = False
             if self._needs_quota_probe():
@@ -922,7 +934,13 @@ class ProviderRequestBudget:
                     )
                 probe_owned = True
 
-            if not self._acquire_rate_slot():
+            if wait_for_rate_slot:
+                rate_allowed = self._acquire_rate_slot()
+            else:
+                self._rate_record()
+                rate_allowed = True
+
+            if not rate_allowed:
                 self._inflight_finish(key)
                 if probe_owned:
                     self._probe_release()
