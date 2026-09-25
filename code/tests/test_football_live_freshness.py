@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from sports_ai.dashboard import storage
 from sports_ai.dashboard.models import FIXTURE_STATUS_LIVE
+from sports_ai.dashboard.production_services import (
+    PRODUCTION_RUNTIME_STATE_KEY,
+    ProductionDashboardServices,
+)
 from sports_ai.dashboard.services import DashboardServices
 
 
@@ -67,3 +72,49 @@ def test_live_bucket_falls_back_to_kickoff_when_update_timestamp_is_missing() ->
     )
 
     assert [row["fixture_id"] for row in rows] == ["recent-fallback"]
+
+
+def test_serverless_cold_start_restores_research_refresh_cadence(tmp_path) -> None:
+    now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+    dashboard_db = tmp_path / "football_dashboard.sqlite"
+    with storage.connect(dashboard_db) as conn:
+        storage.initialize_database(conn)
+        storage.put_runtime_state(
+            conn,
+            state_key=PRODUCTION_RUNTIME_STATE_KEY,
+            state_value={
+                "research_refresh": {
+                    "state": "READY",
+                    "last_attempt_at": now_utc.isoformat(),
+                    "last_success_at": now_utc.isoformat(),
+                    "last_error": None,
+                    "season_code": "2627",
+                    "successful_divisions": ["E0"],
+                    "failed_divisions": {},
+                    "changed_rows": 0,
+                    "latest_match_date": "2026-09-20",
+                }
+            },
+            updated_at=now_utc.isoformat(),
+        )
+
+    services = ProductionDashboardServices.__new__(ProductionDashboardServices)
+    services.config = SimpleNamespace(dashboard_db_path=dashboard_db)
+    services._last_research_refresh_attempt = None
+    services._research_refresh_state = {
+        "state": "NOT_RUN",
+        "last_attempt_at": None,
+        "last_success_at": None,
+        "last_error": None,
+        "season_code": None,
+        "successful_divisions": [],
+        "failed_divisions": {},
+        "changed_rows": 0,
+        "latest_match_date": None,
+    }
+
+    services._restore_persisted_research_refresh_state()
+
+    assert services._last_research_refresh_attempt == now_utc
+    assert services._research_refresh_state["state"] == "READY"
+    assert services._research_refresh_state["season_code"] == "2627"
