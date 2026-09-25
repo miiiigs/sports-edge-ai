@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -118,3 +119,51 @@ def test_serverless_cold_start_restores_research_refresh_cadence(tmp_path) -> No
     assert services._last_research_refresh_attempt == now_utc
     assert services._research_refresh_state["state"] == "READY"
     assert services._research_refresh_state["season_code"] == "2627"
+
+
+def test_production_initialize_primes_freshness_before_startup_sync(monkeypatch) -> None:
+    events: list[str] = []
+    services = ProductionDashboardServices.__new__(ProductionDashboardServices)
+
+    monkeypatch.setattr(
+        ProductionDashboardServices,
+        "_restore_persisted_research_refresh_state",
+        lambda self: events.append("restore"),
+    )
+    monkeypatch.setattr(
+        ProductionDashboardServices,
+        "_refresh_research_if_due",
+        lambda self, *, force, rebuild_snapshot: events.append("research"),
+    )
+    monkeypatch.setattr(
+        ProductionDashboardServices,
+        "_refresh_competition_freshness",
+        lambda self: events.append("freshness"),
+    )
+    monkeypatch.setattr(
+        ProductionDashboardServices,
+        "_log_production_freshness",
+        lambda self: events.append("log"),
+    )
+    monkeypatch.setattr(
+        ProductionDashboardServices,
+        "_persist_production_runtime_state",
+        lambda self: events.append("persist"),
+    )
+
+    async def fake_base_initialize(self) -> None:
+        events.append("base_initialize")
+
+    monkeypatch.setattr(DashboardServices, "initialize", fake_base_initialize)
+
+    asyncio.run(ProductionDashboardServices.initialize(services))
+
+    assert events == [
+        "restore",
+        "research",
+        "freshness",
+        "base_initialize",
+        "freshness",
+        "log",
+        "persist",
+    ]

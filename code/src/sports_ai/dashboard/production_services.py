@@ -150,6 +150,11 @@ class ProductionDashboardServices(DashboardServices):
     async def initialize(self) -> None:
         self._restore_persisted_research_refresh_state()
         self._refresh_research_if_due(force=False, rebuild_snapshot=False)
+        # Prime model-state freshness before the base startup sync. The base
+        # initialize() launches startup synchronization, which calls
+        # ensure_prediction(); leaving this map empty until afterwards makes
+        # every otherwise-fresh fixture fail closed as MODEL_STATE_STALE.
+        self._refresh_competition_freshness()
         await super().initialize()
         self._refresh_competition_freshness()
         self._log_production_freshness()
