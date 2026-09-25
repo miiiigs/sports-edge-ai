@@ -23,6 +23,7 @@ Recommended serverless production controls:
 - use `SPORTS_AI_FIXTURE_LIVE_REFRESH_SECONDS=900`
 - use `SPORTS_AI_FIXTURE_FUTURE_REFRESH_SECONDS=3600`
 - retain the API-Football operational daily cap, persistent request cache, quota governor, rate limiter and circuit breaker
+- persist the six-hour current-season research refresh cadence across serverless cold starts, so hourly wakes do not redownload the same five league feeds
 
 The longer in-process refresh intervals are deliberate in serverless mode: the hourly cold-start synchronization is the primary production cadence, so a short 5-minute loop would usually spend provider quota and Railway compute on a second refresh shortly before the service goes back to sleep.
 
