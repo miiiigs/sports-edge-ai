@@ -148,10 +148,43 @@ class ProductionDashboardServices(DashboardServices):
         services_module.build_fixture_market_evaluation = self._production_market_evaluator
 
     async def initialize(self) -> None:
-        self._refresh_research_if_due(force=True, rebuild_snapshot=False)
+        self._restore_persisted_research_refresh_state()
+        self._refresh_research_if_due(force=False, rebuild_snapshot=False)
         await super().initialize()
         self._refresh_competition_freshness()
         self._persist_production_runtime_state()
+
+    def _restore_persisted_research_refresh_state(self) -> None:
+        """Restore the research cadence across sleeping-process cold starts."""
+        path = Path(self.config.dashboard_db_path)
+        if not path.exists():
+            return
+        try:
+            with storage.connect(path) as conn:
+                persisted = storage.get_runtime_state(
+                    conn,
+                    PRODUCTION_RUNTIME_STATE_KEY,
+                    initialize_schema=False,
+                )
+        except Exception:
+            logger.exception("failed to restore Football production refresh cadence")
+            return
+        if not isinstance(persisted, dict):
+            return
+        research_refresh = persisted.get("research_refresh")
+        if not isinstance(research_refresh, dict):
+            return
+        self._research_refresh_state.update(research_refresh)
+        raw_last_attempt = str(research_refresh.get("last_attempt_at") or "").strip()
+        if not raw_last_attempt:
+            return
+        try:
+            self._last_research_refresh_attempt = parse_iso_datetime(raw_last_attempt)
+        except ValueError:
+            logger.warning(
+                "ignoring invalid persisted Football research refresh timestamp: %s",
+                raw_last_attempt,
+            )
 
     async def shutdown(self) -> None:
         try:
