@@ -215,7 +215,7 @@ def test_probe_reports_safe_reference_candidates_when_exact_resolution_fails() -
     target = target_for_competition("FRA1")
 
     class Provider:
-        def get_historical_league_candidates(self, *, search: str, season: int):
+        def get_historical_league_candidates(self, *, search: str, season: int, country: str | None = None):
             return [
                 {
                     "league": {"id": 61, "name": "Ligue 1 McDonald's", "type": "League"},
