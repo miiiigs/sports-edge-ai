@@ -209,3 +209,44 @@ def test_probe_fails_closed_when_any_sample_lacks_gap_inputs():
     assert result.sampled_gap_ready_count == 2
     assert result.reason == "SAMPLED_GAP_INPUTS_INCOMPLETE"
     assert result.sample_failures[0]["provider_fixture_id"] == "203"
+
+
+def test_probe_reports_safe_reference_candidates_when_exact_resolution_fails() -> None:
+    target = target_for_competition("FRA1")
+
+    class Provider:
+        def get_historical_league_candidates(self, *, search: str, season: int):
+            return [
+                {
+                    "league": {"id": 61, "name": "Ligue 1 McDonald's", "type": "League"},
+                    "country": {"name": "France"},
+                    "seasons": [
+                        {
+                            "year": 2025,
+                            "coverage": {"fixtures": {"statistics_fixtures": True}},
+                        }
+                    ],
+                }
+            ]
+
+        def get_historical_fixtures(self, **kwargs):
+            raise AssertionError("fixture list must not be fetched after unresolved reference")
+
+        def get_historical_fixture_statistics(self, **kwargs):
+            raise AssertionError("statistics must not be fetched after unresolved reference")
+
+    result = run_historical_coverage_probe(Provider(), target=target, season=2025)
+
+    assert result.state == "BLOCKED"
+    assert result.reason == "LEAGUE_REFERENCE_NOT_FOUND"
+    assert result.reference_candidate_count == 1
+    assert result.reference_candidates == (
+        {
+            "league_id": 61,
+            "name": "Ligue 1 McDonald's",
+            "type": "League",
+            "country": "France",
+            "season_present": True,
+            "statistics_fixture_coverage": True,
+        },
+    )
