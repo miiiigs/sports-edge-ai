@@ -342,6 +342,7 @@ def test_auth_error_fails_fast_across_followup_fixture_requests(monkeypatch):
     diagnostics = provider.diagnostics()
     assert diagnostics["state"] == STATE_AUTH_ERROR
     assert diagnostics["last_error"] == "authentication failed (401): INVALID_KEY"
+    assert diagnostics["provider_error_code"] == "INVALID_KEY"
     assert "AUTH_ERROR" in str(exc.value)
     assert calls["count"] == 1
     assert provider.diagnostics()["request_count"] == 1
