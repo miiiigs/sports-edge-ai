@@ -310,7 +310,7 @@ def test_auth_error_state(monkeypatch):
     monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
 
     def handler(request):
-        return httpx.Response(401, request=request)
+        return httpx.Response(401, json={"error_code": "INVALID_KEY"}, request=request)
 
     provider = _make_provider(handler)
     with pytest.raises(MarketProviderError):
@@ -339,7 +339,9 @@ def test_auth_error_fails_fast_across_followup_fixture_requests(monkeypatch):
     with pytest.raises(MarketProviderError) as exc:
         provider.get_market_snapshot("football_data_fixture_2", fixture_context=second_context)
 
-    assert provider.diagnostics()["state"] == STATE_AUTH_ERROR
+    diagnostics = provider.diagnostics()
+    assert diagnostics["state"] == STATE_AUTH_ERROR
+    assert diagnostics["last_error"] == "authentication failed (401): INVALID_KEY"
     assert "AUTH_ERROR" in str(exc.value)
     assert calls["count"] == 1
     assert provider.diagnostics()["request_count"] == 1
