@@ -342,7 +342,15 @@ def test_corners_focus_uses_event_catalog_when_spreads_are_unavailable(monkeypat
             )
         if "/events/" in request.url.path and request.url.path.endswith("/odds"):
             calls["event_odds"] += 1
-            assert request.url.params.get("markets") == "alternate_totals_corners"
+            assert request.url.params.get("markets") == "alternate_spreads,alternate_totals_corners"
+            alternate_spread_market = {
+                "key": "alternate_spreads",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "outcomes": [
+                    {"name": "Manchester United", "price": 1.91, "point": -0.5},
+                    {"name": "Liverpool", "price": 1.95, "point": 0.5},
+                ],
+            }
             corner_market = {
                 "key": "alternate_totals_corners",
                 "last_update": "2026-08-22T12:00:00+00:00",
@@ -363,7 +371,7 @@ def test_corners_focus_uses_event_catalog_when_spreads_are_unavailable(monkeypat
                             "key": "pinnacle",
                             "title": "Pinnacle",
                             "last_update": "2026-08-22T12:00:00+00:00",
-                            "markets": [corner_market],
+                            "markets": [alternate_spread_market, corner_market],
                         }
                     ],
                 },
@@ -375,7 +383,10 @@ def test_corners_focus_uses_event_catalog_when_spreads_are_unavailable(monkeypat
     provider = _make_provider(handler)
     snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
 
-    assert {snapshot.market for snapshot in snapshots} == {"corner_total"}
+    assert {snapshot.market for snapshot in snapshots} == {
+        "asian_handicap",
+        "corner_total",
+    }
     assert calls == {"league": 1, "events": 1, "event_odds": 1}
 
 
