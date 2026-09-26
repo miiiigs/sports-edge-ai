@@ -322,6 +322,18 @@ def _load_alias_catalog(repo_root: Path) -> dict[str, dict[str, str]]:
         "ENG2": {
             normalize_text_key("West Bromwich Albion"): normalize_text_key("West Brom"),
         },
+        "ENG3": {
+            normalize_text_key("Stockport County"): normalize_text_key("Stockport"),
+            normalize_text_key("Peterborough"): normalize_text_key("Peterboro"),
+            normalize_text_key("Peterborough United"): normalize_text_key("Peterboro"),
+        },
+        "ENG4": {
+            normalize_text_key("Bristol Rovers"): normalize_text_key("Bristol Rvs"),
+            normalize_text_key("Swindon Town"): normalize_text_key("Swindon"),
+            normalize_text_key("Accrington ST"): normalize_text_key("Accrington"),
+            normalize_text_key("Accrington Stanley"): normalize_text_key("Accrington"),
+            normalize_text_key("Salford City"): normalize_text_key("Salford"),
+        },
         "ESP1": {
             normalize_text_key("Athletic Club"): normalize_text_key("Ath Bilbao"),
             normalize_text_key("Athletic Bilbao"): normalize_text_key("Ath Bilbao"),
