@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from sports_ai.dashboard.current_market import build_fixture_market_evaluation
+import sports_ai.dashboard.services as services_module
+from sports_ai.dashboard.services import DashboardConfig, DashboardServices
 from sports_ai.dashboard.day12_rolling_xg import (
     DEFAULT_MIN_WINDOW_MATCHES,
     SOURCE_IDENTIFIER,
@@ -21,7 +24,7 @@ from sports_ai.experiments.football_day12_safeguards import (
     DAY12_REVIEW_REQUIRED,
     XG_APPLICABLE_COMPETITIONS,
 )
-from sports_ai.market_data.providers import NormalizedMarketSnapshot
+from sports_ai.market_data.providers import NormalizedMarketSnapshot, NotConfiguredMarketProvider
 
 FIXTURE_ID = "football-data.org:560546"
 MODEL_AS_OF = "2026-05-24T23:59:59+00:00"
@@ -529,3 +532,105 @@ def test_window_too_small_blocks():
     assert row is not None and row["decision"] == "PRELIMINARY_CANDIDATE"
     assert row["day12_state"] == DAY12_BLOCKED_MISSING_XG_DATA
     assert row["paper_entry_eligible"] is False
+
+
+# ---------------------------------------------------------------------------
+# Current-slate readiness audit
+# ---------------------------------------------------------------------------
+
+
+class _AuditFixtureProvider:
+    def provider_name(self):
+        return "audit-fixture-provider"
+
+    def configured(self):
+        return False
+
+
+def _audit_services(tmp_path):
+    research_db = tmp_path / "research.sqlite"
+    research_db.touch()
+    config = DashboardConfig(
+        repo_root=tmp_path,
+        research_db_path=research_db,
+        dashboard_db_path=tmp_path / "dashboard.sqlite",
+        paper_trading_db_path=tmp_path / "paper.sqlite",
+        performance_output_dir=tmp_path / "performance",
+        operational_data_dir=tmp_path,
+        storage_mode="test_tmpdir",
+        persistent_data_dir_configured=False,
+        enable_scheduler=False,
+        current_odds_connected=False,
+        current_xg_connected=False,
+    )
+    fixture_provider = _AuditFixtureProvider()
+    services = DashboardServices(
+        config=config,
+        fixture_provider=fixture_provider,
+        market_provider=NotConfiguredMarketProvider(provider_label="audit-market"),
+        statistics_provider=fixture_provider,
+    )
+    services.snapshot = SimpleNamespace(
+        conversion_coefficients={"ENG1": COEFFS, "ENG2": COEFFS},
+    )
+    return services
+
+
+def _audit_fixture(fixture_id, competition_id):
+    return {
+        "fixture_id": fixture_id,
+        "competition_id": competition_id,
+        "home_team_name": "Home FC",
+        "away_team_name": "Away FC",
+        "kickoff_utc": "2099-09-26T14:00:00+00:00",
+        "status": "PRE_MATCH",
+        "prediction": {
+            "prediction_status": "READY",
+            "team_resolution": {
+                "home": {"canonical_team_name": "Home FC"},
+                "away": {"canonical_team_name": "Away FC"},
+            },
+        },
+    }
+
+
+def test_current_xg_readiness_audit_reports_ready_and_missing_without_enabling_xg(tmp_path, monkeypatch):
+    services = _audit_services(tmp_path)
+
+    def fake_build_fixture_xg_rows(**kwargs):
+        fixture_id = kwargs["fixture_id"]
+        if fixture_id == "ready":
+            rows = {
+                (fixture_id, "HOME"): {"matches_in_window": 5},
+                (fixture_id, "AWAY"): {"matches_in_window": 5},
+            }
+            return rows, {"sufficient_for_day12_rule": True, "reason": None}
+        return {
+            (fixture_id, "HOME"): {"matches_in_window": 4},
+        }, {"sufficient_for_day12_rule": False, "reason": "XG_DATA_NOT_SUPPLIED"}
+
+    monkeypatch.setattr(services_module, "build_fixture_xg_rows", fake_build_fixture_xg_rows)
+    result = services._audit_current_xg_readiness(
+        [_audit_fixture("ready", "ENG1"), _audit_fixture("missing", "ENG2")]
+    )
+
+    assert services.config.current_xg_connected is False
+    assert result["state"] == "PARTIAL"
+    assert result["fixtures_considered"] == 2
+    assert result["fixtures_ready"] == 1
+    assert result["fixtures_missing"] == 1
+    assert result["competition_counts"]["ENG1"] == {"considered": 1, "ready": 1, "missing": 0}
+    assert result["competition_counts"]["ENG2"] == {"considered": 1, "ready": 0, "missing": 1}
+    assert result["missing_examples"][0]["fixture_id"] == "missing"
+    assert result["missing_examples"][0]["home_matches"] == 4
+    assert result["missing_examples"][0]["away_matches"] == 0
+
+
+def test_current_xg_readiness_audit_is_explicit_when_slate_has_no_applicable_fixtures(tmp_path):
+    services = _audit_services(tmp_path)
+    result = services._audit_current_xg_readiness([_audit_fixture("league-one", "ENG3")])
+
+    assert result["state"] == "NO_APPLICABLE_FIXTURES"
+    assert result["fixtures_considered"] == 0
+    assert result["fixtures_ready"] == 0
+    assert result["fixtures_missing"] == 0
