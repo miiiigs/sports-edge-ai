@@ -97,6 +97,36 @@ def test_api_football_history_fails_closed_on_missing_gap_statistics():
     assert coverage.missing_required_fields["away_corners"] == 1
 
 
+def test_completed_fixture_rejected_by_normalizer_reduces_coverage():
+    invalid_completed = {
+        **FIXTURE,
+        "fixture": {**FIXTURE["fixture"], "id": 54321},
+        "goals": {"home": None, "away": None},
+    }
+    good_row = normalize_api_football_historical_event(
+        FIXTURE,
+        [
+            _team_stats(10, "Home FC", shots=14, sot=6, corners=7),
+            _team_stats(20, "Away FC", shots=9, sot=3, corners=2),
+        ],
+        competition_id="FRA1",
+        competition_name="Ligue 1",
+        division_code="F1",
+        season_code="2627",
+    )
+    assert good_row is not None
+
+    coverage = summarize_api_football_history_coverage(
+        [FIXTURE, invalid_completed],
+        [good_row],
+    )
+    assert coverage.completed_fixture_count == 2
+    assert coverage.normalized_event_count == 1
+    assert coverage.gap_ready_count == 1
+    assert coverage.gap_ready_fraction == 0.5
+    assert coverage.rejected_fixture_ids == ("54321",)
+
+
 def test_api_football_history_rejects_nonfinished_fixture():
     fixture = {
         **FIXTURE,
