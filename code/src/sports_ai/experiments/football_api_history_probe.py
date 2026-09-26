@@ -48,6 +48,8 @@ class HistoricalProbeResult:
     projected_backfill_requests: int | None
     bounded_probe_requests: int
     sample_failures: tuple[dict[str, Any], ...]
+    reference_candidate_count: int
+    reference_candidates: tuple[dict[str, Any], ...]
     reason: str | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -138,6 +140,29 @@ def _matching_season(candidate: dict[str, Any], season: int) -> dict[str, Any] |
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _safe_reference_candidates(candidates: Sequence[dict[str, Any]], season: int) -> tuple[dict[str, Any], ...]:
+    safe: list[dict[str, Any]] = []
+    for candidate in candidates[:10]:
+        league = candidate.get("league") or {}
+        country = candidate.get("country") or {}
+        season_row = _matching_season(candidate, season)
+        safe.append(
+            {
+                "league_id": league.get("id"),
+                "name": str(league.get("name") or "")[:100],
+                "type": str(league.get("type") or "")[:40],
+                "country": str(country.get("name") or "")[:80],
+                "season_present": season_row is not None,
+                "statistics_fixture_coverage": None
+                if season_row is None
+                else bool(((season_row.get("coverage") or {}).get("fixtures") or {}).get("statistics_fixtures"))
+                if ((season_row.get("coverage") or {}).get("fixtures") or {}).get("statistics_fixtures") is not None
+                else None,
+            }
+        )
+    return tuple(safe)
 
 
 def resolve_historical_league_candidate(
@@ -246,6 +271,8 @@ def run_historical_coverage_probe(
             projected_backfill_requests=None,
             bounded_probe_requests=1,
             sample_failures=(),
+            reference_candidate_count=len(candidates),
+            reference_candidates=_safe_reference_candidates(candidates, season),
             reason=resolution_error,
         )
 
@@ -271,6 +298,8 @@ def run_historical_coverage_probe(
             projected_backfill_requests=None,
             bounded_probe_requests=1,
             sample_failures=(),
+            reference_candidate_count=len(candidates),
+            reference_candidates=_safe_reference_candidates(candidates, season),
             reason="LEAGUE_ID_INVALID",
         )
 
@@ -291,6 +320,8 @@ def run_historical_coverage_probe(
             projected_backfill_requests=None,
             bounded_probe_requests=1,
             sample_failures=(),
+            reference_candidate_count=len(candidates),
+            reference_candidates=_safe_reference_candidates(candidates, season),
             reason="FIXTURE_STATISTICS_COVERAGE_UNAVAILABLE",
         )
 
@@ -312,6 +343,8 @@ def run_historical_coverage_probe(
             projected_backfill_requests=None,
             bounded_probe_requests=2,
             sample_failures=(),
+            reference_candidate_count=len(candidates),
+            reference_candidates=_safe_reference_candidates(candidates, season),
             reason="NO_COMPLETED_FIXTURES_OR_LOW_PRIORITY_REQUEST_BLOCKED",
         )
 
@@ -367,5 +400,7 @@ def run_historical_coverage_probe(
         projected_backfill_requests=1 + estimate.total_requests,
         bounded_probe_requests=2 + sampled_count,
         sample_failures=tuple(failures),
+        reference_candidate_count=len(candidates),
+        reference_candidates=_safe_reference_candidates(candidates, season),
         reason=None if state == "READY_TO_BACKFILL" else "SAMPLED_GAP_INPUTS_INCOMPLETE",
     )
