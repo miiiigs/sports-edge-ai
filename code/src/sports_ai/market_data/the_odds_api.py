@@ -283,6 +283,25 @@ class TheOddsApiProvider:
             return STATE_QUOTA_GUARD
         return STATE_CONNECTED
 
+    @staticmethod
+    def _safe_provider_error_code(response: httpx.Response) -> str | None:
+        """Extract only the provider's non-secret machine error identifier."""
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        raw = payload.get("error_code") or payload.get("code")
+        if not isinstance(raw, str):
+            return None
+        code = raw.strip().upper()
+        if not code or len(code) > 80:
+            return None
+        if not all(char.isalnum() or char in {"_", "-"} for char in code):
+            return None
+        return code
+
     def _request_json(
         self,
         *,
@@ -310,8 +329,12 @@ class TheOddsApiProvider:
             self._capture_quota(response.headers)
             status = response.status_code
             if status == 401:
-                self._set_state(STATE_AUTH_ERROR, "authentication failed (401)")
-                raise MarketProviderError(f"{THE_ODDS_API_PROVIDER} authentication failed (401)")
+                provider_code = self._safe_provider_error_code(response)
+                detail = "authentication failed (401)"
+                if provider_code:
+                    detail = f"{detail}: {provider_code}"
+                self._set_state(STATE_AUTH_ERROR, detail)
+                raise MarketProviderError(f"{THE_ODDS_API_PROVIDER} {detail}")
             if status == 429:
                 self._set_state(STATE_RATE_LIMITED, "rate limited (429)")
                 if attempt < self._config.max_retries:
