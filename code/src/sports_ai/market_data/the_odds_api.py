@@ -46,6 +46,7 @@ from .providers import MarketProviderError, NormalizedMarketSnapshot
 THE_ODDS_API_PROVIDER = "the-odds-api"
 THE_ODDS_API_INGESTION_VERSION = "the_odds_api_current_market_provider_v1"
 THE_ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
+THE_ODDS_API_EVENTS_CACHE_TTL_SECONDS = 600
 
 THE_ODDS_MARKET_H2H = "h2h"
 THE_ODDS_MARKET_SPREADS = "spreads"
@@ -441,6 +442,25 @@ class TheOddsApiProvider:
             self._cache[cache_key] = (now, payload)
         with self._stats_lock:
             self._stats["events_fetched"] = max(int(self._stats["events_fetched"]), len(payload))
+        return payload
+
+    def _sport_events_payload(self, sport_key: str) -> list[dict[str, Any]]:
+        """Quota-free event catalog used only when odds rows cannot identify a focused fixture."""
+        cache_key = f"events:{sport_key}"
+        now = monotonic()
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+            if cached is not None and now - cached[0] < THE_ODDS_API_EVENTS_CACHE_TTL_SECONDS:
+                return cached[1]
+
+        payload = self._request_json(
+            endpoint=f"sports/{sport_key}/events",
+            params={},
+        )
+        if not isinstance(payload, list):
+            payload = []
+        with self._cache_lock:
+            self._cache[cache_key] = (now, payload)
         return payload
 
     def _match_events(
@@ -846,19 +866,33 @@ class TheOddsApiProvider:
         competition_id = str(fixture_context.get("competition_id") or "")
         sport_key = self._sport_key(competition_id)
         events = self._sport_odds_payload(sport_key)
-        if not events:
-            self._set_state(STATE_NO_CURRENT_EVENTS, None)
-            return []
-        matches = self._match_events(fixture_context, events)
-        if len(matches) == 0:
-            with self._stats_lock:
-                self._stats["unmatched"] = int(self._stats["unmatched"]) + 1
-            raise MarketProviderError("MARKET_FIXTURE_UNRESOLVED")
+        matches = self._match_events(fixture_context, events) if events else []
         if len(matches) > 1:
             with self._stats_lock:
                 self._stats["ambiguous"] = int(self._stats["ambiguous"]) + 1
             raise MarketProviderError("MARKET_FIXTURE_AMBIGUOUS")
-        event = matches[0]
+
+        event = matches[0] if len(matches) == 1 else None
+        # Corners are an event-level market. Do not make corner discovery
+        # depend on a featured spread being available: The Odds API /events
+        # catalog is quota-free and gives us the canonical event id.
+        if event is None and MARKET_CORNER_TOTAL in self._live_market_focus():
+            catalog_events = self._sport_events_payload(sport_key)
+            catalog_matches = self._match_events(fixture_context, catalog_events)
+            if len(catalog_matches) > 1:
+                with self._stats_lock:
+                    self._stats["ambiguous"] = int(self._stats["ambiguous"]) + 1
+                raise MarketProviderError("MARKET_FIXTURE_AMBIGUOUS")
+            if len(catalog_matches) == 1:
+                event = catalog_matches[0]
+
+        if event is None:
+            with self._stats_lock:
+                self._stats["unmatched"] = int(self._stats["unmatched"]) + 1
+            if not events:
+                self._set_state(STATE_NO_CURRENT_EVENTS, None)
+            raise MarketProviderError("MARKET_FIXTURE_UNRESOLVED")
+
         with self._stats_lock:
             self._stats["matched"] = int(self._stats["matched"]) + 1
         snapshots = self._snapshots_from_event(
