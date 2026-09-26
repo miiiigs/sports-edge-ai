@@ -3760,7 +3760,7 @@ class DashboardServices:
         logger.info(
             "football market sync: mode=%s runtime_state=%s provider_state=%s provider_requests=%s "
             "additional_event_requests=%s additional_cap=%s additional_truncated=%s quota_remaining=%s "
-            "fixtures=%s matched=%s snapshots=%s candidates=%s paper_entries=%s",
+            "quota_credits_used=%s fixtures=%s matched=%s snapshots=%s candidates=%s paper_entries=%s",
             mode,
             self._market_runtime_state.get("state"),
             diagnostics.get("state"),
@@ -3769,6 +3769,7 @@ class DashboardServices:
             diagnostics.get("additional_event_request_cap"),
             diagnostics.get("additional_markets_truncated"),
             quota.get("remaining"),
+            quota.get("usage_credits_this_process"),
             self._market_runtime_state.get("fixtures_considered"),
             self._market_runtime_state.get("fixtures_matched"),
             self._market_runtime_state.get("market_snapshots"),
