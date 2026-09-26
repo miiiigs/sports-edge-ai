@@ -164,8 +164,9 @@ class TheOddsApiProviderConfig:
     max_retries: int = 2
     retry_backoff_seconds: float = 1.0
     # Legacy field name retained for compatibility with existing config/tests.
-    # This caps event-level add-on market requests per league-wide sync window.
-    max_btts_event_requests: int = 10
+    # This is a slate-wide cap for event-level add-on markets (BTTS/corners).
+    # Featured h2h/spreads/totals stay league-wide and are unaffected.
+    max_btts_event_requests: int = 5
 
 
 class TheOddsApiProvider:
@@ -208,6 +209,10 @@ class TheOddsApiProvider:
         self._last_attempt_at: str | None = None
         self._last_success_at: str | None = None
         self._request_count = 0
+        self._additional_event_requests_this_window = 0
+
+    def begin_sync_window(self) -> None:
+        """Reset the slate-wide add-on request allowance for one market sync."""
         self._additional_event_requests_this_window = 0
 
     def provider_name(self) -> str:
@@ -347,11 +352,6 @@ class TheOddsApiProvider:
             cached = self._cache.get(cache_key)
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
                 return cached[1]
-
-        # A fresh league-wide fetch starts a new sync window; reset the
-        # event-level add-on market budget so the fan-out cap is per-window,
-        # not cumulative.
-        self._additional_event_requests_this_window = 0
 
         payload = self._request_json(
             endpoint=f"sports/{sport_key}/odds",
@@ -852,6 +852,7 @@ class TheOddsApiProvider:
             "btts_event_requests": int(stats.get("btts_event_requests", 0)),
             "btts_truncated": int(stats.get("btts_truncated", 0)),
             "additional_event_requests": int(stats.get("additional_event_requests", 0)),
+            "additional_event_request_cap": int(self._config.max_btts_event_requests),
             "additional_markets_truncated": int(stats.get("additional_markets_truncated", 0)),
             "bookmakers": dict(stats["bookmakers"]),
             "competition_mappings": {
