@@ -207,7 +207,7 @@ class ProductionDashboardServices(DashboardServices):
         self._persist_production_runtime_state()
 
     def _run_history_probe_once(self) -> None:
-        raw = self._history_probe_once_spec
+        raw = str(getattr(self, "_history_probe_once_spec", "") or "").strip()
         if not raw:
             return
         token_id = canonical_hash({"history_probe_once": raw})[:12]
