@@ -360,6 +360,16 @@ class TheOddsApiProvider:
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
                 return cached[1]
 
+        if self._state in {
+            STATE_AUTH_ERROR,
+            STATE_RATE_LIMITED,
+            STATE_QUOTA_GUARD,
+            STATE_QUOTA_EXHAUSTED,
+        }:
+            raise MarketProviderError(
+                f"{THE_ODDS_API_PROVIDER} request blocked by provider state {self._state}"
+            )
+
         payload = self._request_json(
             endpoint=f"sports/{sport_key}/odds",
             params={
