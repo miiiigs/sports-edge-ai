@@ -935,10 +935,23 @@ class ApiFootballFixtureProvider(FixtureProvider):
             self._statistics_cache[cache_key] = (monotonic(), list(rows))
         return list(rows)
 
-    def _request_league_reference_rows(self, *, search: str, season: int) -> list[dict[str, Any]]:
-        params = {"search": str(search).strip(), "season": int(season)}
-        if not params["search"]:
-            raise FixtureProviderError("history coverage search must not be empty")
+    def _request_league_reference_rows(
+        self,
+        *,
+        search: str,
+        season: int,
+        country: str | None = None,
+    ) -> list[dict[str, Any]]:
+        country_value = str(country or "").strip()
+        search_value = str(search).strip()
+        if country_value:
+            # API-Football documents country+season as the deterministic catalog
+            # lookup for leagues. We still apply exact name/type matching locally.
+            params = {"country": country_value, "season": int(season)}
+        else:
+            params = {"search": search_value, "season": int(season)}
+            if not search_value:
+                raise FixtureProviderError("history coverage search must not be empty")
 
         if self._budget is not None:
             decision = self._budget.issue(
@@ -1009,9 +1022,15 @@ class ApiFootballFixtureProvider(FixtureProvider):
             )
         return list(rows)
 
-    def get_historical_league_candidates(self, *, search: str, season: int) -> list[dict[str, Any]]:
+    def get_historical_league_candidates(
+        self,
+        *,
+        search: str,
+        season: int,
+        country: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Low-priority reference lookup for an offline historical coverage probe."""
-        return self._request_league_reference_rows(search=search, season=season)
+        return self._request_league_reference_rows(search=search, season=season, country=country)
 
     def get_historical_fixtures(self, *, league_id: int, season: int) -> list[dict[str, Any]]:
         """Low-priority raw fixture list for one league-season backfill probe."""
