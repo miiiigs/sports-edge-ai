@@ -30,6 +30,7 @@ class HistoricalProbeTarget:
     country: str
     competition_type: str
     accepted_provider_names: tuple[str, ...]
+    provider_league_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class HistoricalProbeResult:
 
 class HistoricalProbeProvider(Protocol):
     def get_historical_league_candidates(self, *, search: str, season: int) -> list[dict[str, Any]]: ...
+    def get_historical_league_by_id(self, *, league_id: int, season: int) -> list[dict[str, Any]]: ...
 
     def get_historical_fixtures(self, *, league_id: int, season: int) -> list[dict[str, Any]]: ...
 
@@ -64,10 +66,10 @@ class HistoricalProbeProvider(Protocol):
 
 MISSING_SCOPE_TARGETS: tuple[HistoricalProbeTarget, ...] = (
     HistoricalProbeTarget(
-        "FRA1", "Ligue 1", "F1", "Ligue 1", "France", "League", ("Ligue 1",)
+        "FRA1", "Ligue 1", "F1", "Ligue 1", "France", "League", ("Ligue 1",), 61
     ),
     HistoricalProbeTarget(
-        "GER1", "Bundesliga", "D1", "Bundesliga", "Germany", "League", ("Bundesliga",)
+        "GER1", "Bundesliga", "D1", "Bundesliga", "Germany", "League", ("Bundesliga",), 78
     ),
     HistoricalProbeTarget(
         "ITA1", "Serie A", "I1", "Serie A", "Italy", "League", ("Serie A",)
@@ -221,10 +223,16 @@ def run_historical_coverage_probe(
     season: int,
     sample_size: int = 3,
 ) -> HistoricalProbeResult:
-    candidates = provider.get_historical_league_candidates(
-        search=target.search,
-        season=int(season),
-    )
+    if target.provider_league_id is not None:
+        candidates = provider.get_historical_league_by_id(
+            league_id=int(target.provider_league_id),
+            season=int(season),
+        )
+    else:
+        candidates = provider.get_historical_league_candidates(
+            search=target.search,
+            season=int(season),
+        )
     candidate, resolution_error = resolve_historical_league_candidate(
         candidates,
         target=target,
