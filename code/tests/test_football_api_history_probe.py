@@ -15,6 +15,7 @@ TARGET = HistoricalProbeTarget(
     country="France",
     competition_type="League",
     accepted_provider_names=("Ligue 1",),
+    provider_league_id=61,
 )
 
 
@@ -79,7 +80,11 @@ class _FakeProvider:
         self.calls = []
 
     def get_historical_league_candidates(self, *, search, season):
-        self.calls.append(("league", search, season))
+        self.calls.append(("league_search", search, season))
+        return list(self.candidates)
+
+    def get_historical_league_by_id(self, *, league_id, season):
+        self.calls.append(("league_id", league_id, season))
         return list(self.candidates)
 
     def get_historical_fixtures(self, *, league_id, season):
@@ -131,7 +136,7 @@ def test_probe_blocks_before_fixture_call_when_statistics_coverage_is_unavailabl
     assert result.reason == "FIXTURE_STATISTICS_COVERAGE_UNAVAILABLE"
     assert result.statistics_fixture_coverage is False
     assert result.bounded_probe_requests == 1
-    assert provider.calls == [("league", "Ligue 1", 2025)]
+    assert provider.calls == [("league_id", 61, 2025)]
 
 
 def test_probe_samples_first_middle_last_and_projects_full_backfill_cost():
