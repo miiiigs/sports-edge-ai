@@ -4381,6 +4381,7 @@ class DashboardServices:
                 and parse_iso_datetime(str(row["kickoff"])) <= now_utc
             )
 
+        market_state = self._market_provider_state()
         self._persist_market_runtime_checkpoint(
             market_state=market_state,
             evaluations=evaluations,
