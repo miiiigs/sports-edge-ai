@@ -265,6 +265,45 @@ def test_one_region_configuration(monkeypatch):
     assert captured["oddsFormat"] == "decimal"
 
 
+def test_ah_corners_focus_requests_only_spreads_and_corners(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "SPORTS_AI_FOOTBALL_LIVE_MARKET_FOCUS",
+        "asian_handicap,corner_total",
+    )
+    captured = {"league_markets": None, "event_markets": None}
+
+    def handler(request):
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            captured["league_markets"] = request.url.params.get("markets")
+            return httpx.Response(
+                200,
+                json=[EVENT_WITH_TOTALS_AND_SPREADS],
+                headers=QUOTA_HEADERS,
+                request=request,
+            )
+        if "/events/" in request.url.path and request.url.path.endswith("/odds"):
+            captured["event_markets"] = request.url.params.get("markets")
+            return httpx.Response(
+                200,
+                json={"id": "epl_event_123", "bookmakers": []},
+                headers=QUOTA_HEADERS,
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler)
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+
+    assert captured["league_markets"] == "spreads"
+    assert captured["event_markets"] == "alternate_totals_corners"
+    assert {snapshot.market for snapshot in snapshots} == {"asian_handicap"}
+    diagnostics = provider.diagnostics()
+    assert diagnostics["live_market_focus"] == ["asian_handicap", "corner_total"]
+    assert diagnostics["league_markets_requested"] == ["spreads"]
+    assert diagnostics["event_markets_requested"] == ["alternate_totals_corners"]
+
+
 def test_default_region_is_uk(monkeypatch):
     monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
     monkeypatch.delenv("SPORTS_AI_ODDS_REGION", raising=False)
