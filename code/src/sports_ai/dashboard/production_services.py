@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ..football_market_focus import configured_live_market_focus
 from ..experiments.football_api_history_probe import (
     run_historical_coverage_probe,
     target_for_competition,
@@ -205,8 +206,39 @@ class ProductionDashboardServices(DashboardServices):
         await super().initialize()
         self._refresh_competition_freshness()
         self._run_history_probe_once()
+        self._log_live_market_evidence()
         self._log_production_freshness()
         self._persist_production_runtime_state()
+
+    def _log_live_market_evidence(self) -> None:
+        focus = configured_live_market_focus()
+        try:
+            _rows, paper_status = self._paper_positions()
+            performance = paper_status.get("performance") or {}
+            by_market = performance.get("by_market") or {}
+        except Exception as exc:
+            logger.warning(
+                "football live market evidence unavailable: focus=%s error=%s",
+                list(focus),
+                type(exc).__name__,
+            )
+            return
+
+        evidence: list[str] = []
+        for market in focus:
+            row = by_market.get(market) or {}
+            evidence.append(
+                f"{market}:positions={int(row.get('positions') or 0)}"
+                f",settled={int(row.get('settled_positions') or 0)}"
+                f",net_units={row.get('net_units')}"
+                f",roi={row.get('roi')}"
+                f",strike_rate={row.get('strike_rate')}"
+            )
+        logger.info(
+            "football live market evidence: focus=%s %s",
+            list(focus),
+            " | ".join(evidence),
+        )
 
     def _run_history_probe_once(self) -> None:
         raw = str(getattr(self, "_history_probe_once_spec", "") or "").strip()
@@ -864,6 +896,7 @@ class ProductionDashboardServices(DashboardServices):
             },
             "candidate_evidence": evidence_summary,
             "history_probe_once": dict(self._history_probe_state),
+            "live_market_focus": list(configured_live_market_focus()),
             "updated_at": utc_now_iso(),
         }
         try:
