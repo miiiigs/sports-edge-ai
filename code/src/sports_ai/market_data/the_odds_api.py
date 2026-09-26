@@ -192,6 +192,7 @@ class TheOddsApiProvider:
             "last_request_cost": None,
         }
         self._quota_lock = Lock()
+        self._quota_window_start_used: int | None = None
         self._stats: dict[str, Any] = {
             "events_fetched": 0,
             "matched": 0,
@@ -259,6 +260,12 @@ class TheOddsApiProvider:
         used = _int("x-requests-used")
         last = _int("x-requests-last")
         with self._quota_lock:
+            if (
+                self._quota_window_start_used is None
+                and used is not None
+                and last is not None
+            ):
+                self._quota_window_start_used = max(0, used - last)
             if remaining is not None:
                 self._quota["remaining"] = remaining
             if used is not None:
@@ -827,6 +834,14 @@ class TheOddsApiProvider:
             stats = {key: value for key, value in self._stats.items()}
         with self._quota_lock:
             quota = dict(self._quota)
+            current_used = quota.get("used")
+            if self._quota_window_start_used is not None and current_used is not None:
+                quota["usage_credits_this_process"] = max(
+                    0,
+                    int(current_used) - int(self._quota_window_start_used),
+                )
+            else:
+                quota["usage_credits_this_process"] = None
         state = STATE_NOT_CONFIGURED
         if self.configured():
             state = STATE_IDLE if self._state == STATE_NOT_CONFIGURED else self._state
