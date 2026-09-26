@@ -214,3 +214,28 @@ def test_probe_fails_closed_when_any_sample_lacks_gap_inputs():
     assert result.sampled_gap_ready_count == 2
     assert result.reason == "SAMPLED_GAP_INPUTS_INCOMPLETE"
     assert result.sample_failures[0]["provider_fixture_id"] == "203"
+
+
+def test_failed_reference_keeps_only_safe_candidate_descriptors():
+    candidate = _candidate(name="Ligue One", country="France")
+    provider = _FakeProvider(candidates=[candidate], fixtures=[])
+
+    result = run_historical_coverage_probe(
+        provider,
+        target=TARGET,
+        season=2025,
+    )
+
+    assert result.state == "BLOCKED"
+    assert result.reason == "LEAGUE_REFERENCE_NOT_FOUND"
+    assert result.reference_candidate_count == 1
+    assert result.reference_candidates == (
+        {
+            "league_id": 61,
+            "name": "Ligue One",
+            "type": "League",
+            "country": "France",
+            "season_present": True,
+            "statistics_fixture_coverage": True,
+        },
+    )
