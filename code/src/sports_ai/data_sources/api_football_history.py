@@ -64,7 +64,7 @@ class ApiFootballBackfillEstimate:
 
 
 def _int_or_none(value: Any) -> int | None:
-    if value in {None, ""}:
+    if value is None or value == "":
         return None
     try:
         return int(float(value))
@@ -235,12 +235,13 @@ def summarize_api_football_history_coverage(
             gap_ready += 1
 
     normalized_count = len(normalized_rows)
+    completed_count = len(completed_ids)
     return ApiFootballHistoryCoverage(
         fixture_count=len(fixtures),
-        completed_fixture_count=len(completed_ids),
+        completed_fixture_count=completed_count,
         normalized_event_count=normalized_count,
         gap_ready_count=gap_ready,
-        gap_ready_fraction=0.0 if normalized_count == 0 else round(gap_ready / normalized_count, 4),
+        gap_ready_fraction=0.0 if completed_count == 0 else round(gap_ready / completed_count, 4),
         missing_required_fields=missing,
         rejected_fixture_ids=tuple(sorted(completed_ids - normalized_fixture_ids)),
     )
