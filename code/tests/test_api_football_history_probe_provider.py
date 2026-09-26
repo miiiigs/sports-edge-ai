@@ -63,3 +63,17 @@ def test_historical_league_reference_uses_low_priority_and_daily_cache():
     assert call["priority"] == PRIORITY_LOW
     assert call["wait_for_rate_slot"] is True
     assert call["ttl_seconds"] == 24 * 60 * 60
+
+
+def test_historical_league_reference_by_id_uses_low_priority_and_daily_cache():
+    provider, budget = _provider_with_budget()
+
+    assert provider.get_historical_league_by_id(league_id=61, season=2025) == []
+
+    assert len(budget.calls) == 1
+    call = budget.calls[0]
+    assert call["endpoint"] == "leagues"
+    assert call["params"] == {"id": 61, "season": 2025}
+    assert call["priority"] == PRIORITY_LOW
+    assert call["wait_for_rate_slot"] is True
+    assert call["ttl_seconds"] == 24 * 60 * 60
