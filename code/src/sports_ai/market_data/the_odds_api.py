@@ -332,6 +332,10 @@ class TheOddsApiProvider:
             if status == 401:
                 provider_code = self._safe_provider_error_code(response)
                 self._last_provider_error_code = provider_code
+                if provider_code == "OUT_OF_USAGE_CREDITS":
+                    detail = "usage credits exhausted (401): OUT_OF_USAGE_CREDITS"
+                    self._set_state(STATE_QUOTA_EXHAUSTED, detail)
+                    raise MarketProviderError(f"{THE_ODDS_API_PROVIDER} {detail}")
                 detail = "authentication failed (401)"
                 if provider_code:
                     detail = f"{detail}: {provider_code}"
