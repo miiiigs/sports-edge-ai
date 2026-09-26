@@ -207,6 +207,7 @@ class TheOddsApiProvider:
         self._stats_lock = Lock()
         self._state = STATE_NOT_CONFIGURED
         self._last_error: str | None = None
+        self._last_provider_error_code: str | None = None
         self._last_attempt_at: str | None = None
         self._last_success_at: str | None = None
         self._request_count = 0
@@ -283,6 +284,25 @@ class TheOddsApiProvider:
             return STATE_QUOTA_GUARD
         return STATE_CONNECTED
 
+    @staticmethod
+    def _safe_provider_error_code(response: httpx.Response) -> str | None:
+        """Extract only the provider's non-secret machine error identifier."""
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        raw = payload.get("error_code") or payload.get("code")
+        if not isinstance(raw, str):
+            return None
+        code = raw.strip().upper()
+        if not code or len(code) > 80:
+            return None
+        if not all(char.isalnum() or char in {"_", "-"} for char in code):
+            return None
+        return code
+
     def _request_json(
         self,
         *,
@@ -310,8 +330,13 @@ class TheOddsApiProvider:
             self._capture_quota(response.headers)
             status = response.status_code
             if status == 401:
-                self._set_state(STATE_AUTH_ERROR, "authentication failed (401)")
-                raise MarketProviderError(f"{THE_ODDS_API_PROVIDER} authentication failed (401)")
+                provider_code = self._safe_provider_error_code(response)
+                self._last_provider_error_code = provider_code
+                detail = "authentication failed (401)"
+                if provider_code:
+                    detail = f"{detail}: {provider_code}"
+                self._set_state(STATE_AUTH_ERROR, detail)
+                raise MarketProviderError(f"{THE_ODDS_API_PROVIDER} {detail}")
             if status == 429:
                 self._set_state(STATE_RATE_LIMITED, "rate limited (429)")
                 if attempt < self._config.max_retries:
@@ -359,6 +384,16 @@ class TheOddsApiProvider:
             cached = self._cache.get(cache_key)
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
                 return cached[1]
+
+        if self._state in {
+            STATE_AUTH_ERROR,
+            STATE_RATE_LIMITED,
+            STATE_QUOTA_GUARD,
+            STATE_QUOTA_EXHAUSTED,
+        }:
+            raise MarketProviderError(
+                f"{THE_ODDS_API_PROVIDER} request blocked by provider state {self._state}"
+            )
 
         payload = self._request_json(
             endpoint=f"sports/{sport_key}/odds",
@@ -859,6 +894,7 @@ class TheOddsApiProvider:
             "last_attempt_at": self._last_attempt_at,
             "last_success_at": self._last_success_at,
             "last_error": self._last_error,
+            "provider_error_code": self._last_provider_error_code,
             "request_count": self._request_count,
             "events_fetched": stats["events_fetched"],
             "fixtures_matched": stats["matched"],
