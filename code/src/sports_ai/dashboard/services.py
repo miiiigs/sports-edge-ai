@@ -93,11 +93,11 @@ logger = logging.getLogger(__name__)
 PAPER_ACTIVE_STATES = {"PENDING", "OPEN", "UNSETTLED"}
 PAPER_FINAL_STATES = {"WON", "LOST", "PUSH", "HALF_WIN", "HALF_LOSS", "VOID"}
 PAPER_MARKET_DISPLAY_ORDER = {
-    "asian_handicap": 0,
-    "corner_total": 1,
+    "1x2": 0,
+    "btts": 1,
     "goals_total": 2,
-    "btts": 3,
-    "1x2": 4,
+    "corner_total": 3,
+    "asian_handicap": 4,
 }
 CLIENT_PRIMARY_MARKETS = ("1x2", "btts", "goals_total", "asian_handicap", "corner_total")
 CLIENT_PRIMARY_LEAGUES = ("ENG1", "ENG2", "ENG3", "ENG4", "ESP1")
@@ -115,11 +115,11 @@ TODAY_PRIMARY_KPI_LABELS = (
     "ROI",
 )
 CLIENT_MATCH_CARD_MARKETS = (
-    ("asian_handicap", "ASIAN HANDICAP"),
-    ("corner_total", "CORNERS"),
-    ("goals_total", "GOALS"),
-    ("btts", "BTTS"),
     ("1x2", "MATCH WINNER / 1X2"),
+    ("btts", "BTTS"),
+    ("goals_total", "GOALS"),
+    ("corner_total", "CORNERS"),
+    ("asian_handicap", "ASIAN HANDICAP"),
 )
 CLIENT_MATCH_CARD_MARKET_ORDER = {
     market_family: index
