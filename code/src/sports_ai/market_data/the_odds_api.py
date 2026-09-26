@@ -207,6 +207,7 @@ class TheOddsApiProvider:
         self._stats_lock = Lock()
         self._state = STATE_NOT_CONFIGURED
         self._last_error: str | None = None
+        self._last_provider_error_code: str | None = None
         self._last_attempt_at: str | None = None
         self._last_success_at: str | None = None
         self._request_count = 0
@@ -330,6 +331,7 @@ class TheOddsApiProvider:
             status = response.status_code
             if status == 401:
                 provider_code = self._safe_provider_error_code(response)
+                self._last_provider_error_code = provider_code
                 detail = "authentication failed (401)"
                 if provider_code:
                     detail = f"{detail}: {provider_code}"
@@ -892,6 +894,7 @@ class TheOddsApiProvider:
             "last_attempt_at": self._last_attempt_at,
             "last_success_at": self._last_success_at,
             "last_error": self._last_error,
+            "provider_error_code": self._last_provider_error_code,
             "request_count": self._request_count,
             "events_fetched": stats["events_fetched"],
             "fixtures_matched": stats["matched"],
