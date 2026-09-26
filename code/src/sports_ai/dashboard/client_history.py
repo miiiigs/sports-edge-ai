@@ -29,11 +29,11 @@ from .portfolio_selection import (
 FINAL_STATES = {"WON", "LOST", "PUSH", "HALF_WIN", "HALF_LOSS", "VOID"}
 ACTIVE_STATES = {"PENDING", "OPEN", "UNSETTLED"}
 MARKET_ORDER = {
-    "1x2": 0,
-    "btts": 1,
+    "asian_handicap": 0,
+    "corner_total": 1,
     "goals_total": 2,
-    "corner_total": 3,
-    "asian_handicap": 4,
+    "btts": 3,
+    "1x2": 4,
 }
 MARKET_LABELS = {
     "1x2": "1X2",
