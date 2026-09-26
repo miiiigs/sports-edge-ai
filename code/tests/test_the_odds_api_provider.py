@@ -318,6 +318,44 @@ def test_auth_error_state(monkeypatch):
     assert provider.diagnostics()["state"] == STATE_AUTH_ERROR
 
 
+def test_out_of_usage_credits_is_quota_exhausted_and_fails_fast(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "valid-but-exhausted-key")
+    calls = {"count": 0}
+
+    def handler(request):
+        calls["count"] += 1
+        return httpx.Response(
+            401,
+            json={"error_code": "OUT_OF_USAGE_CREDITS"},
+            headers={"x-requests-remaining": "0", "x-requests-used": "500", "x-requests-last": "0"},
+            request=request,
+        )
+
+    provider = _make_provider(handler)
+    with pytest.raises(MarketProviderError):
+        provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+
+    with pytest.raises(MarketProviderError) as exc:
+        provider.get_market_snapshot(
+            "football_data_fixture_2",
+            fixture_context=dict(
+                FIXTURE_CONTEXT,
+                fixture_id="football_data_fixture_2",
+                home_team_name="Spurs",
+                away_team_name="West Ham",
+            ),
+        )
+
+    diagnostics = provider.diagnostics()
+    assert diagnostics["state"] == STATE_QUOTA_EXHAUSTED
+    assert diagnostics["provider_error_code"] == "OUT_OF_USAGE_CREDITS"
+    assert diagnostics["last_error"] == "usage credits exhausted (401): OUT_OF_USAGE_CREDITS"
+    assert diagnostics["quota"]["remaining"] == 0
+    assert calls["count"] == 1
+    assert diagnostics["request_count"] == 1
+    assert "QUOTA_EXHAUSTED" in str(exc.value)
+
+
 def test_auth_error_fails_fast_across_followup_fixture_requests(monkeypatch):
     monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "bad-key")
     calls = {"count": 0}
