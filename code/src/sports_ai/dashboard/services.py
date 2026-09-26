@@ -62,6 +62,7 @@ from .portfolio_selection import (
 )
 from .runtime_paths import ensure_operational_data_dir, resolve_dashboard_operational_paths
 from .snapshot_service import CurrentFootballModelSnapshot, CurrentSnapshotError, build_current_football_model_snapshot
+from ..experiments.football_day12_safeguards import XG_APPLICABLE_COMPETITIONS
 
 DEFAULT_UPCOMING_HORIZON_DAYS = 5
 DEFAULT_ENABLE_AUTOMATED_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_AUTOMATED_SYNC"
@@ -588,6 +589,16 @@ class DashboardServices:
                 "model_history_missing_examples": [],
             },
             "last_counts": self._empty_counts(),
+            "xg_readiness": {
+                "state": "NOT_AUDITED",
+                "audited_at": None,
+                "fixtures_considered": 0,
+                "fixtures_ready": 0,
+                "fixtures_missing": 0,
+                "competition_counts": {},
+                "missing_examples": [],
+                "reason": None,
+            },
         }
         self._prediction_state: dict[str, Any] = {
             "state": "BLOCKED",
@@ -1183,6 +1194,7 @@ class DashboardServices:
             "derived_input_available": "YES" if derived_available else "NO",
             "source": "sports_edge_day8_historical_rolling_xg_v1" if derived_available else None,
             "path": str(self.config.research_db_path) if derived_available else None,
+            "current_slate_readiness": dict(self._provider_state.get("xg_readiness") or {}),
             "missing_requirement": None
             if enabled
             else (
@@ -1190,6 +1202,125 @@ class DashboardServices:
                 if derived_available
                 else "Historical research store access is required for the derived rolling xG safeguard input."
             ),
+        }
+
+    def _audit_current_xg_readiness(self, rows_with_predictions: list[dict[str, Any]]) -> dict[str, Any]:
+        """Audit current xG-required fixtures without enabling the safeguard or calling a provider."""
+        audited_at = utc_now_iso()
+        if self.snapshot is None or not self.config.research_db_path.exists():
+            return {
+                "state": "UNAVAILABLE",
+                "audited_at": audited_at,
+                "fixtures_considered": 0,
+                "fixtures_ready": 0,
+                "fixtures_missing": 0,
+                "competition_counts": {},
+                "missing_examples": [],
+                "reason": "CURRENT_MODEL_OR_RESEARCH_STORE_UNAVAILABLE",
+            }
+
+        applicable_rows = [
+            row
+            for row in self._future_fixture_rows(rows_with_predictions)
+            if self._prediction_eligibility_status(row.get("prediction")) == "PREDICTION_READY"
+            and str(row.get("competition_id") or "") in XG_APPLICABLE_COMPETITIONS
+        ]
+        if not applicable_rows:
+            return {
+                "state": "NO_APPLICABLE_FIXTURES",
+                "audited_at": audited_at,
+                "fixtures_considered": 0,
+                "fixtures_ready": 0,
+                "fixtures_missing": 0,
+                "competition_counts": {},
+                "missing_examples": [],
+                "reason": None,
+            }
+
+        ready_count = 0
+        missing_count = 0
+        competition_counts: dict[str, dict[str, int]] = defaultdict(
+            lambda: {"considered": 0, "ready": 0, "missing": 0}
+        )
+        missing_examples: list[dict[str, Any]] = []
+
+        for row in applicable_rows:
+            prediction = row.get("prediction") or {}
+            competition_id = str(row.get("competition_id") or "")
+            counts = competition_counts[competition_id]
+            counts["considered"] += 1
+            coefficients = (self.snapshot.conversion_coefficients or {}).get(competition_id)
+            team_resolution = prediction.get("team_resolution") or {}
+            home_team = str(
+                (team_resolution.get("home") or {}).get("canonical_team_name")
+                or row.get("home_team_name")
+                or ""
+            )
+            away_team = str(
+                (team_resolution.get("away") or {}).get("canonical_team_name")
+                or row.get("away_team_name")
+                or ""
+            )
+
+            rows_by_role: dict[tuple[str, str], dict[str, Any]] = {}
+            inspection: dict[str, Any] = {}
+            if coefficients:
+                rows_by_role, inspection = build_fixture_xg_rows(
+                    db_path=self.config.research_db_path,
+                    competition_id=competition_id,
+                    fixture_id=str(row.get("fixture_id") or ""),
+                    home_team=home_team,
+                    away_team=away_team,
+                    decision_as_of=audited_at,
+                    coefficients=coefficients,
+                    min_window_matches=DEFAULT_XG_MIN_WINDOW_MATCHES,
+                )
+
+            fixture_id = str(row.get("fixture_id") or "")
+            home_row = rows_by_role.get((fixture_id, "HOME"))
+            away_row = rows_by_role.get((fixture_id, "AWAY"))
+            home_matches = int((home_row or {}).get("matches_in_window") or 0)
+            away_matches = int((away_row or {}).get("matches_in_window") or 0)
+            ready = bool(
+                inspection.get("sufficient_for_day12_rule")
+                and home_row is not None
+                and away_row is not None
+                and home_matches >= DEFAULT_XG_MIN_WINDOW_MATCHES
+                and away_matches >= DEFAULT_XG_MIN_WINDOW_MATCHES
+            )
+            if ready:
+                ready_count += 1
+                counts["ready"] += 1
+                continue
+
+            missing_count += 1
+            counts["missing"] += 1
+            if len(missing_examples) < 5:
+                missing_examples.append(
+                    {
+                        "fixture_id": fixture_id,
+                        "competition_id": competition_id,
+                        "home_team_name": home_team,
+                        "away_team_name": away_team,
+                        "home_matches": home_matches,
+                        "away_matches": away_matches,
+                        "reason": inspection.get("reason")
+                        or ("CONVERSION_COEFFICIENTS_MISSING" if not coefficients else "INSUFFICIENT_XG_HISTORY"),
+                    }
+                )
+
+        state = "READY" if missing_count == 0 else "PARTIAL"
+        return {
+            "state": state,
+            "audited_at": audited_at,
+            "fixtures_considered": len(applicable_rows),
+            "fixtures_ready": ready_count,
+            "fixtures_missing": missing_count,
+            "competition_counts": {
+                key: dict(competition_counts[key]) for key in sorted(competition_counts)
+            },
+            "missing_examples": missing_examples,
+            "reason": None,
         }
 
     def _performance_summary_path(self) -> Path:
@@ -3226,6 +3357,17 @@ class DashboardServices:
                 }
             )
             self._update_prediction_state(rows_with_predictions)
+            self._provider_state["xg_readiness"] = self._audit_current_xg_readiness(rows_with_predictions)
+            xg_readiness = self._provider_state["xg_readiness"]
+            logger.info(
+                "football xg readiness: state=%s considered=%s ready=%s missing=%s competitions=%s missing_examples=%s",
+                xg_readiness.get("state"),
+                xg_readiness.get("fixtures_considered"),
+                xg_readiness.get("fixtures_ready"),
+                xg_readiness.get("fixtures_missing"),
+                xg_readiness.get("competition_counts"),
+                xg_readiness.get("missing_examples"),
+            )
             self._run_market_sync(rows_with_predictions, conn)
             storage.put_runtime_state(
                 conn,
