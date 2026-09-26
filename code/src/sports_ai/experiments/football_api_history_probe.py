@@ -57,7 +57,13 @@ class HistoricalProbeResult:
 
 
 class HistoricalProbeProvider(Protocol):
-    def get_historical_league_candidates(self, *, search: str, season: int) -> list[dict[str, Any]]: ...
+    def get_historical_league_candidates(
+        self,
+        *,
+        search: str,
+        season: int,
+        country: str | None = None,
+    ) -> list[dict[str, Any]]: ...
 
     def get_historical_fixtures(self, *, league_id: int, season: int) -> list[dict[str, Any]]: ...
 
