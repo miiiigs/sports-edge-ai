@@ -34,6 +34,7 @@ from .models import (
     utc_now_iso,
 )
 from .prediction_service import attach_edge_desk_shadow_bundle
+from .provider_budget import QUOTA_HEALTHY
 from .production_research import (
     DEFAULT_PRODUCTION_DIVISIONS,
     ResearchRefreshResult,
@@ -251,13 +252,27 @@ class ProductionDashboardServices(DashboardServices):
             if parsed is None:
                 return
             competition_id, season, sample_size = parsed
-            target = target_for_competition(competition_id)
-            result = run_historical_coverage_probe(
-                self.fixture_provider,
-                target=target,
-                season=season,
-                sample_size=sample_size,
-            )
+            quota_state = self._provider_budget.quota_state()
+            if quota_state != QUOTA_HEALTHY:
+                result_payload = {
+                    "competition_id": competition_id,
+                    "season": season,
+                    "state": "BLOCKED",
+                    "bounded_probe_requests": 0,
+                    "projected_backfill_requests": None,
+                    "sampled_gap_ready_count": 0,
+                    "sampled_fixture_count": 0,
+                    "reason": f"LOW_PRIORITY_QUOTA_{quota_state}",
+                }
+            else:
+                target = target_for_competition(competition_id)
+                result = run_historical_coverage_probe(
+                    self.fixture_provider,
+                    target=target,
+                    season=season,
+                    sample_size=sample_size,
+                )
+                result_payload = result.to_dict()
             final = {
                 "configured": True,
                 "state": "COMPLETED",
@@ -265,7 +280,7 @@ class ProductionDashboardServices(DashboardServices):
                 "spec": raw,
                 "claimed_at": claimed["claimed_at"],
                 "completed_at": utc_now_iso(),
-                "result": result.to_dict(),
+                "result": result_payload,
                 "error_code": None,
             }
         except Exception as exc:
