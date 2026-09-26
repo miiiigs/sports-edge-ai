@@ -63,3 +63,21 @@ def test_historical_league_reference_uses_low_priority_and_daily_cache():
     assert call["priority"] == PRIORITY_LOW
     assert call["wait_for_rate_slot"] is True
     assert call["ttl_seconds"] == 24 * 60 * 60
+
+
+def test_historical_league_reference_prefers_country_and_season_when_available():
+    provider, budget = _provider_with_budget()
+
+    assert provider.get_historical_league_candidates(
+        search="Ligue 1",
+        season=2025,
+        country="France",
+    ) == []
+
+    assert len(budget.calls) == 1
+    call = budget.calls[0]
+    assert call["endpoint"] == "leagues"
+    assert call["params"] == {"country": "France", "season": 2025}
+    assert call["priority"] == PRIORITY_LOW
+    assert call["wait_for_rate_slot"] is True
+    assert call["ttl_seconds"] == 24 * 60 * 60
