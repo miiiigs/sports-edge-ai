@@ -33,6 +33,7 @@ from typing import Any
 import httpx
 
 from ..dashboard.models import normalize_text_key, parse_iso_datetime
+from ..football_market_focus import configured_live_market_focus
 from .freshness import (
     FRESHNESS_STATE_FRESH,
     FRESHNESS_STATE_STALE,
@@ -235,6 +236,32 @@ class TheOddsApiProvider:
         raw = os.environ.get(self._config.region_env_var, "").strip()
         return raw if raw else self._config.default_region
 
+    def _live_market_focus(self) -> tuple[str, ...]:
+        return configured_live_market_focus()
+
+    def _league_markets_requested(self) -> tuple[str, ...]:
+        focus = self._live_market_focus()
+        markets: list[str] = []
+        if MARKET_1X2 in focus:
+            markets.append(THE_ODDS_MARKET_H2H)
+        if MARKET_ASIAN_HANDICAP in focus:
+            markets.append(THE_ODDS_MARKET_SPREADS)
+        if MARKET_GOALS_TOTAL in focus:
+            markets.append(THE_ODDS_MARKET_TOTALS)
+        # We still need a league-wide event index in an event-only focus.
+        if not markets:
+            markets.append(THE_ODDS_MARKET_H2H)
+        return tuple(markets)
+
+    def _event_markets_requested(self) -> tuple[str, ...]:
+        focus = self._live_market_focus()
+        markets: list[str] = []
+        if MARKET_BTTS in focus:
+            markets.append(THE_ODDS_MARKET_BTTS)
+        if MARKET_CORNER_TOTAL in focus:
+            markets.append(THE_ODDS_MARKET_CORNERS)
+        return tuple(markets)
+
     def _reference_bookmakers(self) -> tuple[str, ...]:
         raw = os.environ.get(self._config.reference_bookmakers_env_var, "").strip()
         if not raw:
@@ -382,7 +409,8 @@ class TheOddsApiProvider:
         return mapping.sport_key
 
     def _sport_odds_payload(self, sport_key: str) -> list[dict[str, Any]]:
-        cache_key = f"odds:{sport_key}:{self._region()}"
+        league_markets = self._league_markets_requested()
+        cache_key = f"odds:{sport_key}:{self._region()}:{','.join(league_markets)}"
         now = monotonic()
         with self._cache_lock:
             cached = self._cache.get(cache_key)
@@ -403,7 +431,7 @@ class TheOddsApiProvider:
             endpoint=f"sports/{sport_key}/odds",
             params={
                 "regions": self._region(),
-                "markets": THE_ODDS_MARKETS_REQUESTED,
+                "markets": ",".join(league_markets),
                 "oddsFormat": "decimal",
             },
         )
@@ -647,7 +675,10 @@ class TheOddsApiProvider:
         on transport/provider failures, which the caller isolates so the
         league-wide h2h/totals data is preserved.
         """
-        cache_key = f"event-markets:{sport_key}:{self._region()}:{event_id}"
+        event_markets = self._event_markets_requested()
+        if not event_markets:
+            return None
+        cache_key = f"event-markets:{sport_key}:{self._region()}:{event_id}:{','.join(event_markets)}"
         now = monotonic()
         with self._cache_lock:
             cached = self._cache.get(cache_key)
@@ -664,7 +695,7 @@ class TheOddsApiProvider:
             endpoint=f"sports/{sport_key}/events/{event_id}/odds",
             params={
                 "regions": self._region(),
-                "markets": THE_ODDS_EVENT_MARKETS_REQUESTED,
+                "markets": ",".join(event_markets),
                 "oddsFormat": "decimal",
             },
         )
@@ -891,6 +922,9 @@ class TheOddsApiProvider:
             "current_market_decisions": "READY" if self.configured() else "BLOCKED",
             "captured_at": _utc_now(),
             "region": self._region(),
+            "live_market_focus": list(self._live_market_focus()),
+            "league_markets_requested": list(self._league_markets_requested()),
+            "event_markets_requested": list(self._event_markets_requested()),
             "reason": None
             if self.configured()
             else f"missing required environment variable {self._config.api_key_env_var}",
