@@ -3758,12 +3758,13 @@ class DashboardServices:
         diagnostics = self.market_provider.diagnostics()
         quota = diagnostics.get("quota") or {}
         logger.info(
-            "football market sync: mode=%s runtime_state=%s provider_state=%s provider_requests=%s "
+            "football market sync: mode=%s runtime_state=%s provider_state=%s provider_error_code=%s provider_requests=%s "
             "additional_event_requests=%s additional_cap=%s additional_truncated=%s quota_remaining=%s "
             "quota_credits_used=%s fixtures=%s matched=%s snapshots=%s candidates=%s paper_entries=%s",
             mode,
             self._market_runtime_state.get("state"),
             diagnostics.get("state"),
+            diagnostics.get("provider_error_code"),
             diagnostics.get("request_count"),
             diagnostics.get("additional_event_requests"),
             diagnostics.get("additional_event_request_cap"),
