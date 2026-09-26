@@ -113,7 +113,10 @@ def _parse_history_probe_once_spec(raw: str) -> tuple[str, int, int] | None:
             raise ValueError("history probe sample size must be an integer") from exc
     if sample_size < 1 or sample_size > 3:
         raise ValueError("history probe sample size must be between 1 and 3")
-    target_for_competition(competition_id)
+    try:
+        target_for_competition(competition_id)
+    except KeyError as exc:
+        raise ValueError(f"unsupported history probe competition {competition_id}") from exc
     return competition_id, season, sample_size
 
 
