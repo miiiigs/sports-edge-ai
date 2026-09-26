@@ -1060,6 +1060,44 @@ def test_btts_fan_out_cap_enforced(monkeypatch):
     assert provider.diagnostics()["btts_truncated"] >= 1
 
 
+def test_addon_request_cap_resets_only_for_explicit_sync_window(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    config = TheOddsApiProviderConfig(max_btts_event_requests=1)
+    event_requests = {"count": 0}
+    events = [
+        {**EVENT, "id": "epl_1", "home_team": "Arsenal", "away_team": "Chelsea", "commence_time": KICKOFF},
+        {**EVENT, "id": "epl_2", "home_team": "Spurs", "away_team": "West Ham", "commence_time": KICKOFF},
+    ]
+
+    def handler(request):
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            return httpx.Response(200, json=events, headers=QUOTA_HEADERS, request=request)
+        if "/events/" in request.url.path:
+            event_requests["count"] += 1
+            return httpx.Response(200, json={"id": "x", "bookmakers": []}, headers=QUOTA_HEADERS, request=request)
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler, config=config)
+    provider.begin_sync_window()
+    provider.get_market_snapshot(
+        FIXTURE_ID,
+        fixture_context=dict(FIXTURE_CONTEXT, home_team_name="Arsenal", away_team_name="Chelsea"),
+    )
+    provider.get_market_snapshot(
+        "football_data_fixture_2",
+        fixture_context=dict(FIXTURE_CONTEXT, home_team_name="Spurs", away_team_name="West Ham"),
+    )
+    assert event_requests["count"] == 1
+    assert provider.diagnostics()["additional_event_request_cap"] == 1
+
+    provider.begin_sync_window()
+    provider.get_market_snapshot(
+        "football_data_fixture_2",
+        fixture_context=dict(FIXTURE_CONTEXT, home_team_name="Spurs", away_team_name="West Ham"),
+    )
+    assert event_requests["count"] == 2
+
+
 def test_btts_duplicate_event_no_duplicate_request(monkeypatch):
     monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
     event_requests = {"count": 0}
