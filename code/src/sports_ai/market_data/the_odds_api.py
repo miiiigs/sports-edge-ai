@@ -52,6 +52,7 @@ THE_ODDS_MARKET_H2H = "h2h"
 THE_ODDS_MARKET_SPREADS = "spreads"
 THE_ODDS_MARKET_TOTALS = "totals"
 THE_ODDS_MARKET_BTTS = "btts"
+THE_ODDS_MARKET_ALT_SPREADS = "alternate_spreads"
 THE_ODDS_MARKET_CORNERS = "alternate_totals_corners"
 THE_ODDS_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_H2H},{THE_ODDS_MARKET_SPREADS},{THE_ODDS_MARKET_TOTALS}"
 THE_ODDS_EVENT_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_BTTS},{THE_ODDS_MARKET_CORNERS}"
@@ -254,11 +255,21 @@ class TheOddsApiProvider:
             markets.append(THE_ODDS_MARKET_H2H)
         return tuple(markets)
 
-    def _event_markets_requested(self) -> tuple[str, ...]:
+    def _event_markets_requested(
+        self,
+        *,
+        include_ah_fallback: bool = False,
+    ) -> tuple[str, ...]:
         focus = self._live_market_focus()
         markets: list[str] = []
         if MARKET_BTTS in focus:
             markets.append(THE_ODDS_MARKET_BTTS)
+        if (
+            include_ah_fallback
+            and is_focused_live_mode()
+            and MARKET_ASIAN_HANDICAP in focus
+        ):
+            markets.append(THE_ODDS_MARKET_ALT_SPREADS)
         if MARKET_CORNER_TOTAL in focus:
             markets.append(THE_ODDS_MARKET_CORNERS)
         return tuple(markets)
@@ -687,7 +698,13 @@ class TheOddsApiProvider:
                     )
         return snapshots
 
-    def _event_odds_payload(self, sport_key: str, event_id: str) -> dict[str, Any] | None:
+    def _event_odds_payload(
+        self,
+        sport_key: str,
+        event_id: str,
+        *,
+        include_ah_fallback: bool = False,
+    ) -> dict[str, Any] | None:
         """Fetch a single event's add-on market odds (for example BTTS/corners).
 
         Returns the event payload on success, or None when the fan-out cap has
@@ -695,7 +712,9 @@ class TheOddsApiProvider:
         on transport/provider failures, which the caller isolates so the
         league-wide h2h/totals data is preserved.
         """
-        event_markets = self._event_markets_requested()
+        event_markets = self._event_markets_requested(
+            include_ah_fallback=include_ah_fallback,
+        )
         if not event_markets:
             return None
         cache_key = f"event-markets:{sport_key}:{self._region()}:{event_id}:{','.join(event_markets)}"
@@ -756,7 +775,11 @@ class TheOddsApiProvider:
             reference_designation = "reference" if reference_rank is not None else "available"
             for market in bookmaker.get("markets") or []:
                 market_key = str(market.get("key") or "").strip()
-                if market_key not in {THE_ODDS_MARKET_BTTS, THE_ODDS_MARKET_CORNERS}:
+                if market_key not in {
+                    THE_ODDS_MARKET_BTTS,
+                    THE_ODDS_MARKET_ALT_SPREADS,
+                    THE_ODDS_MARKET_CORNERS,
+                }:
                     continue
                 source_timestamp = (
                     str(market.get("last_update") or "").strip()
@@ -780,6 +803,31 @@ class TheOddsApiProvider:
                             continue
                         snapshot_market = MARKET_BTTS
                         snapshot_line = None
+                    elif market_key == THE_ODDS_MARKET_ALT_SPREADS:
+                        home_team = str(
+                            event.get("home_team")
+                            or fixture_context.get("home_team_name")
+                            or ""
+                        )
+                        away_team = str(
+                            event.get("away_team")
+                            or fixture_context.get("away_team_name")
+                            or ""
+                        )
+                        selection = self._classify_h2h_selection(
+                            home_team,
+                            away_team,
+                            outcome_name,
+                        )
+                        if selection not in {"HOME", "AWAY"}:
+                            continue
+                        snapshot_line = self._normalize_asian_handicap_line(
+                            outcome.get("point"),
+                            selection=selection,
+                        )
+                        if snapshot_line is None:
+                            continue
+                        snapshot_market = MARKET_ASIAN_HANDICAP
                     else:
                         selection = self._classify_totals_selection(outcome_name)
                         if selection is None:
@@ -829,6 +877,7 @@ class TheOddsApiProvider:
         fixture_context: dict[str, Any],
         sport_key: str,
         event: dict[str, Any],
+        include_ah_fallback: bool = False,
     ) -> list[NormalizedMarketSnapshot]:
         """Fetch and normalize add-on market snapshots for one matched fixture event.
 
@@ -842,7 +891,11 @@ class TheOddsApiProvider:
         if self._state in _ADDITIONAL_MARKET_BLOCKING_STATES:
             return []
         try:
-            event_payload = self._event_odds_payload(sport_key, event_id)
+            event_payload = self._event_odds_payload(
+                sport_key,
+                event_id,
+                include_ah_fallback=include_ah_fallback,
+            )
         except MarketProviderError:
             return []
         if not event_payload:
@@ -907,12 +960,20 @@ class TheOddsApiProvider:
             fixture_context=fixture_context,
             event=event,
         )
+        has_featured_ah = any(
+            snapshot.market == MARKET_ASIAN_HANDICAP for snapshot in snapshots
+        )
         snapshots.extend(
             self._fetch_additional_market_snapshots(
                 fixture_id=fixture_id,
                 fixture_context=fixture_context,
                 sport_key=sport_key,
                 event=event,
+                include_ah_fallback=(
+                    is_focused_live_mode()
+                    and MARKET_ASIAN_HANDICAP in self._live_market_focus()
+                    and not has_featured_ah
+                ),
             )
         )
         return snapshots
@@ -966,6 +1027,7 @@ class TheOddsApiProvider:
             "live_market_focus": list(self._live_market_focus()),
             "league_markets_requested": list(self._league_markets_requested()),
             "event_markets_requested": list(self._event_markets_requested()),
+            "ah_event_fallback_market": THE_ODDS_MARKET_ALT_SPREADS,
             "reason": None
             if self.configured()
             else f"missing required environment variable {self._config.api_key_env_var}",
