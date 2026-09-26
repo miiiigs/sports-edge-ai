@@ -16,6 +16,10 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ..experiments.football_api_history_probe import (
+    run_historical_coverage_probe,
+    target_for_competition,
+)
 from ..locking import canonical_hash
 from ..storage import football_candidate_evidence, football_paper_trading, football_research_store
 from . import services as services_module
@@ -30,6 +34,7 @@ from .models import (
     utc_now_iso,
 )
 from .prediction_service import attach_edge_desk_shadow_bundle
+from .provider_budget import QUOTA_HEALTHY
 from .production_research import (
     DEFAULT_PRODUCTION_DIVISIONS,
     ResearchRefreshResult,
@@ -43,6 +48,8 @@ logger = logging.getLogger(__name__)
 _BASE_MARKET_EVALUATOR = services_module.build_fixture_market_evaluation
 MODEL_SNAPSHOT_STATE_KEY = "model_snapshot_state"
 PRODUCTION_RUNTIME_STATE_KEY = "production_hardening_state"
+HISTORY_PROBE_ONCE_ENV_VAR = "SPORTS_AI_FOOTBALL_HISTORY_PROBE_ONCE"
+HISTORY_PROBE_STATE_PREFIX = "football_history_probe_once"
 
 _CONTEXT_MODES = {"off", "shadow", "enforce"}
 DEFAULT_RESEARCH_REFRESH_SECONDS = 6 * 60 * 60
@@ -81,6 +88,37 @@ def _env_float(name: str, default: float) -> float:
 def _context_mode() -> str:
     raw = os.environ.get("SPORTS_AI_FOOTBALL_CONTEXT_MODE", "shadow").strip().lower()
     return raw if raw in _CONTEXT_MODES else "shadow"
+
+
+def _parse_history_probe_once_spec(raw: str) -> tuple[str, int, int] | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    parts = [part.strip() for part in value.split(":")]
+    if len(parts) not in {2, 3}:
+        raise ValueError("history probe spec must be COMPETITION:SEASON[:SAMPLES]")
+    competition_id = parts[0].upper()
+    if not competition_id:
+        raise ValueError("history probe competition must not be empty")
+    try:
+        season = int(parts[1])
+    except ValueError as exc:
+        raise ValueError("history probe season must be a four-digit start year") from exc
+    if season < 2000 or season > 2100:
+        raise ValueError("history probe season must be a four-digit start year")
+    sample_size = 3
+    if len(parts) == 3:
+        try:
+            sample_size = int(parts[2])
+        except ValueError as exc:
+            raise ValueError("history probe sample size must be an integer") from exc
+    if sample_size < 1 or sample_size > 3:
+        raise ValueError("history probe sample size must be between 1 and 3")
+    try:
+        target_for_competition(competition_id)
+    except KeyError as exc:
+        raise ValueError(f"unsupported history probe competition {competition_id}") from exc
+    return competition_id, season, sample_size
 
 
 def _production_divisions() -> tuple[str, ...]:
@@ -130,6 +168,14 @@ class ProductionDashboardServices(DashboardServices):
         self._competition_model_freshness: dict[str, dict[str, Any]] = {}
         self._context_provider: ApiFootballContextProvider | None = None
         self._context_fixture_cache: dict[str, dict[str, Any]] = {}
+        self._history_probe_once_spec = os.environ.get(HISTORY_PROBE_ONCE_ENV_VAR, "").strip()
+        self._history_probe_state: dict[str, Any] = {
+            "configured": bool(self._history_probe_once_spec),
+            "state": "NOT_CONFIGURED" if not self._history_probe_once_spec else "PENDING",
+            "token_id": None,
+            "result": None,
+            "error_code": None,
+        }
 
         resolved = requested
         if self._bundled_research_db_path.exists():
@@ -157,8 +203,123 @@ class ProductionDashboardServices(DashboardServices):
         self._refresh_competition_freshness()
         await super().initialize()
         self._refresh_competition_freshness()
+        self._run_history_probe_once()
         self._log_production_freshness()
         self._persist_production_runtime_state()
+
+    def _run_history_probe_once(self) -> None:
+        raw = str(getattr(self, "_history_probe_once_spec", "") or "").strip()
+        if not raw:
+            return
+        token_id = canonical_hash({"history_probe_once": raw})[:12]
+        state_key = f"{HISTORY_PROBE_STATE_PREFIX}:{token_id}"
+        self._history_probe_state.update({"token_id": token_id, "state": "CHECKING"})
+
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            existing = storage.get_runtime_state(
+                conn,
+                state_key,
+                initialize_schema=False,
+            )
+            if isinstance(existing, dict):
+                self._history_probe_state = dict(existing)
+                logger.info(
+                    "football history probe: token_id=%s state=%s reused=true",
+                    token_id,
+                    self._history_probe_state.get("state"),
+                )
+                return
+
+            claimed = {
+                "configured": True,
+                "state": "CLAIMED",
+                "token_id": token_id,
+                "spec": raw,
+                "claimed_at": utc_now_iso(),
+                "result": None,
+                "error_code": None,
+            }
+            storage.put_runtime_state(
+                conn,
+                state_key=state_key,
+                state_value=claimed,
+                updated_at=claimed["claimed_at"],
+                initialize_schema=False,
+            )
+
+        try:
+            parsed = _parse_history_probe_once_spec(raw)
+            if parsed is None:
+                return
+            competition_id, season, sample_size = parsed
+            quota_state = self._provider_budget.quota_state()
+            if quota_state != QUOTA_HEALTHY:
+                result_payload = {
+                    "competition_id": competition_id,
+                    "season": season,
+                    "state": "BLOCKED",
+                    "bounded_probe_requests": 0,
+                    "projected_backfill_requests": None,
+                    "sampled_gap_ready_count": 0,
+                    "sampled_fixture_count": 0,
+                    "reason": f"LOW_PRIORITY_QUOTA_{quota_state}",
+                }
+            else:
+                target = target_for_competition(competition_id)
+                result = run_historical_coverage_probe(
+                    self.fixture_provider,
+                    target=target,
+                    season=season,
+                    sample_size=sample_size,
+                )
+                result_payload = result.to_dict()
+            final = {
+                "configured": True,
+                "state": "COMPLETED",
+                "token_id": token_id,
+                "spec": raw,
+                "claimed_at": claimed["claimed_at"],
+                "completed_at": utc_now_iso(),
+                "result": result_payload,
+                "error_code": None,
+            }
+        except Exception as exc:
+            final = {
+                "configured": True,
+                "state": "FAILED",
+                "token_id": token_id,
+                "spec": raw,
+                "claimed_at": claimed["claimed_at"],
+                "completed_at": utc_now_iso(),
+                "result": None,
+                "error_code": type(exc).__name__,
+            }
+
+        self._history_probe_state = final
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            storage.put_runtime_state(
+                conn,
+                state_key=state_key,
+                state_value=final,
+                updated_at=str(final["completed_at"]),
+                initialize_schema=False,
+            )
+
+        result_payload = final.get("result") or {}
+        logger.info(
+            "football history probe: token_id=%s state=%s competition=%s season=%s "
+            "probe_requests=%s projected_backfill_requests=%s sampled_ready=%s/%s reason=%s error_code=%s",
+            token_id,
+            final.get("state"),
+            result_payload.get("competition_id"),
+            result_payload.get("season"),
+            result_payload.get("bounded_probe_requests"),
+            result_payload.get("projected_backfill_requests"),
+            result_payload.get("sampled_gap_ready_count"),
+            result_payload.get("sampled_fixture_count"),
+            result_payload.get("reason"),
+            final.get("error_code"),
+        )
 
     def _restore_persisted_research_refresh_state(self) -> None:
         """Restore the research cadence across sleeping-process cold starts."""
@@ -696,6 +857,7 @@ class ProductionDashboardServices(DashboardServices):
                 "dead_rubber_signal": "NOT_AVAILABLE_YET",
             },
             "candidate_evidence": evidence_summary,
+            "history_probe_once": dict(self._history_probe_state),
             "updated_at": utc_now_iso(),
         }
         try:
