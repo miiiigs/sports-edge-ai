@@ -78,8 +78,8 @@ class _FakeProvider:
         self.stats_by_fixture = dict(stats_by_fixture or {})
         self.calls = []
 
-    def get_historical_league_candidates(self, *, search, season):
-        self.calls.append(("league", search, season))
+    def get_historical_league_candidates(self, *, search, season, country=None):
+        self.calls.append(("league", search, season, country))
         return list(self.candidates)
 
     def get_historical_fixtures(self, *, league_id, season):
