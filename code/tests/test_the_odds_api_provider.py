@@ -324,7 +324,7 @@ def test_auth_error_fails_fast_across_followup_fixture_requests(monkeypatch):
 
     def handler(request):
         calls["count"] += 1
-        return httpx.Response(401, request=request)
+        return httpx.Response(401, json={"error_code": "INVALID_KEY"}, request=request)
 
     provider = _make_provider(handler)
     with pytest.raises(MarketProviderError):
