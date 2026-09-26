@@ -869,6 +869,7 @@ class ApiFootballFixtureProvider(FixtureProvider):
                 params={"fixture": provider_fixture_id},
                 ttl_seconds=self._config.statistics_cache_ttl_seconds,
                 priority=priority_override or PRIORITY_ESSENTIAL,
+                wait_for_rate_slot=priority_override == PRIORITY_LOW,
             )
             if decision.action == ACTION_CACHE_HIT and decision.cached_payload is not None:
                 rows = decision.cached_payload.get("response")
