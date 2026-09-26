@@ -33,7 +33,7 @@ from typing import Any
 import httpx
 
 from ..dashboard.models import normalize_text_key, parse_iso_datetime
-from ..football_market_focus import configured_live_market_focus
+from ..football_market_focus import configured_live_market_focus, is_focused_live_mode
 from .freshness import (
     FRESHNESS_STATE_FRESH,
     FRESHNESS_STATE_STALE,
@@ -876,8 +876,15 @@ class TheOddsApiProvider:
         # Corners are an event-level market. Do not make corner discovery
         # depend on a featured spread being available: The Odds API /events
         # catalog is quota-free and gives us the canonical event id.
-        if event is None and MARKET_CORNER_TOTAL in self._live_market_focus():
-            catalog_events = self._sport_events_payload(sport_key)
+        if (
+            event is None
+            and is_focused_live_mode()
+            and MARKET_CORNER_TOTAL in self._live_market_focus()
+        ):
+            try:
+                catalog_events = self._sport_events_payload(sport_key)
+            except MarketProviderError:
+                catalog_events = []
             catalog_matches = self._match_events(fixture_context, catalog_events)
             if len(catalog_matches) > 1:
                 with self._stats_lock:
