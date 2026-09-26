@@ -131,7 +131,7 @@ def test_probe_blocks_before_fixture_call_when_statistics_coverage_is_unavailabl
     assert result.reason == "FIXTURE_STATISTICS_COVERAGE_UNAVAILABLE"
     assert result.statistics_fixture_coverage is False
     assert result.bounded_probe_requests == 1
-    assert provider.calls == [("league", "Ligue 1", 2025)]
+    assert provider.calls == [("league", "Ligue 1", 2025, "France")]
 
 
 def test_probe_samples_first_middle_last_and_projects_full_backfill_cost():
