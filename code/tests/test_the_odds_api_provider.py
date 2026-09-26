@@ -387,22 +387,28 @@ def test_kickoff_tolerance_out_of_window(monkeypatch):
     assert "UNRESOLVED" in str(exc.value)
 
 
-def test_competition_mapping_verified_and_unverified():
-    assert COMPETITION_TO_SPORT["ENG1"].verified is True
-    assert COMPETITION_TO_SPORT["ENG1"].enabled is True
-    assert COMPETITION_TO_SPORT["ENG1"].sport_key == "soccer_epl"
-    for competition in ("ENG2", "ENG3", "ENG4", "ESP1"):
-        assert COMPETITION_TO_SPORT[competition].verified is False
-        assert COMPETITION_TO_SPORT[competition].enabled is False
+def test_supported_competition_mappings_are_verified():
+    expected = {
+        "ENG1": "soccer_epl",
+        "ENG2": "soccer_efl_champ",
+        "ENG3": "soccer_england_league1",
+        "ENG4": "soccer_england_league2",
+        "ESP1": "soccer_spain_la_liga",
+    }
+    for competition, sport_key in expected.items():
+        mapping = COMPETITION_TO_SPORT[competition]
+        assert mapping.verified is True
+        assert mapping.enabled is True
+        assert mapping.sport_key == sport_key
 
 
-def test_unverified_competition_raises(monkeypatch):
+def test_unknown_competition_still_fails_closed(monkeypatch):
     monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
     provider = TheOddsApiProvider()
-    context = dict(FIXTURE_CONTEXT, competition_id="ESP1")
+    context = dict(FIXTURE_CONTEXT, competition_id="UNKNOWN")
     with pytest.raises(MarketProviderError) as exc:
         provider.get_market_snapshot(FIXTURE_ID, fixture_context=context)
-    assert "UNVERIFIED" in str(exc.value)
+    assert "UNSUPPORTED" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------
