@@ -3754,6 +3754,28 @@ class DashboardServices:
 
         return build
 
+    def _log_market_sync_summary(self, *, mode: str) -> None:
+        diagnostics = self.market_provider.diagnostics()
+        quota = diagnostics.get("quota") or {}
+        logger.info(
+            "football market sync: mode=%s runtime_state=%s provider_state=%s provider_requests=%s "
+            "additional_event_requests=%s additional_cap=%s additional_truncated=%s quota_remaining=%s "
+            "fixtures=%s matched=%s snapshots=%s candidates=%s paper_entries=%s",
+            mode,
+            self._market_runtime_state.get("state"),
+            diagnostics.get("state"),
+            diagnostics.get("request_count"),
+            diagnostics.get("additional_event_requests"),
+            diagnostics.get("additional_event_request_cap"),
+            diagnostics.get("additional_markets_truncated"),
+            quota.get("remaining"),
+            self._market_runtime_state.get("fixtures_considered"),
+            self._market_runtime_state.get("fixtures_matched"),
+            self._market_runtime_state.get("market_snapshots"),
+            self._market_runtime_state.get("candidate_count"),
+            self._market_runtime_state.get("paper_entry_count"),
+        )
+
     def _run_market_sync(self, rows_with_predictions: list[dict[str, Any]], conn: Any) -> None:
         """Run the current-market sync, honoring the one-shot checkpoint token.
 
@@ -3778,6 +3800,7 @@ class DashboardServices:
                 "error": None,
             }
             self._sync_current_market_state(rows_with_predictions, dashboard_conn=conn)
+            self._log_market_sync_summary(mode="automatic" if self.config.enable_odds_sync else "disabled")
             return
 
         token_id: str | None = None
@@ -3815,6 +3838,7 @@ class DashboardServices:
                     "error": "AUTOMATIC_SYNC_ENABLED",
                 }
                 self._sync_current_market_state(rows_with_predictions, dashboard_conn=conn)
+                self._log_market_sync_summary(mode="automatic")
                 return
 
             claimed_at = utc_now_iso()
@@ -3908,6 +3932,7 @@ class DashboardServices:
                 "paper_entries": paper_entries,
                 "error": error_code,
             }
+            self._log_market_sync_summary(mode="one_shot")
         except Exception:
             # Defensive: one-shot bookkeeping must never break the normal sync path.
             self._one_shot_sync_state = {
@@ -4119,6 +4144,9 @@ class DashboardServices:
             for row in self._future_fixture_rows(rows_with_predictions)
             if self._prediction_eligibility_status(row.get("prediction")) == "PREDICTION_READY"
         ]
+        begin_market_sync_window = getattr(self.market_provider, "begin_sync_window", None)
+        if callable(begin_market_sync_window):
+            begin_market_sync_window()
         snapshot_count = 0
         matched_count = 0
         candidate_count = 0
