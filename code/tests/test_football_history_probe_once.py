@@ -56,6 +56,7 @@ def test_history_probe_once_is_persistent_and_not_replayed(tmp_path, monkeypatch
     service = ProductionDashboardServices.__new__(ProductionDashboardServices)
     service.config = SimpleNamespace(dashboard_db_path=dashboard_db)
     service.fixture_provider = object()
+    service._provider_budget = SimpleNamespace(quota_state=lambda: "HEALTHY")
     service._history_probe_once_spec = "FRA1:2025"
     service._history_probe_state = {
         "configured": True,
@@ -74,3 +75,34 @@ def test_history_probe_once_is_persistent_and_not_replayed(tmp_path, monkeypatch
     assert first["state"] == "COMPLETED"
     assert first["result"]["state"] == "READY_TO_BACKFILL"
     assert second == first
+
+
+def test_history_probe_once_blocks_without_provider_calls_when_quota_not_healthy(tmp_path, monkeypatch) -> None:
+    dashboard_db = tmp_path / "football_dashboard.sqlite"
+    with storage.connect(dashboard_db) as conn:
+        storage.initialize_database(conn)
+
+    def unexpected_probe(*args, **kwargs):
+        raise AssertionError("history provider probe must not run while LOW priority is suppressed")
+
+    monkeypatch.setattr(production_services, "run_historical_coverage_probe", unexpected_probe)
+
+    service = ProductionDashboardServices.__new__(ProductionDashboardServices)
+    service.config = SimpleNamespace(dashboard_db_path=dashboard_db)
+    service.fixture_provider = object()
+    service._provider_budget = SimpleNamespace(quota_state=lambda: "CONSERVE")
+    service._history_probe_once_spec = "FRA1:2025"
+    service._history_probe_state = {
+        "configured": True,
+        "state": "PENDING",
+        "token_id": None,
+        "result": None,
+        "error_code": None,
+    }
+
+    service._run_history_probe_once()
+
+    assert service._history_probe_state["state"] == "COMPLETED"
+    assert service._history_probe_state["result"]["state"] == "BLOCKED"
+    assert service._history_probe_state["result"]["bounded_probe_requests"] == 0
+    assert service._history_probe_state["result"]["reason"] == "LOW_PRIORITY_QUOTA_CONSERVE"
