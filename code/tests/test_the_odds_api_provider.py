@@ -276,9 +276,20 @@ def test_ah_corners_focus_requests_only_spreads_and_corners(monkeypatch):
     def handler(request):
         if request.url.path.endswith("/sports/soccer_epl/odds"):
             captured["league_markets"] = request.url.params.get("markets")
+            focused_event = {
+                **EVENT,
+                "bookmakers": [
+                    {
+                        "key": "pinnacle",
+                        "title": "Pinnacle",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "markets": [SPREADS_MARKET_MINUS_HALF],
+                    }
+                ],
+            }
             return httpx.Response(
                 200,
-                json=[EVENT_WITH_TOTALS_AND_SPREADS],
+                json=[focused_event],
                 headers=QUOTA_HEADERS,
                 request=request,
             )
