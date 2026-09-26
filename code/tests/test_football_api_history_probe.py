@@ -15,6 +15,7 @@ TARGET = HistoricalProbeTarget(
     country="France",
     competition_type="League",
     accepted_provider_names=("Ligue 1",),
+    provider_league_id=61,
 )
 
 
@@ -79,7 +80,11 @@ class _FakeProvider:
         self.calls = []
 
     def get_historical_league_candidates(self, *, search, season):
-        self.calls.append(("league", search, season))
+        self.calls.append(("league_search", search, season))
+        return list(self.candidates)
+
+    def get_historical_league_by_id(self, *, league_id, season):
+        self.calls.append(("league_id", league_id, season))
         return list(self.candidates)
 
     def get_historical_fixtures(self, *, league_id, season):
@@ -131,7 +136,7 @@ def test_probe_blocks_before_fixture_call_when_statistics_coverage_is_unavailabl
     assert result.reason == "FIXTURE_STATISTICS_COVERAGE_UNAVAILABLE"
     assert result.statistics_fixture_coverage is False
     assert result.bounded_probe_requests == 1
-    assert provider.calls == [("league", "Ligue 1", 2025)]
+    assert provider.calls == [("league_id", 61, 2025)]
 
 
 def test_probe_samples_first_middle_last_and_projects_full_backfill_cost():
@@ -209,3 +214,28 @@ def test_probe_fails_closed_when_any_sample_lacks_gap_inputs():
     assert result.sampled_gap_ready_count == 2
     assert result.reason == "SAMPLED_GAP_INPUTS_INCOMPLETE"
     assert result.sample_failures[0]["provider_fixture_id"] == "203"
+
+
+def test_failed_reference_keeps_only_safe_candidate_descriptors():
+    candidate = _candidate(name="Ligue One", country="France")
+    provider = _FakeProvider(candidates=[candidate], fixtures=[])
+
+    result = run_historical_coverage_probe(
+        provider,
+        target=TARGET,
+        season=2025,
+    )
+
+    assert result.state == "BLOCKED"
+    assert result.reason == "LEAGUE_REFERENCE_NOT_FOUND"
+    assert result.reference_candidate_count == 1
+    assert result.reference_candidates == (
+        {
+            "league_id": 61,
+            "name": "Ligue One",
+            "type": "League",
+            "country": "France",
+            "season_present": True,
+            "statistics_fixture_coverage": True,
+        },
+    )

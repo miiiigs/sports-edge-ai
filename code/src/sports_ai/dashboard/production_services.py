@@ -50,6 +50,7 @@ MODEL_SNAPSHOT_STATE_KEY = "model_snapshot_state"
 PRODUCTION_RUNTIME_STATE_KEY = "production_hardening_state"
 HISTORY_PROBE_ONCE_ENV_VAR = "SPORTS_AI_FOOTBALL_HISTORY_PROBE_ONCE"
 HISTORY_PROBE_STATE_PREFIX = "football_history_probe_once"
+HISTORY_PROBE_IMPLEMENTATION_VERSION = "stable_league_id_v2"
 
 _CONTEXT_MODES = {"off", "shadow", "enforce"}
 DEFAULT_RESEARCH_REFRESH_SECONDS = 6 * 60 * 60
@@ -211,7 +212,12 @@ class ProductionDashboardServices(DashboardServices):
         raw = str(getattr(self, "_history_probe_once_spec", "") or "").strip()
         if not raw:
             return
-        token_id = canonical_hash({"history_probe_once": raw})[:12]
+        token_id = canonical_hash(
+            {
+                "history_probe_once": raw,
+                "implementation_version": HISTORY_PROBE_IMPLEMENTATION_VERSION,
+            }
+        )[:12]
         state_key = f"{HISTORY_PROBE_STATE_PREFIX}:{token_id}"
         self._history_probe_state.update({"token_id": token_id, "state": "CHECKING"})
 

@@ -1013,6 +1013,75 @@ class ApiFootballFixtureProvider(FixtureProvider):
         """Low-priority reference lookup for an offline historical coverage probe."""
         return self._request_league_reference_rows(search=search, season=season)
 
+    def get_historical_league_by_id(self, *, league_id: int, season: int) -> list[dict[str, Any]]:
+        """Low-priority exact league lookup using API-Football's stable v3 league ID."""
+        params = {"id": int(league_id), "season": int(season)}
+        if self._budget is not None:
+            decision = self._budget.issue(
+                provider=PROVIDER_API_FOOTBALL,
+                endpoint="leagues",
+                params=params,
+                ttl_seconds=API_FOOTBALL_REFERENCE_CACHE_TTL_SECONDS,
+                priority=PRIORITY_LOW,
+                wait_for_rate_slot=True,
+            )
+            if decision.action == ACTION_CACHE_HIT and decision.cached_payload is not None:
+                rows = decision.cached_payload.get("response")
+                return list(rows) if isinstance(rows, list) else []
+            if not decision.allow:
+                return []
+
+        with self._client() as client:
+            response = client.get(API_FOOTBALL_LEAGUES_ENDPOINT, params=params)
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"errors": {"message": response.text[:200]}, "response": [], "results": 0}
+
+        failure_state, failure_message, _ = classify_provider_response(
+            http_status=int(response.status_code),
+            payload=payload,
+            response_headers=response.headers,
+        )
+        if self._budget is not None:
+            if failure_state is not None:
+                self._budget.finish_failure(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint="leagues",
+                    params=params,
+                    state=failure_state,
+                    message=failure_message,
+                    response_headers=response.headers,
+                )
+            else:
+                self._budget.finish_success(
+                    provider=PROVIDER_API_FOOTBALL,
+                    endpoint="leagues",
+                    params=params,
+                    payload=payload,
+                    provider_timestamp=None,
+                    ttl_seconds=API_FOOTBALL_REFERENCE_CACHE_TTL_SECONDS,
+                    response_headers=response.headers,
+                )
+
+        rows = payload.get("response")
+        if not isinstance(rows, list):
+            raise FixtureProviderError("unexpected API-Football leagues response payload")
+        with self._query_log_lock:
+            self._query_log.append(
+                {
+                    "query_timestamp": utc_now_iso(),
+                    "provider": API_FOOTBALL_PROVIDER,
+                    "query_kind": "historical_league_reference_by_id",
+                    "endpoint": "leagues",
+                    "http_status": int(response.status_code),
+                    "response_status": "OK" if failure_state is None else "ERROR",
+                    "params": params,
+                    "response_results": int(payload.get("results") or 0),
+                }
+            )
+        return list(rows)
+
     def get_historical_fixtures(self, *, league_id: int, season: int) -> list[dict[str, Any]]:
         """Low-priority raw fixture list for one league-season backfill probe."""
         return self._request_fixtures(
