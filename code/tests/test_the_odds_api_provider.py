@@ -265,6 +265,131 @@ def test_one_region_configuration(monkeypatch):
     assert captured["oddsFormat"] == "decimal"
 
 
+def test_ah_corners_focus_requests_only_spreads_and_corners(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "SPORTS_AI_FOOTBALL_LIVE_MARKET_FOCUS",
+        "asian_handicap,corner_total",
+    )
+    captured = {"league_markets": None, "event_markets": None}
+
+    def handler(request):
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            captured["league_markets"] = request.url.params.get("markets")
+            focused_event = {
+                **EVENT,
+                "bookmakers": [
+                    {
+                        "key": "pinnacle",
+                        "title": "Pinnacle",
+                        "last_update": "2026-08-22T12:00:00+00:00",
+                        "markets": [SPREADS_MARKET_MINUS_HALF],
+                    }
+                ],
+            }
+            return httpx.Response(
+                200,
+                json=[focused_event],
+                headers=QUOTA_HEADERS,
+                request=request,
+            )
+        if "/events/" in request.url.path and request.url.path.endswith("/odds"):
+            captured["event_markets"] = request.url.params.get("markets")
+            return httpx.Response(
+                200,
+                json={"id": "epl_event_123", "bookmakers": []},
+                headers=QUOTA_HEADERS,
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler)
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+
+    assert captured["league_markets"] == "spreads"
+    assert captured["event_markets"] == "alternate_totals_corners"
+    assert {snapshot.market for snapshot in snapshots} == {"asian_handicap"}
+    diagnostics = provider.diagnostics()
+    assert diagnostics["live_market_focus"] == ["asian_handicap", "corner_total"]
+    assert diagnostics["league_markets_requested"] == ["spreads"]
+    assert diagnostics["event_markets_requested"] == ["alternate_totals_corners"]
+
+
+def test_corners_focus_uses_event_catalog_when_spreads_are_unavailable(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "SPORTS_AI_FOOTBALL_LIVE_MARKET_FOCUS",
+        "asian_handicap,corner_total",
+    )
+    calls = {"league": 0, "events": 0, "event_odds": 0}
+
+    def handler(request):
+        if request.url.path.endswith("/sports/soccer_epl/odds"):
+            calls["league"] += 1
+            assert request.url.params.get("markets") == "spreads"
+            return httpx.Response(200, json=[], headers=QUOTA_HEADERS, request=request)
+        if request.url.path.endswith("/sports/soccer_epl/events"):
+            calls["events"] += 1
+            return httpx.Response(
+                200,
+                json=[{key: value for key, value in EVENT.items() if key != "bookmakers"}],
+                headers={
+                    "x-requests-remaining": "495",
+                    "x-requests-used": "5",
+                    "x-requests-last": "0",
+                },
+                request=request,
+            )
+        if "/events/" in request.url.path and request.url.path.endswith("/odds"):
+            calls["event_odds"] += 1
+            assert request.url.params.get("markets") == "alternate_spreads,alternate_totals_corners"
+            alternate_spread_market = {
+                "key": "alternate_spreads",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "outcomes": [
+                    {"name": "Manchester United", "price": 1.91, "point": -0.5},
+                    {"name": "Liverpool", "price": 1.95, "point": 0.5},
+                ],
+            }
+            corner_market = {
+                "key": "alternate_totals_corners",
+                "last_update": "2026-08-22T12:00:00+00:00",
+                "outcomes": [
+                    {"name": "Over", "price": 1.95, "point": 9.5},
+                    {"name": "Under", "price": 1.91, "point": 9.5},
+                ],
+            }
+            return httpx.Response(
+                200,
+                json={
+                    "id": "epl_event_123",
+                    "commence_time": KICKOFF,
+                    "home_team": "Manchester United",
+                    "away_team": "Liverpool",
+                    "bookmakers": [
+                        {
+                            "key": "pinnacle",
+                            "title": "Pinnacle",
+                            "last_update": "2026-08-22T12:00:00+00:00",
+                            "markets": [alternate_spread_market, corner_market],
+                        }
+                    ],
+                },
+                headers=QUOTA_HEADERS,
+                request=request,
+            )
+        return httpx.Response(404, request=request)
+
+    provider = _make_provider(handler)
+    snapshots = provider.get_market_snapshot(FIXTURE_ID, fixture_context=FIXTURE_CONTEXT)
+
+    assert {snapshot.market for snapshot in snapshots} == {
+        "asian_handicap",
+        "corner_total",
+    }
+    assert calls == {"league": 1, "events": 1, "event_odds": 1}
+
+
 def test_default_region_is_uk(monkeypatch):
     monkeypatch.setenv("SPORTS_AI_THE_ODDS_API_KEY", "test-key")
     monkeypatch.delenv("SPORTS_AI_ODDS_REGION", raising=False)

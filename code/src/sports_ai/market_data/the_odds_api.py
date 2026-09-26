@@ -33,6 +33,7 @@ from typing import Any
 import httpx
 
 from ..dashboard.models import normalize_text_key, parse_iso_datetime
+from ..football_market_focus import configured_live_market_focus, is_focused_live_mode
 from .freshness import (
     FRESHNESS_STATE_FRESH,
     FRESHNESS_STATE_STALE,
@@ -45,11 +46,13 @@ from .providers import MarketProviderError, NormalizedMarketSnapshot
 THE_ODDS_API_PROVIDER = "the-odds-api"
 THE_ODDS_API_INGESTION_VERSION = "the_odds_api_current_market_provider_v1"
 THE_ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
+THE_ODDS_API_EVENTS_CACHE_TTL_SECONDS = 600
 
 THE_ODDS_MARKET_H2H = "h2h"
 THE_ODDS_MARKET_SPREADS = "spreads"
 THE_ODDS_MARKET_TOTALS = "totals"
 THE_ODDS_MARKET_BTTS = "btts"
+THE_ODDS_MARKET_ALT_SPREADS = "alternate_spreads"
 THE_ODDS_MARKET_CORNERS = "alternate_totals_corners"
 THE_ODDS_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_H2H},{THE_ODDS_MARKET_SPREADS},{THE_ODDS_MARKET_TOTALS}"
 THE_ODDS_EVENT_MARKETS_REQUESTED = f"{THE_ODDS_MARKET_BTTS},{THE_ODDS_MARKET_CORNERS}"
@@ -235,6 +238,42 @@ class TheOddsApiProvider:
         raw = os.environ.get(self._config.region_env_var, "").strip()
         return raw if raw else self._config.default_region
 
+    def _live_market_focus(self) -> tuple[str, ...]:
+        return configured_live_market_focus()
+
+    def _league_markets_requested(self) -> tuple[str, ...]:
+        focus = self._live_market_focus()
+        markets: list[str] = []
+        if MARKET_1X2 in focus:
+            markets.append(THE_ODDS_MARKET_H2H)
+        if MARKET_ASIAN_HANDICAP in focus:
+            markets.append(THE_ODDS_MARKET_SPREADS)
+        if MARKET_GOALS_TOTAL in focus:
+            markets.append(THE_ODDS_MARKET_TOTALS)
+        # We still need a league-wide event index in an event-only focus.
+        if not markets:
+            markets.append(THE_ODDS_MARKET_H2H)
+        return tuple(markets)
+
+    def _event_markets_requested(
+        self,
+        *,
+        include_ah_fallback: bool = False,
+    ) -> tuple[str, ...]:
+        focus = self._live_market_focus()
+        markets: list[str] = []
+        if MARKET_BTTS in focus:
+            markets.append(THE_ODDS_MARKET_BTTS)
+        if (
+            include_ah_fallback
+            and is_focused_live_mode()
+            and MARKET_ASIAN_HANDICAP in focus
+        ):
+            markets.append(THE_ODDS_MARKET_ALT_SPREADS)
+        if MARKET_CORNER_TOTAL in focus:
+            markets.append(THE_ODDS_MARKET_CORNERS)
+        return tuple(markets)
+
     def _reference_bookmakers(self) -> tuple[str, ...]:
         raw = os.environ.get(self._config.reference_bookmakers_env_var, "").strip()
         if not raw:
@@ -382,7 +421,8 @@ class TheOddsApiProvider:
         return mapping.sport_key
 
     def _sport_odds_payload(self, sport_key: str) -> list[dict[str, Any]]:
-        cache_key = f"odds:{sport_key}:{self._region()}"
+        league_markets = self._league_markets_requested()
+        cache_key = f"odds:{sport_key}:{self._region()}:{','.join(league_markets)}"
         now = monotonic()
         with self._cache_lock:
             cached = self._cache.get(cache_key)
@@ -403,7 +443,7 @@ class TheOddsApiProvider:
             endpoint=f"sports/{sport_key}/odds",
             params={
                 "regions": self._region(),
-                "markets": THE_ODDS_MARKETS_REQUESTED,
+                "markets": ",".join(league_markets),
                 "oddsFormat": "decimal",
             },
         )
@@ -413,6 +453,25 @@ class TheOddsApiProvider:
             self._cache[cache_key] = (now, payload)
         with self._stats_lock:
             self._stats["events_fetched"] = max(int(self._stats["events_fetched"]), len(payload))
+        return payload
+
+    def _sport_events_payload(self, sport_key: str) -> list[dict[str, Any]]:
+        """Quota-free event catalog used only when odds rows cannot identify a focused fixture."""
+        cache_key = f"events:{sport_key}"
+        now = monotonic()
+        with self._cache_lock:
+            cached = self._cache.get(cache_key)
+            if cached is not None and now - cached[0] < THE_ODDS_API_EVENTS_CACHE_TTL_SECONDS:
+                return cached[1]
+
+        payload = self._request_json(
+            endpoint=f"sports/{sport_key}/events",
+            params={},
+        )
+        if not isinstance(payload, list):
+            payload = []
+        with self._cache_lock:
+            self._cache[cache_key] = (now, payload)
         return payload
 
     def _match_events(
@@ -639,7 +698,13 @@ class TheOddsApiProvider:
                     )
         return snapshots
 
-    def _event_odds_payload(self, sport_key: str, event_id: str) -> dict[str, Any] | None:
+    def _event_odds_payload(
+        self,
+        sport_key: str,
+        event_id: str,
+        *,
+        include_ah_fallback: bool = False,
+    ) -> dict[str, Any] | None:
         """Fetch a single event's add-on market odds (for example BTTS/corners).
 
         Returns the event payload on success, or None when the fan-out cap has
@@ -647,7 +712,12 @@ class TheOddsApiProvider:
         on transport/provider failures, which the caller isolates so the
         league-wide h2h/totals data is preserved.
         """
-        cache_key = f"event-markets:{sport_key}:{self._region()}:{event_id}"
+        event_markets = self._event_markets_requested(
+            include_ah_fallback=include_ah_fallback,
+        )
+        if not event_markets:
+            return None
+        cache_key = f"event-markets:{sport_key}:{self._region()}:{event_id}:{','.join(event_markets)}"
         now = monotonic()
         with self._cache_lock:
             cached = self._cache.get(cache_key)
@@ -664,7 +734,7 @@ class TheOddsApiProvider:
             endpoint=f"sports/{sport_key}/events/{event_id}/odds",
             params={
                 "regions": self._region(),
-                "markets": THE_ODDS_EVENT_MARKETS_REQUESTED,
+                "markets": ",".join(event_markets),
                 "oddsFormat": "decimal",
             },
         )
@@ -705,7 +775,11 @@ class TheOddsApiProvider:
             reference_designation = "reference" if reference_rank is not None else "available"
             for market in bookmaker.get("markets") or []:
                 market_key = str(market.get("key") or "").strip()
-                if market_key not in {THE_ODDS_MARKET_BTTS, THE_ODDS_MARKET_CORNERS}:
+                if market_key not in {
+                    THE_ODDS_MARKET_BTTS,
+                    THE_ODDS_MARKET_ALT_SPREADS,
+                    THE_ODDS_MARKET_CORNERS,
+                }:
                     continue
                 source_timestamp = (
                     str(market.get("last_update") or "").strip()
@@ -729,6 +803,31 @@ class TheOddsApiProvider:
                             continue
                         snapshot_market = MARKET_BTTS
                         snapshot_line = None
+                    elif market_key == THE_ODDS_MARKET_ALT_SPREADS:
+                        home_team = str(
+                            event.get("home_team")
+                            or fixture_context.get("home_team_name")
+                            or ""
+                        )
+                        away_team = str(
+                            event.get("away_team")
+                            or fixture_context.get("away_team_name")
+                            or ""
+                        )
+                        selection = self._classify_h2h_selection(
+                            home_team,
+                            away_team,
+                            outcome_name,
+                        )
+                        if selection not in {"HOME", "AWAY"}:
+                            continue
+                        snapshot_line = self._normalize_asian_handicap_line(
+                            outcome.get("point"),
+                            selection=selection,
+                        )
+                        if snapshot_line is None:
+                            continue
+                        snapshot_market = MARKET_ASIAN_HANDICAP
                     else:
                         selection = self._classify_totals_selection(outcome_name)
                         if selection is None:
@@ -778,6 +877,7 @@ class TheOddsApiProvider:
         fixture_context: dict[str, Any],
         sport_key: str,
         event: dict[str, Any],
+        include_ah_fallback: bool = False,
     ) -> list[NormalizedMarketSnapshot]:
         """Fetch and normalize add-on market snapshots for one matched fixture event.
 
@@ -791,7 +891,11 @@ class TheOddsApiProvider:
         if self._state in _ADDITIONAL_MARKET_BLOCKING_STATES:
             return []
         try:
-            event_payload = self._event_odds_payload(sport_key, event_id)
+            event_payload = self._event_odds_payload(
+                sport_key,
+                event_id,
+                include_ah_fallback=include_ah_fallback,
+            )
         except MarketProviderError:
             return []
         if not event_payload:
@@ -815,19 +919,40 @@ class TheOddsApiProvider:
         competition_id = str(fixture_context.get("competition_id") or "")
         sport_key = self._sport_key(competition_id)
         events = self._sport_odds_payload(sport_key)
-        if not events:
-            self._set_state(STATE_NO_CURRENT_EVENTS, None)
-            return []
-        matches = self._match_events(fixture_context, events)
-        if len(matches) == 0:
-            with self._stats_lock:
-                self._stats["unmatched"] = int(self._stats["unmatched"]) + 1
-            raise MarketProviderError("MARKET_FIXTURE_UNRESOLVED")
+        matches = self._match_events(fixture_context, events) if events else []
         if len(matches) > 1:
             with self._stats_lock:
                 self._stats["ambiguous"] = int(self._stats["ambiguous"]) + 1
             raise MarketProviderError("MARKET_FIXTURE_AMBIGUOUS")
-        event = matches[0]
+
+        event = matches[0] if len(matches) == 1 else None
+        # Corners are an event-level market. Do not make corner discovery
+        # depend on a featured spread being available: The Odds API /events
+        # catalog is quota-free and gives us the canonical event id.
+        if (
+            event is None
+            and is_focused_live_mode()
+            and MARKET_CORNER_TOTAL in self._live_market_focus()
+        ):
+            try:
+                catalog_events = self._sport_events_payload(sport_key)
+            except MarketProviderError:
+                catalog_events = []
+            catalog_matches = self._match_events(fixture_context, catalog_events)
+            if len(catalog_matches) > 1:
+                with self._stats_lock:
+                    self._stats["ambiguous"] = int(self._stats["ambiguous"]) + 1
+                raise MarketProviderError("MARKET_FIXTURE_AMBIGUOUS")
+            if len(catalog_matches) == 1:
+                event = catalog_matches[0]
+
+        if event is None:
+            with self._stats_lock:
+                self._stats["unmatched"] = int(self._stats["unmatched"]) + 1
+            if not events:
+                self._set_state(STATE_NO_CURRENT_EVENTS, None)
+            raise MarketProviderError("MARKET_FIXTURE_UNRESOLVED")
+
         with self._stats_lock:
             self._stats["matched"] = int(self._stats["matched"]) + 1
         snapshots = self._snapshots_from_event(
@@ -835,12 +960,20 @@ class TheOddsApiProvider:
             fixture_context=fixture_context,
             event=event,
         )
+        has_featured_ah = any(
+            snapshot.market == MARKET_ASIAN_HANDICAP for snapshot in snapshots
+        )
         snapshots.extend(
             self._fetch_additional_market_snapshots(
                 fixture_id=fixture_id,
                 fixture_context=fixture_context,
                 sport_key=sport_key,
                 event=event,
+                include_ah_fallback=(
+                    is_focused_live_mode()
+                    and MARKET_ASIAN_HANDICAP in self._live_market_focus()
+                    and not has_featured_ah
+                ),
             )
         )
         return snapshots
@@ -891,6 +1024,10 @@ class TheOddsApiProvider:
             "current_market_decisions": "READY" if self.configured() else "BLOCKED",
             "captured_at": _utc_now(),
             "region": self._region(),
+            "live_market_focus": list(self._live_market_focus()),
+            "league_markets_requested": list(self._league_markets_requested()),
+            "event_markets_requested": list(self._event_markets_requested()),
+            "ah_event_fallback_market": THE_ODDS_MARKET_ALT_SPREADS,
             "reason": None
             if self.configured()
             else f"missing required environment variable {self._config.api_key_env_var}",

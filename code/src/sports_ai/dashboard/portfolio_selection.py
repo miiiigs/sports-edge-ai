@@ -18,11 +18,11 @@ PORTFOLIO_STATE_POLICY_INACTIVE = "PORTFOLIO_POLICY_INACTIVE"
 PORTFOLIO_STATE_NOT_APPLICABLE = "NOT_APPLICABLE"
 PORTFOLIO_LIFECYCLE_CURRENT = "CURRENT_PORTFOLIO_SELECTION"
 PORTFOLIO_MARKET_ORDER = {
-    "1x2": 0,
-    "btts": 1,
+    "asian_handicap": 0,
+    "corner_total": 1,
     "goals_total": 2,
-    "asian_handicap": 3,
-    "corner_total": 4,
+    "btts": 3,
+    "1x2": 4,
 }
 MAX_SELECTED_PER_MARKET_FAMILY = 1
 MAX_SELECTED_PER_FIXTURE = 3

@@ -5445,3 +5445,24 @@ def test_sync_once_remains_single_flight_when_called_concurrently(
 
     assert call_order == ["first", "second"]
     assert max_active_calls == 1
+
+
+def test_betting_desk_respects_live_market_focus(tmp_path, monkeypatch):
+    services, _today_rows, _market_evaluations = _build_paginated_dashboard_services(
+        tmp_path,
+        monkeypatch,
+        fixture_count=1,
+    )
+    monkeypatch.setenv("SPORTS_AI_FOOTBALL_LIVE_MARKET_FOCUS", "1x2")
+
+    payload = services.get_betting_desk_payload()
+
+    assert payload["rows"]
+    assert {row["market_family"] for row in payload["rows"]} == {"1x2"}
+    assert payload["supported_markets"] == ["1x2"]
+    assert set(payload["research_markets"]) == {
+        "btts",
+        "goals_total",
+        "asian_handicap",
+        "corner_total",
+    }

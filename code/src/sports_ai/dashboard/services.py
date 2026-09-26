@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..football_market_focus import configured_live_market_focus
 from ..market_data.api_football import ApiFootballOddsProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
@@ -6282,6 +6283,12 @@ class DashboardServices:
             ),
             records=portfolio_records,
         )
+        live_market_focus = configured_live_market_focus()
+        desk_rows = [
+            row
+            for row in desk_rows
+            if str(row.get("market_family") or row.get("market") or "") in live_market_focus
+        ]
         preliminary = [row for row in desk_rows if row.get("portfolio_selected") or (portfolio_records.get("policy") is None and row["desk_decision"] == "BET")]
         no_bets = [row for row in desk_rows if row["decision_group"] == "no_bet"]
         blocked = [row for row in desk_rows if row["decision_group"] in {"blocked", "unsupported"}]
@@ -6324,7 +6331,10 @@ class DashboardServices:
             "preliminary_candidates": preliminary,
             "blocked_candidates": blocked,
             "no_bet_candidates": no_bets,
-            "supported_markets": list(CLIENT_PRIMARY_MARKETS),
+            "supported_markets": list(live_market_focus),
+            "research_markets": [
+                market for market in CLIENT_PRIMARY_MARKETS if market not in live_market_focus
+            ],
             "blocking_reasons": self._blocking_reason_counts(desk_rows),
             "summary": {
                 "rows": len(desk_rows),
@@ -6346,11 +6356,15 @@ class DashboardServices:
             storage_state=self._storage_status(),
         )
         published_rows = self._published_pick_rows(paper_rows, selection_context=portfolio_context)
+        live_market_focus = configured_live_market_focus()
         visible_rows = [
             row
             for row in published_rows
-            if str(row.get("trade_state") or "") in PAPER_ACTIVE_STATES
-            or self._local_date_for_timestamp(row.get("kickoff_utc") or row.get("kickoff")) == self._current_local_date()
+            if str(row.get("market") or "") in live_market_focus
+            and (
+                str(row.get("trade_state") or "") in PAPER_ACTIVE_STATES
+                or self._local_date_for_timestamp(row.get("kickoff_utc") or row.get("kickoff")) == self._current_local_date()
+            )
         ]
         member_rows = [
             {
