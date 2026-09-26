@@ -342,6 +342,7 @@ def test_quota_headers_captured_and_guard(monkeypatch):
     assert diagnostics["quota"]["remaining"] == 5
     assert diagnostics["quota"]["used"] == 95
     assert diagnostics["quota"]["last_request_cost"] == 1
+    assert diagnostics["quota"]["usage_credits_this_process"] == 1
 
 
 def test_quota_exhausted_state(monkeypatch):
