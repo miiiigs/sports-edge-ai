@@ -203,7 +203,7 @@ def test_api_football_schedule_fanout_is_capped_below_burst_limit(tmp_path, monk
     monkeypatch.setattr(provider, "_request_fixtures", lambda *, params: [])
 
     assert provider.get_fixtures_for_date(date(2026, 9, 26)) == []
-    assert observed["max_workers"] == 3
+    assert observed["max_workers"] == 2
 
 
 # --------------------------------------------------------- adaptive lifecycle
