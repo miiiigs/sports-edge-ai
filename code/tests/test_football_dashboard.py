@@ -5543,3 +5543,21 @@ def test_member_card_respects_live_market_focus(tmp_path, monkeypatch):
         "f3",
         "f4",
     }
+
+
+def test_prospective_focus_payload_separates_historical_and_prospective(tmp_path, monkeypatch):
+    services, _today_rows, _market_evaluations = _build_paginated_dashboard_services(
+        tmp_path,
+        monkeypatch,
+        fixture_count=1,
+    )
+
+    payload = services.get_prospective_focus_payload()
+
+    assert payload["cohort"]["focus_markets"] == ["asian_handicap", "corner_total"]
+    assert "historical" in payload
+    assert "prospective" in payload
+    assert "by_market" in payload
+    assert "clv" in payload
+    assert payload["prospective"]["positions"] == 0
+    assert payload["clv"]["average_clv"] is None

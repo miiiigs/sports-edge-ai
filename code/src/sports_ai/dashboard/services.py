@@ -21,7 +21,13 @@ from ..market_data.api_football import ApiFootballOddsProvider
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
 from ..market_data.the_odds_api import TheOddsApiProvider
-from ..storage import football_canonical_fixture, football_edge_desk, football_paper_trading, football_portfolio_selection
+from ..storage import (
+    football_canonical_fixture,
+    football_edge_desk,
+    football_paper_trading,
+    football_portfolio_selection,
+    football_prospective_cohort,
+)
 from . import storage
 from .current_market import build_fixture_market_evaluation
 from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
@@ -6598,6 +6604,30 @@ class DashboardServices:
             },
             "portfolio_publish_state": portfolio_context["publish_state"],
             "portfolio_publish_note": portfolio_context["publish_note"],
+            "system_status": self._build_system_status(
+                paper_status=paper_status,
+                storage_state=self._storage_status(),
+            ),
+        }
+
+    def get_prospective_focus_payload(self) -> dict[str, Any]:
+        """Historical reconciled vs prospective focused (AH + Corners) evidence.
+
+        The prospective cohort is persisted (reproducible after restart) and
+        counts only reconciled (duplicate-excluded) focused positions decided at
+        or after the cohort effective-from boundary. Historical all-time
+        performance is reported separately so the two can never be conflated.
+        """
+        paper_rows, paper_status = self._paper_positions()
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            cohort = football_prospective_cohort.resolve_cohort(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
+        prospective = football_prospective_cohort.prospective_focus_performance(paper_rows, cohort)
+        return {
+            **prospective,
+            "paper_status": paper_status,
             "system_status": self._build_system_status(
                 paper_status=paper_status,
                 storage_state=self._storage_status(),
