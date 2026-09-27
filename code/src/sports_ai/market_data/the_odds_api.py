@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic, sleep
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -68,6 +68,17 @@ TOTALS_SELECTION_UNDER = "UNDER"
 BTTS_SELECTION_YES = "YES"
 BTTS_SELECTION_NO = "NO"
 
+# Complete selection sets per market family, used to validate that a persisted
+# reference bookmaker can actually form a de-vig reference book before reuse is
+# authorized. An incomplete reference book must fail closed to a provider fetch.
+_REUSE_EXPECTED_SELECTIONS: dict[str, frozenset[str]] = {
+    MARKET_1X2: frozenset({"HOME", "DRAW", "AWAY"}),
+    MARKET_BTTS: frozenset({"YES", "NO"}),
+    MARKET_GOALS_TOTAL: frozenset({"OVER", "UNDER"}),
+    MARKET_CORNER_TOTAL: frozenset({"OVER", "UNDER"}),
+    MARKET_ASIAN_HANDICAP: frozenset({"HOME", "AWAY"}),
+}
+
 STATE_NOT_CONFIGURED = "NOT_CONFIGURED"
 STATE_IDLE = "IDLE"
 STATE_CONNECTED = "CONNECTED"
@@ -77,6 +88,25 @@ STATE_RATE_LIMITED = "RATE_LIMITED"
 STATE_QUOTA_GUARD = "QUOTA_GUARD"
 STATE_QUOTA_EXHAUSTED = "QUOTA_EXHAUSTED"
 STATE_NO_CURRENT_EVENTS = "NO_CURRENT_EVENTS"
+
+# Persisted snapshot reuse decision reasons. These are diagnostics only: a
+# reason never authorizes a stale or incompatible snapshot to be served.
+PERSISTED_REUSE_REASON_NO_DATA = "NO_PERSISTED_DATA"
+PERSISTED_REUSE_REASON_STALE = "STALE"
+PERSISTED_REUSE_REASON_FIXTURE_MISMATCH = "FIXTURE_MISMATCH"
+PERSISTED_REUSE_REASON_LINE_MISMATCH = "LINE_MISMATCH"
+PERSISTED_REUSE_REASON_MISSING_MARKET = "MISSING_MARKET"
+PERSISTED_REUSE_REASON_SEMANTICS_MISMATCH = "SEMANTICS_MISMATCH"
+
+
+@dataclass(frozen=True)
+class PersistedReuseResult:
+    """Outcome of evaluating persisted market_snapshots for a fixture request."""
+
+    reusable: bool
+    reason: str | None
+    snapshots: tuple[NormalizedMarketSnapshot, ...] = ()
+
 
 # Provider states that stop further event-level add-on market fan-out for a
 # sync. These requests are additive to the league-wide h2h,totals request, so
@@ -180,6 +210,7 @@ class TheOddsApiProvider:
         config: TheOddsApiProviderConfig | None = None,
         *,
         client: httpx.Client | None = None,
+        persisted_snapshot_reader: Callable[[str], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._config = TheOddsApiProviderConfig() if config is None else config
         self._client = client or httpx.Client(
@@ -189,6 +220,7 @@ class TheOddsApiProvider:
         )
         self._cache: dict[str, tuple[float, Any]] = {}
         self._cache_lock = Lock()
+        self._persisted_snapshot_reader = persisted_snapshot_reader
         self._quota: dict[str, Any] = {
             "remaining": None,
             "used": None,
@@ -206,6 +238,15 @@ class TheOddsApiProvider:
             "btts_truncated": 0,
             "additional_event_requests": 0,
             "additional_markets_truncated": 0,
+            "persisted_snapshot_hits": 0,
+            "memory_cache_hits": 0,
+            "provider_calls_avoided": 0,
+            "persisted_snapshot_stale": 0,
+            "persisted_snapshot_line_mismatch": 0,
+            "persisted_snapshot_fixture_mismatch": 0,
+            "persisted_snapshot_semantics_mismatch": 0,
+            "persisted_snapshot_missing_market": 0,
+            "event_request_cap_reached": 0,
         }
         self._stats_lock = Lock()
         self._state = STATE_NOT_CONFIGURED
@@ -215,6 +256,13 @@ class TheOddsApiProvider:
         self._last_success_at: str | None = None
         self._request_count = 0
         self._additional_event_requests_this_window = 0
+
+    def attach_persisted_snapshot_reader(
+        self,
+        reader: Callable[[str], list[dict[str, Any]]] | None,
+    ) -> None:
+        """Wire a reader for persisted market_snapshots (enables cross-restart reuse)."""
+        self._persisted_snapshot_reader = reader
 
     def begin_sync_window(self) -> None:
         """Reset the slate-wide add-on request allowance for one market sync."""
@@ -427,6 +475,8 @@ class TheOddsApiProvider:
         with self._cache_lock:
             cached = self._cache.get(cache_key)
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
+                with self._stats_lock:
+                    self._stats["memory_cache_hits"] = int(self._stats["memory_cache_hits"]) + 1
                 return cached[1]
 
         if self._state in {
@@ -462,6 +512,8 @@ class TheOddsApiProvider:
         with self._cache_lock:
             cached = self._cache.get(cache_key)
             if cached is not None and now - cached[0] < THE_ODDS_API_EVENTS_CACHE_TTL_SECONDS:
+                with self._stats_lock:
+                    self._stats["memory_cache_hits"] = int(self._stats["memory_cache_hits"]) + 1
                 return cached[1]
 
         payload = self._request_json(
@@ -590,6 +642,252 @@ class TheOddsApiProvider:
             threshold_minutes=self._freshness_threshold_minutes(),
             kickoff_utc=kickoff_utc,
         )
+
+    def _reference_bookmaker_priority(self) -> dict[str, int]:
+        return {name: index for index, name in enumerate(self._reference_bookmakers())}
+
+    def _reconstruct_persisted_snapshot(
+        self,
+        row: dict[str, Any],
+        *,
+        reference_priority: dict[str, int],
+        freshness_state: str,
+    ) -> NormalizedMarketSnapshot:
+        """Rebuild a NormalizedMarketSnapshot from a persisted market_snapshots row.
+
+        Line and selection are copied exactly from the stored row (already
+        canonical at ingestion). Reference bookmaker semantics are re-derived
+        from the current configuration rather than trusting any capture-time
+        designation, which is intentionally not persisted.
+        """
+        bookmaker = str(row.get("bookmaker") or "")
+        reference_rank = reference_priority.get(bookmaker.lower()) if bookmaker else None
+        line = row.get("line")
+        return NormalizedMarketSnapshot(
+            provider=self.provider_name(),
+            fixture_id=str(row["fixture_id"]),
+            provider_fixture_id=row.get("provider_fixture_id"),
+            captured_at=str(row["captured_at"]),
+            source_timestamp=row.get("provider_timestamp"),
+            market=str(row["market"]),
+            selection=str(row["selection"]),
+            line=None if line is None else float(line),
+            decimal_odds=float(row["odds"]),
+            bookmaker=bookmaker,
+            ingestion_version=str(row["ingestion_version"]),
+            provider_market_id=row.get("provider_market_id"),
+            is_pre_match=bool(row["is_pre_match"]),
+            home_team_name=row.get("home_team_name"),
+            away_team_name=row.get("away_team_name"),
+            competition_id=row.get("competition_id"),
+            competition_name=row.get("competition_name"),
+            kickoff_utc=row.get("kickoff_utc"),
+            freshness_state=freshness_state,
+            reference_designation="reference" if reference_rank is not None else "available",
+            reference_rank=reference_rank,
+        )
+
+    def resolve_persisted_snapshot(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        fixture_id: str,
+        market: str,
+        selection: str,
+        line: float | None,
+        bookmaker: str,
+        evaluated_at: str | None = None,
+        kickoff_utc: str | None = None,
+    ) -> tuple[NormalizedMarketSnapshot | None, str | None]:
+        """Return the latest fresh persisted snapshot for an exact identity.
+
+        The identity is (fixture_id, market, selection, line, bookmaker) with the
+        same provider and ingestion version. Line and fixture are never treated
+        as interchangeable: a different line for the same fixture/market, or a
+        different fixture, is reported as a distinct rejection reason.
+        """
+        evaluated_at = evaluated_at or _utc_now()
+        threshold = self._freshness_threshold_minutes()
+        reference_priority = self._reference_bookmaker_priority()
+
+        matching: list[dict[str, Any]] = []
+        saw_other_fixture = False
+        saw_other_line = False
+        for row in rows:
+            if str(row.get("provider")) != self.provider_name():
+                continue
+            if str(row.get("ingestion_version")) != THE_ODDS_API_INGESTION_VERSION:
+                continue
+            if not bool(row.get("is_pre_match")):
+                continue
+            if str(row.get("fixture_id")) != fixture_id:
+                saw_other_fixture = True
+                continue
+            if str(row.get("market")) != market:
+                continue
+            if str(row.get("selection")) != selection:
+                continue
+            if str(row.get("bookmaker") or "") != bookmaker:
+                continue
+            row_line = row.get("line")
+            if (line is None) != (row_line is None):
+                saw_other_line = True
+                continue
+            if line is not None and float(row_line) != line:
+                saw_other_line = True
+                continue
+            matching.append(row)
+
+        if not matching:
+            if saw_other_line:
+                return None, PERSISTED_REUSE_REASON_LINE_MISMATCH
+            if saw_other_fixture:
+                return None, PERSISTED_REUSE_REASON_FIXTURE_MISMATCH
+            return None, PERSISTED_REUSE_REASON_NO_DATA
+
+        latest = max(
+            matching,
+            key=lambda row: (str(row.get("captured_at") or ""), int(row.get("snapshot_id") or 0)),
+        )
+        freshness = classify_freshness_state(
+            source_timestamp=latest.get("provider_timestamp"),
+            evaluated_at=evaluated_at,
+            threshold_minutes=threshold,
+            kickoff_utc=kickoff_utc,
+        )
+        if freshness != FRESHNESS_STATE_FRESH:
+            return None, PERSISTED_REUSE_REASON_STALE
+        snapshot = self._reconstruct_persisted_snapshot(
+            latest,
+            reference_priority=reference_priority,
+            freshness_state=freshness,
+        )
+        return snapshot, None
+
+    def evaluate_persisted_odds_reuse(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        fixture_id: str,
+        evaluated_at: str | None = None,
+        kickoff_utc: str | None = None,
+    ) -> PersistedReuseResult:
+        """Decide whether persisted snapshots can satisfy a focused fixture request.
+
+        Reuse is allowed only when the persisted data covers every configured
+        focused market with fresh snapshots and retains a reference bookmaker for
+        each focused market. In non-focused (default) mode reuse is never
+        attempted so the historical all-markets provider path is unchanged.
+        """
+        if not is_focused_live_mode():
+            return PersistedReuseResult(False, PERSISTED_REUSE_REASON_NO_DATA)
+
+        evaluated_at = evaluated_at or _utc_now()
+        focus = self._live_market_focus()
+
+        identities: set[tuple[str, str, str, float | None]] = set()
+        for row in rows:
+            identities.add(
+                (
+                    str(row.get("bookmaker") or ""),
+                    str(row.get("market") or ""),
+                    str(row.get("selection") or ""),
+                    None if row.get("line") is None else float(row["line"]),
+                )
+            )
+
+        snapshots: list[NormalizedMarketSnapshot] = []
+        saw_stale = False
+        for bookmaker, market, selection, line in identities:
+            snapshot, reason = self.resolve_persisted_snapshot(
+                rows,
+                fixture_id=fixture_id,
+                market=market,
+                selection=selection,
+                line=line,
+                bookmaker=bookmaker,
+                evaluated_at=evaluated_at,
+                kickoff_utc=kickoff_utc,
+            )
+            if snapshot is not None:
+                snapshots.append(snapshot)
+            elif reason == PERSISTED_REUSE_REASON_STALE:
+                saw_stale = True
+
+        if not snapshots:
+            return PersistedReuseResult(
+                False,
+                PERSISTED_REUSE_REASON_STALE if saw_stale else PERSISTED_REUSE_REASON_NO_DATA,
+            )
+
+        present_markets = {snapshot.market for snapshot in snapshots}
+        missing = [market for market in focus if market not in present_markets]
+        if missing:
+            return PersistedReuseResult(False, PERSISTED_REUSE_REASON_MISSING_MARKET)
+
+        for market in focus:
+            expected = _REUSE_EXPECTED_SELECTIONS.get(market)
+            if expected is None:
+                continue
+            reference_by_bookmaker_line: dict[tuple[str, float | None], set[str]] = {}
+            for snapshot in snapshots:
+                if snapshot.market != market or snapshot.reference_designation != "reference":
+                    continue
+                reference_by_bookmaker_line.setdefault(
+                    (snapshot.bookmaker, snapshot.line),
+                    set(),
+                ).add(snapshot.selection)
+            if not any(
+                selections >= expected
+                for selections in reference_by_bookmaker_line.values()
+            ):
+                return PersistedReuseResult(False, PERSISTED_REUSE_REASON_SEMANTICS_MISMATCH)
+
+        return PersistedReuseResult(True, None, tuple(snapshots))
+
+    def _try_persisted_reuse(
+        self,
+        fixture_id: str,
+        fixture_context: dict[str, Any],
+    ) -> list[NormalizedMarketSnapshot] | None:
+        """Serve a focused fixture request from persisted snapshots when possible.
+
+        Returns reconstructed fresh snapshots when a persisted canonical snapshot
+        set satisfies the request, otherwise None so the normal provider path
+        runs. Never reuses stale or incompatible data merely to save a request.
+        """
+        reader = self._persisted_snapshot_reader
+        if reader is None:
+            return None
+        try:
+            rows = reader(fixture_id)
+        except Exception:
+            rows = []
+        if not rows:
+            return None
+
+        result = self.evaluate_persisted_odds_reuse(
+            rows,
+            fixture_id=fixture_id,
+            kickoff_utc=fixture_context.get("kickoff_utc"),
+        )
+        if result.reusable:
+            with self._stats_lock:
+                self._stats["persisted_snapshot_hits"] = int(self._stats["persisted_snapshot_hits"]) + 1
+                self._stats["provider_calls_avoided"] = int(self._stats["provider_calls_avoided"]) + 1
+            return list(result.snapshots)
+
+        counter = {
+            PERSISTED_REUSE_REASON_STALE: "persisted_snapshot_stale",
+            PERSISTED_REUSE_REASON_LINE_MISMATCH: "persisted_snapshot_line_mismatch",
+            PERSISTED_REUSE_REASON_FIXTURE_MISMATCH: "persisted_snapshot_fixture_mismatch",
+            PERSISTED_REUSE_REASON_SEMANTICS_MISMATCH: "persisted_snapshot_semantics_mismatch",
+            PERSISTED_REUSE_REASON_MISSING_MARKET: "persisted_snapshot_missing_market",
+        }.get(result.reason)
+        if counter is not None:
+            with self._stats_lock:
+                self._stats[counter] = int(self._stats[counter]) + 1
+        return None
 
     def _snapshots_from_event(
         self,
@@ -722,12 +1020,15 @@ class TheOddsApiProvider:
         with self._cache_lock:
             cached = self._cache.get(cache_key)
             if cached is not None and now - cached[0] < self._config.odds_cache_ttl_seconds:
+                with self._stats_lock:
+                    self._stats["memory_cache_hits"] = int(self._stats["memory_cache_hits"]) + 1
                 return cached[1]
 
         if self._additional_event_requests_this_window >= self._config.max_btts_event_requests:
             with self._stats_lock:
                 self._stats["btts_truncated"] = int(self._stats["btts_truncated"]) + 1
                 self._stats["additional_markets_truncated"] = int(self._stats["additional_markets_truncated"]) + 1
+                self._stats["event_request_cap_reached"] = int(self._stats["event_request_cap_reached"]) + 1
             return None
 
         payload = self._request_json(
@@ -918,6 +1219,9 @@ class TheOddsApiProvider:
             raise MarketProviderError("fixture_context is required for cross-provider market mapping")
         competition_id = str(fixture_context.get("competition_id") or "")
         sport_key = self._sport_key(competition_id)
+        reused = self._try_persisted_reuse(fixture_id, fixture_context)
+        if reused is not None:
+            return reused
         events = self._sport_odds_payload(sport_key)
         matches = self._match_events(fixture_context, events) if events else []
         if len(matches) > 1:
@@ -1037,15 +1341,25 @@ class TheOddsApiProvider:
             "last_error": self._last_error,
             "provider_error_code": self._last_provider_error_code,
             "request_count": self._request_count,
+            "provider_calls_made": self._request_count,
             "events_fetched": stats["events_fetched"],
             "fixtures_matched": stats["matched"],
             "fixtures_unmatched": stats["unmatched"],
             "fixtures_ambiguous": stats["ambiguous"],
+            "persisted_snapshot_hits": int(stats.get("persisted_snapshot_hits", 0)),
+            "memory_cache_hits": int(stats.get("memory_cache_hits", 0)),
+            "provider_calls_avoided": int(stats.get("provider_calls_avoided", 0)),
+            "persisted_snapshot_stale": int(stats.get("persisted_snapshot_stale", 0)),
+            "persisted_snapshot_line_mismatch": int(stats.get("persisted_snapshot_line_mismatch", 0)),
+            "persisted_snapshot_fixture_mismatch": int(stats.get("persisted_snapshot_fixture_mismatch", 0)),
+            "persisted_snapshot_semantics_mismatch": int(stats.get("persisted_snapshot_semantics_mismatch", 0)),
+            "persisted_snapshot_missing_market": int(stats.get("persisted_snapshot_missing_market", 0)),
             "btts_event_requests": int(stats.get("btts_event_requests", 0)),
             "btts_truncated": int(stats.get("btts_truncated", 0)),
             "additional_event_requests": int(stats.get("additional_event_requests", 0)),
             "additional_event_request_cap": int(self._config.max_btts_event_requests),
             "additional_markets_truncated": int(stats.get("additional_markets_truncated", 0)),
+            "event_request_cap_reached": int(stats.get("event_request_cap_reached", 0)),
             "bookmakers": dict(stats["bookmakers"]),
             "competition_mappings": {
                 key: {
