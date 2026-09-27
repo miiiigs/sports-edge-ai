@@ -5466,3 +5466,80 @@ def test_betting_desk_respects_live_market_focus(tmp_path, monkeypatch):
         "asian_handicap",
         "corner_total",
     }
+
+
+def test_member_card_respects_live_market_focus(tmp_path, monkeypatch):
+    services = DashboardServices(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+    published_rows = [
+        {
+            "fixture_id": "f1",
+            "market": "1x2",
+            "trade_state": "PENDING",
+            "home_team_name": "Arsenal",
+            "away_team_name": "Chelsea",
+            "bet_label": "Arsenal",
+        },
+        {
+            "fixture_id": "f2",
+            "market": "asian_handicap",
+            "trade_state": "PENDING",
+            "home_team_name": "Arsenal",
+            "away_team_name": "Chelsea",
+            "bet_label": "Arsenal -0.5",
+        },
+        {
+            "fixture_id": "f3",
+            "market": "corner_total",
+            "trade_state": "PENDING",
+            "home_team_name": "Arsenal",
+            "away_team_name": "Chelsea",
+            "bet_label": "Over 9.5",
+        },
+        {
+            "fixture_id": "f4",
+            "market": "btts",
+            "trade_state": "PENDING",
+            "home_team_name": "Arsenal",
+            "away_team_name": "Chelsea",
+            "bet_label": "Both Teams To Score",
+        },
+    ]
+    monkeypatch.setattr(services, "_paper_positions", lambda: ([], {}))
+    monkeypatch.setattr(
+        services,
+        "_portfolio_selection_context",
+        lambda paper_rows: {
+            "publish_state": "CURRENT PORTFOLIO",
+            "publish_note": "test",
+            "policy": None,
+        },
+    )
+    monkeypatch.setattr(services, "_storage_status", lambda: {})
+    monkeypatch.setattr(services, "_build_system_status", lambda **kwargs: {})
+    monkeypatch.setattr(
+        services,
+        "_published_pick_rows",
+        lambda paper_rows, selection_context=None: published_rows,
+    )
+
+    monkeypatch.setenv(
+        "SPORTS_AI_FOOTBALL_LIVE_MARKET_FOCUS",
+        "asian_handicap,corner_total",
+    )
+    payload = services.get_member_card_payload()
+
+    assert {row["fixture_id"] for row in payload["rows"]} == {"f2", "f3"}
+    assert {row["pick"] for row in payload["rows"]} == {"Arsenal -0.5", "Over 9.5"}
+
+    monkeypatch.delenv("SPORTS_AI_FOOTBALL_LIVE_MARKET_FOCUS", raising=False)
+    payload_all = services.get_member_card_payload()
+    assert {row["fixture_id"] for row in payload_all["rows"]} == {
+        "f1",
+        "f2",
+        "f3",
+        "f4",
+    }
