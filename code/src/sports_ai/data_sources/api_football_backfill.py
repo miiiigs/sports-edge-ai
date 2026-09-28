@@ -73,12 +73,17 @@ ALL_FAILURE_KINDS: frozenset[str] = frozenset(
 )
 
 # Failures that can be retried on a later resume without inventing data.
+# ``MISSING_REQUIRED_STATISTICS`` is deliberately retryable: an empty or
+# incomplete statistics payload is often a temporary source-integration gap and
+# must not permanently eliminate a fixture from future coverage. It becomes
+# ``TERMINAL_SOURCE_GAP`` only after the configured retry allowance is exhausted.
 RETRYABLE_FAILURE_KINDS: frozenset[str] = frozenset(
-    {FAILURE_QUOTA_BLOCK, FAILURE_TRANSIENT, FAILURE_PERSISTENCE}
+    {FAILURE_QUOTA_BLOCK, FAILURE_TRANSIENT, FAILURE_PERSISTENCE, FAILURE_MISSING_STATS}
 )
 
-# Failures that must never be endlessly retried: the source genuinely lacks the
-# required inputs, or the payload/normalization can never succeed.
+# Failures that are terminal immediately: the fixture/league/season does not
+# exist authoritatively, the payload is structurally invalid, or normalization
+# can never succeed for this source identity.
 TERMINAL_FAILURE_KINDS: frozenset[str] = ALL_FAILURE_KINDS - RETRYABLE_FAILURE_KINDS
 
 
@@ -127,9 +132,11 @@ class BackfillSpec:
     """An explicit, bounded backfill invocation.
 
     ``max_request_cap`` is a hard ceiling on provider requests for one run; it is
-    not optional and there is no implicit default. ``max_retries_per_fixture``
-    bounds how many times a single retryable failure is re-attempted across
-    resumes before the fixture is treated as a terminal source gap.
+    not optional and there is no implicit default. ``max_retries_per_fixture`` is
+    the number of retries allowed AFTER the initial attempt (so a fixture may be
+    contacted at most ``1 + max_retries_per_fixture`` times). After that
+    allowance is exhausted on retryable failures the fixture becomes a terminal
+    source gap.
     """
 
     competition_id: str
@@ -205,7 +212,7 @@ def backfill_job_id(*, provider: str, competition_id: str, season: int, provider
 class BackfillEligibility:
     permitted: bool
     reason: str | None
-    projected_requests: int
+    required_requests: int
     max_request_cap: int
     budget_state: str
     budget_remaining: int | None
@@ -216,36 +223,39 @@ class BackfillEligibility:
 
 def evaluate_backfill_eligibility(
     *,
-    projected_requests: int,
+    required_requests: int,
     max_request_cap: int,
     budget_state: str,
     budget_remaining: int | None,
     paid_provider_calls_allowed: bool = True,
 ) -> BackfillEligibility:
-    """Decide, before any provider call, whether a backfill may run.
+    """Decide, before any provider call, whether a backfill invocation may run.
+
+    ``required_requests`` is the *bounded* number of requests THIS invocation
+    needs the provider budget to cover (already accounting for the hard cap and
+    any already-complete/terminal fixtures). It is NOT the whole-season total;
+    future resumptions carry their own budget requirement.
 
     LOW-priority historical traffic is only permitted while the shared quota is
     HEALTHY, the paid-provider gate is open, and the remaining budget (when
-    known) covers the projected cost.
+    known) covers the bounded required amount.
 
-    The ``max_request_cap`` is a per-invocation execution ceiling, not a
-    permit/deny gate: when the projected cost exceeds the cap the run is
-    permitted to proceed and will process a bounded prefix (leaving the rest
-    resumable). An invalid (zero/negative) cap is rejected outright.
+    The ``max_request_cap`` is a per-invocation execution ceiling; an invalid
+    (zero/negative) cap is rejected outright.
     """
-    projected = max(0, int(projected_requests))
+    required = max(0, int(required_requests))
     cap = max(0, int(max_request_cap))
     if cap < 1:
-        return BackfillEligibility(False, "HARD_CAP_INVALID", projected, cap, budget_state, budget_remaining)
+        return BackfillEligibility(False, "HARD_CAP_INVALID", required, cap, budget_state, budget_remaining)
     if not paid_provider_calls_allowed:
-        return BackfillEligibility(False, "PAID_PROVIDER_CALLS_DISABLED", projected, cap, budget_state, budget_remaining)
+        return BackfillEligibility(False, "PAID_PROVIDER_CALLS_DISABLED", required, cap, budget_state, budget_remaining)
     if budget_state == BUDGET_EXHAUSTED:
-        return BackfillEligibility(False, "BUDGET_EXHAUSTED", projected, cap, budget_state, budget_remaining)
+        return BackfillEligibility(False, "BUDGET_EXHAUSTED", required, cap, budget_state, budget_remaining)
     if budget_state != BUDGET_HEALTHY:
-        return BackfillEligibility(False, f"LOW_PRIORITY_QUOTA_{budget_state}", projected, cap, budget_state, budget_remaining)
-    if budget_remaining is not None and int(budget_remaining) < projected:
-        return BackfillEligibility(False, "BUDGET_INSUFFICIENT", projected, cap, budget_state, budget_remaining)
-    return BackfillEligibility(True, None, projected, cap, budget_state, budget_remaining)
+        return BackfillEligibility(False, f"LOW_PRIORITY_QUOTA_{budget_state}", required, cap, budget_state, budget_remaining)
+    if budget_remaining is not None and int(budget_remaining) < required:
+        return BackfillEligibility(False, "BUDGET_INSUFFICIENT", required, cap, budget_state, budget_remaining)
+    return BackfillEligibility(True, None, required, cap, budget_state, budget_remaining)
 
 
 # ---------------------------------------------------------------------------
@@ -289,11 +299,18 @@ def build_backfill_audit_manifest(
     request_cap: int,
     missing_field_counts: Mapping[str, int],
     run_state: str,
+    projected_total_requests: int = 0,
+    planned_requests_this_run: int = 0,
     retryable_failure_count: int = 0,
     terminal_failure_count: int = 0,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Build a reproducible, secret-free audit summary.
+
+    ``projected_total_requests`` is the informational whole-job cost (fixture
+    list + every outstanding statistic). ``planned_requests_this_run`` is the
+    bounded number of provider requests this invocation intends to make, already
+    capped by ``request_cap`` and by already-complete/terminal fixtures.
 
     The content signature is computed over a stable subset of deterministic
     fields so two identical backfill states produce the same signature.
@@ -314,6 +331,8 @@ def build_backfill_audit_manifest(
         "terminal_failure_count": int(terminal_failure_count),
         "request_count": int(request_count),
         "request_cap": int(request_cap),
+        "projected_total_requests": int(projected_total_requests),
+        "planned_requests_this_run": int(planned_requests_this_run),
         "missing_field_counts": missing,
         "run_state": run_state,
     }
@@ -328,6 +347,8 @@ def build_backfill_audit_manifest(
         "incomplete_count": int(incomplete_count),
         "request_count": int(request_count),
         "request_cap": int(request_cap),
+        "projected_total_requests": int(projected_total_requests),
+        "planned_requests_this_run": int(planned_requests_this_run),
         "missing_field_counts": missing,
         "run_state": run_state,
     }

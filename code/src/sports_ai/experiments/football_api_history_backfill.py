@@ -4,13 +4,18 @@ This module is the ONLY place that turns a validated :class:`BackfillSpec` into
 provider traffic. It:
 
 * resolves the pinned competition + season to a stable provider league id;
+* distinguishes the informational whole-job cost (``projected_total_requests``)
+  from the bounded, resumable per-invocation plan (``planned_requests_this_run``)
+  so a partial run is never refused for the cost of future resumptions;
 * runs a pre-flight budget/eligibility gate BEFORE any provider call;
 * supports a true zero-provider-request dry run;
-* always reads the (single) fixture list once per run, then checkpoints
-  per-fixture progress so a later resume re-fetches the list but never
-  repurchases already-complete statistics;
+* re-reads the (single) fixture list once per run, then checkpoints per-fixture
+  progress so a later resume re-fetches the list but never repurchases
+  already-complete statistics;
 * writes GAP-ready events idempotently (no duplicate historical events);
-* classifies every per-fixture failure as retryable or terminal.
+* classifies every per-fixture failure as retryable or terminal, retrying
+  missing/incomplete statistics a bounded number of times before declaring a
+  terminal source gap.
 
 Historical traffic is LOW priority by construction; the provider's own request
 budget still enforces the priority on each call.
@@ -23,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol, Sequence
 
 from ..data_sources.api_football_backfill import (
+    FAILURE_MALFORMED,
     FAILURE_MISSING_STATS,
     FAILURE_NORMALIZATION,
     FAILURE_PERSISTENCE,
@@ -89,7 +95,10 @@ class BackfillResult:
     dry_run: bool
     permitted: bool
     block_reason: str | None
-    projected_request_count: int
+    # Whole-job cost (informational): 1 fixture-list + every outstanding statistic.
+    projected_total_requests: int
+    # Bounded provider requests THIS invocation intends to make (already capped).
+    planned_requests_this_run: int
     max_request_cap: int
     target_fixture_count: int
     completed_count: int
@@ -222,9 +231,13 @@ def _blocked_result(
     target: BackfillTarget,
     reason: str,
     dry_run: bool,
-    projected_request_count: int,
+    projected_total_requests: int,
+    planned_requests_this_run: int,
     target_fixture_count: int,
+    provider_request_count: int = 0,
+    completed_count: int = 0,
 ) -> BackfillResult:
+    incomplete = max(0, target_fixture_count - completed_count)
     manifest = build_backfill_audit_manifest(
         provider=target.provider,
         provider_league_id=target.provider_league_id,
@@ -233,10 +246,12 @@ def _blocked_result(
         season=spec.season,
         source_version=target.source_version,
         fixture_count=target_fixture_count,
-        gap_ready_count=0,
-        incomplete_count=target_fixture_count,
-        request_count=0,
+        gap_ready_count=completed_count,
+        incomplete_count=incomplete,
+        request_count=provider_request_count,
         request_cap=spec.max_request_cap,
+        projected_total_requests=projected_total_requests,
+        planned_requests_this_run=planned_requests_this_run,
         missing_field_counts={},
         run_state=JOB_BLOCKED,
         dry_run=dry_run,
@@ -250,19 +265,36 @@ def _blocked_result(
         dry_run=dry_run,
         permitted=False,
         block_reason=reason,
-        projected_request_count=projected_request_count,
+        projected_total_requests=projected_total_requests,
+        planned_requests_this_run=planned_requests_this_run,
         max_request_cap=spec.max_request_cap,
         target_fixture_count=target_fixture_count,
-        completed_count=0,
-        gap_ready_count=0,
-        incomplete_count=target_fixture_count,
+        completed_count=completed_count,
+        gap_ready_count=completed_count,
+        incomplete_count=incomplete,
         retryable_failure_count=0,
         terminal_failure_count=0,
-        provider_request_count=0,
+        provider_request_count=provider_request_count,
         missing_field_counts={},
         completion_state=JOB_BLOCKED,
         manifest=manifest,
     )
+
+
+def _planned_for_known_count(
+    *,
+    known_fixture_count: int,
+    completed_count: int,
+    max_request_cap: int,
+) -> int:
+    """Bounded planned requests for this invocation from a known/hinted count.
+
+    The fixture list is one request; at most ``max_request_cap - 1`` statistics
+    requests follow. Already-complete fixtures need no statistics.
+    """
+    outstanding = max(0, int(known_fixture_count) - int(completed_count))
+    stats = min(outstanding, max(0, int(max_request_cap) - 1))
+    return 1 + stats
 
 
 def run_backfill(
@@ -294,7 +326,8 @@ def run_backfill(
             target=empty_target,
             reason=validation_error,
             dry_run=dry_run,
-            projected_request_count=0,
+            projected_total_requests=0,
+            planned_requests_this_run=0,
             target_fixture_count=0,
         )
 
@@ -314,7 +347,8 @@ def run_backfill(
             target=no_id_target,
             reason="NO_STABLE_LEAGUE_ID",
             dry_run=dry_run,
-            projected_request_count=0,
+            projected_total_requests=0,
+            planned_requests_this_run=0,
             target_fixture_count=0,
         )
 
@@ -345,9 +379,16 @@ def run_backfill(
     elif fixture_count_hint is not None:
         known_fixture_count = max(0, int(fixture_count_hint))
 
-    projected = 1 + known_fixture_count
+    # Whole-job cost (informational) and bounded per-invocation plan.
+    projected_total_requests = 1 + known_fixture_count
+    planned_requests_this_run = _planned_for_known_count(
+        known_fixture_count=known_fixture_count,
+        completed_count=len(completed_ids),
+        max_request_cap=spec.max_request_cap,
+    )
+
     eligibility = evaluate_backfill_eligibility(
-        projected_requests=projected,
+        required_requests=planned_requests_this_run,
         max_request_cap=spec.max_request_cap,
         budget_state=budget.quota_state(),
         budget_remaining=budget.effective_remaining(),
@@ -369,7 +410,7 @@ def run_backfill(
             required_statistics=_REQUIRED_STATISTICS,
             max_request_cap=spec.max_request_cap,
             max_retries_per_fixture=spec.max_retries_per_fixture,
-            projected_request_count=projected,
+            projected_total_requests=projected_total_requests,
             target_fixture_count=known_fixture_count,
             start_timestamp=now_iso,
             completion_state=JOB_BLOCKED,
@@ -380,13 +421,15 @@ def run_backfill(
             target=target,
             reason=eligibility.reason,
             dry_run=dry_run,
-            projected_request_count=projected,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=planned_requests_this_run,
             target_fixture_count=known_fixture_count,
+            completed_count=len(completed_ids),
         )
 
     if dry_run:
         completed_count = len(completed_ids)
-        incomplete = max(0, known_fixture_count - completed_count)
+        outstanding = max(0, known_fixture_count - completed_count)
         if known_fixture_count > 0 and completed_count == known_fixture_count:
             run_state = JOB_COMPLETE
         elif completed_count == 0:
@@ -402,9 +445,11 @@ def run_backfill(
             source_version=target.source_version,
             fixture_count=known_fixture_count,
             gap_ready_count=completed_count,
-            incomplete_count=incomplete,
+            incomplete_count=outstanding,
             request_count=0,
             request_cap=spec.max_request_cap,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=planned_requests_this_run,
             missing_field_counts={},
             run_state=run_state,
             dry_run=True,
@@ -418,12 +463,13 @@ def run_backfill(
             dry_run=True,
             permitted=True,
             block_reason=None,
-            projected_request_count=projected,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=planned_requests_this_run,
             max_request_cap=spec.max_request_cap,
             target_fixture_count=known_fixture_count,
             completed_count=completed_count,
             gap_ready_count=completed_count,
-            incomplete_count=incomplete,
+            incomplete_count=outstanding,
             retryable_failure_count=0,
             terminal_failure_count=0,
             provider_request_count=0,
@@ -447,12 +493,15 @@ def run_backfill(
         required_statistics=_REQUIRED_STATISTICS,
         max_request_cap=spec.max_request_cap,
         max_retries_per_fixture=spec.max_retries_per_fixture,
-        projected_request_count=projected,
+        projected_total_requests=projected_total_requests,
         target_fixture_count=known_fixture_count,
         start_timestamp=now_iso,
         completion_state=JOB_IN_PROGRESS,
     )
 
+    # The fixture-list request is accounted for as soon as it is initiated, so a
+    # failure after the request is sent still reflects a consumed attempt.
+    provider_request_count = 1
     try:
         raw_fixtures = provider.get_historical_fixtures(
             league_id=target.provider_league_id,
@@ -466,8 +515,11 @@ def run_backfill(
             target=target,
             reason=classify_exception(exc),
             dry_run=False,
-            projected_request_count=projected,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=planned_requests_this_run,
             target_fixture_count=known_fixture_count,
+            provider_request_count=provider_request_count,
+            completed_count=len(completed_ids),
         )
     if raw_fixtures is None:
         store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=now_iso)
@@ -475,13 +527,15 @@ def run_backfill(
             job_id=job_id,
             spec=spec,
             target=target,
-            reason="MALFORMED_PAYLOAD",
+            reason=FAILURE_MALFORMED,
             dry_run=False,
-            projected_request_count=projected,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=planned_requests_this_run,
             target_fixture_count=known_fixture_count,
+            provider_request_count=provider_request_count,
+            completed_count=len(completed_ids),
         )
 
-    provider_request_count = 1  # the fixture-list request
     targets = completed_target_fixtures(
         raw_fixtures,
         competition_id=target.competition_id,
@@ -489,6 +543,14 @@ def run_backfill(
         season=spec.season,
     )
     target_fixture_count = len(targets)
+    projected_total_requests = 1 + target_fixture_count
+    store.update_job_plan(
+        store_conn,
+        job_id=job_id,
+        projected_total_requests=projected_total_requests,
+        target_fixture_count=target_fixture_count,
+        updated_at=now_iso,
+    )
 
     if target_fixture_count == 0:
         store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=now_iso)
@@ -496,10 +558,13 @@ def run_backfill(
             job_id=job_id,
             spec=spec,
             target=target,
-            reason="NOT_FOUND",
+            reason=FAILURE_NOT_FOUND,
             dry_run=False,
-            projected_request_count=projected,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=provider_request_count,
             target_fixture_count=0,
+            provider_request_count=provider_request_count,
+            completed_count=len(completed_ids),
         )
 
     # Seed PENDING progress rows for any target fixture we have not seen before
@@ -518,14 +583,31 @@ def run_backfill(
             state=FIXTURE_PENDING,
             failure_kind=None,
             missing_fields=(),
-            retry_count=0,
+            attempt_count=0,
             event_id=None,
             updated_at=now_iso,
         )
 
-    projected = 1 + target_fixture_count
+    # Refresh progress view after seeding.
+    progress_rows = store.fetch_fixture_progress(store_conn, job_id)
+    progress_by_canonical = {row["canonical_fixture_id"]: row for row in progress_rows}
+    completed_ids = store.completed_canonical_fixture_ids(store_conn, job_id)
+
+    outstanding = [
+        target_row
+        for target_row, _raw in targets
+        if target_row.canonical_fixture_id not in completed_ids
+        and progress_by_canonical.get(target_row.canonical_fixture_id, {}).get("state") != FIXTURE_TERMINAL
+    ]
+
+    # The fixture-list request is already spent; only the remaining bounded
+    # statistics requests count against the current remaining quota.
+    remaining_cap = max(0, spec.max_request_cap - provider_request_count)
+    planned_stats_this_run = min(len(outstanding), remaining_cap)
+    planned_requests_this_run = provider_request_count + planned_stats_this_run
+
     post_fetch_eligibility = evaluate_backfill_eligibility(
-        projected_requests=projected,
+        required_requests=planned_stats_this_run,
         max_request_cap=spec.max_request_cap,
         budget_state=budget.quota_state(),
         budget_remaining=budget.effective_remaining(),
@@ -533,6 +615,7 @@ def run_backfill(
     )
     if not post_fetch_eligibility.permitted:
         store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=now_iso)
+        incomplete = target_fixture_count - len(completed_ids)
         manifest = build_backfill_audit_manifest(
             provider=target.provider,
             provider_league_id=target.provider_league_id,
@@ -542,9 +625,11 @@ def run_backfill(
             source_version=target.source_version,
             fixture_count=target_fixture_count,
             gap_ready_count=len(completed_ids),
-            incomplete_count=target_fixture_count - len(completed_ids),
+            incomplete_count=incomplete,
             request_count=provider_request_count,
             request_cap=spec.max_request_cap,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=planned_requests_this_run,
             missing_field_counts={},
             run_state=JOB_BLOCKED,
         )
@@ -557,12 +642,13 @@ def run_backfill(
             dry_run=False,
             permitted=False,
             block_reason=post_fetch_eligibility.reason,
-            projected_request_count=projected,
+            projected_total_requests=projected_total_requests,
+            planned_requests_this_run=planned_requests_this_run,
             max_request_cap=spec.max_request_cap,
             target_fixture_count=target_fixture_count,
             completed_count=len(completed_ids),
             gap_ready_count=len(completed_ids),
-            incomplete_count=target_fixture_count - len(completed_ids),
+            incomplete_count=incomplete,
             retryable_failure_count=0,
             terminal_failure_count=0,
             provider_request_count=provider_request_count,
@@ -571,41 +657,14 @@ def run_backfill(
             manifest=manifest,
         )
 
-    # Refresh progress view after seeding.
-    progress_rows = store.fetch_fixture_progress(store_conn, job_id)
-    progress_by_canonical = {row["canonical_fixture_id"]: row for row in progress_rows}
-    completed_ids = store.completed_canonical_fixture_ids(store_conn, job_id)
-
     raw_by_provider_id = {tgt.provider_fixture_id: raw for tgt, raw in targets}
-    ordered = [
-        target_row
-        for target_row, _raw in targets
-        if target_row.canonical_fixture_id not in completed_ids
-        and progress_by_canonical.get(target_row.canonical_fixture_id, {}).get("state") != FIXTURE_TERMINAL
-    ]
 
-    missing_field_counts: dict[str, int] = {field: 0 for field in _GAP_FIELDS}
-
-    for target_row in ordered:
-        existing = progress_by_canonical.get(target_row.canonical_fixture_id, {})
-        retry_count = int(existing.get("retry_count") or 0)
-
-        if retry_count >= spec.max_retries_per_fixture and existing.get("state") == FIXTURE_RETRYABLE:
-            _record_failure(
-                store_conn,
-                job_id=job_id,
-                target_row=target_row,
-                failure_kind=FAILURE_TERMINAL_GAP,
-                message="retry budget exhausted",
-                missing_fields=(),
-                state=FIXTURE_TERMINAL,
-                retry_count=retry_count,
-                now_iso=now_iso,
-            )
-            continue
-
+    for target_row in outstanding:
         if provider_request_count >= spec.max_request_cap:
             break
+
+        existing = progress_by_canonical.get(target_row.canonical_fixture_id, {})
+        attempt_count = int(existing.get("attempt_count") or 0)
 
         provider_request_count += 1
         try:
@@ -613,31 +672,30 @@ def run_backfill(
                 provider_fixture_id=target_row.provider_fixture_id,
             )
         except Exception as exc:  # noqa: BLE001
-            kind = classify_exception(exc)
-            _record_failure(
+            _record_attempt_failure(
                 store_conn,
                 job_id=job_id,
                 target_row=target_row,
-                failure_kind=kind,
+                failure_kind=classify_exception(exc),
                 message=str(exc),
                 missing_fields=(),
-                state=FIXTURE_RETRYABLE if is_retryable_failure(kind) else FIXTURE_TERMINAL,
-                retry_count=retry_count,
+                attempt_count=attempt_count,
+                max_retries_per_fixture=spec.max_retries_per_fixture,
                 now_iso=now_iso,
             )
             continue
 
         if not statistics:
             kind = FAILURE_QUOTA_BLOCK if budget.quota_state() != "HEALTHY" else FAILURE_MISSING_STATS
-            _record_failure(
+            _record_attempt_failure(
                 store_conn,
                 job_id=job_id,
                 target_row=target_row,
                 failure_kind=kind,
                 message="provider returned no statistics rows",
                 missing_fields=(),
-                state=FIXTURE_RETRYABLE if is_retryable_failure(kind) else FIXTURE_TERMINAL,
-                retry_count=retry_count,
+                attempt_count=attempt_count,
+                max_retries_per_fixture=spec.max_retries_per_fixture,
                 now_iso=now_iso,
             )
             continue
@@ -652,32 +710,29 @@ def run_backfill(
             season_code=target.season_code,
         )
         if normalized is None:
-            _record_failure(
+            _record_attempt_failure(
                 store_conn,
                 job_id=job_id,
                 target_row=target_row,
                 failure_kind=FAILURE_NORMALIZATION,
                 message="fixture could not be normalized",
                 missing_fields=(),
-                state=FIXTURE_TERMINAL,
-                retry_count=retry_count,
+                attempt_count=attempt_count,
+                max_retries_per_fixture=spec.max_retries_per_fixture,
                 now_iso=now_iso,
             )
             continue
 
         if not event_is_gap_ready(normalized):
-            missing = missing_gap_fields(normalized)
-            for field in missing:
-                missing_field_counts[field] = missing_field_counts.get(field, 0) + 1
-            _record_failure(
+            _record_attempt_failure(
                 store_conn,
                 job_id=job_id,
                 target_row=target_row,
                 failure_kind=FAILURE_MISSING_STATS,
                 message="required GAP statistics missing",
-                missing_fields=missing,
-                state=FIXTURE_TERMINAL,
-                retry_count=retry_count,
+                missing_fields=missing_gap_fields(normalized),
+                attempt_count=attempt_count,
+                max_retries_per_fixture=spec.max_retries_per_fixture,
                 now_iso=now_iso,
             )
             continue
@@ -685,15 +740,15 @@ def run_backfill(
         try:
             store.upsert_backfill_event(store_conn, normalized)
         except Exception as exc:  # noqa: BLE001
-            _record_failure(
+            _record_attempt_failure(
                 store_conn,
                 job_id=job_id,
                 target_row=target_row,
                 failure_kind=FAILURE_PERSISTENCE,
                 message=str(exc),
                 missing_fields=(),
-                state=FIXTURE_RETRYABLE,
-                retry_count=retry_count,
+                attempt_count=attempt_count,
+                max_retries_per_fixture=spec.max_retries_per_fixture,
                 now_iso=now_iso,
             )
             continue
@@ -709,7 +764,7 @@ def run_backfill(
             state=FIXTURE_COMPLETE,
             failure_kind=None,
             missing_fields=(),
-            retry_count=retry_count,
+            attempt_count=attempt_count + 1,
             event_id=normalized.event_id,
             updated_at=now_iso,
         )
@@ -721,13 +776,14 @@ def run_backfill(
         target=target,
         spec=spec,
         target_fixture_count=target_fixture_count,
-        projected=projected,
+        projected_total_requests=projected_total_requests,
+        planned_requests_this_run=planned_requests_this_run,
         provider_request_count=provider_request_count,
         now_iso=now_iso,
     )
 
 
-def _record_failure(
+def _record_attempt_failure(
     store_conn,
     *,
     job_id: str,
@@ -735,10 +791,31 @@ def _record_failure(
     failure_kind: str,
     message: str | None,
     missing_fields: Sequence[str],
-    state: str,
-    retry_count: int,
+    attempt_count: int,
+    max_retries_per_fixture: int,
     now_iso: str,
 ) -> None:
+    """Record one failed provider attempt, deciding retryable vs terminal.
+
+    ``attempt_count`` is the number of attempts ALREADY made before this one.
+    A retryable failure becomes terminal only once the configured retry allowance
+    (``max_retries_per_fixture`` retries after the initial attempt) is exhausted.
+    Terminal failures (NOT_FOUND / MALFORMED / NORMALIZATION) stay terminal
+    immediately.
+    """
+    new_attempt_count = int(attempt_count) + 1
+    if is_retryable_failure(failure_kind):
+        retries_used = new_attempt_count - 1
+        if retries_used >= int(max_retries_per_fixture):
+            state = FIXTURE_TERMINAL
+            kind = FAILURE_TERMINAL_GAP
+        else:
+            state = FIXTURE_RETRYABLE
+            kind = failure_kind
+    else:
+        state = FIXTURE_TERMINAL
+        kind = failure_kind
+
     store.upsert_fixture_progress(
         store_conn,
         job_id=job_id,
@@ -748,9 +825,9 @@ def _record_failure(
         home_team=target_row.home_team,
         away_team=target_row.away_team,
         state=state,
-        failure_kind=failure_kind,
+        failure_kind=kind,
         missing_fields=tuple(missing_fields),
-        retry_count=int(retry_count) + (1 if state == FIXTURE_RETRYABLE else 0),
+        attempt_count=new_attempt_count,
         event_id=None,
         updated_at=now_iso,
     )
@@ -759,7 +836,7 @@ def _record_failure(
         job_id=job_id,
         canonical_fixture_id=target_row.canonical_fixture_id,
         provider_fixture_id=target_row.provider_fixture_id,
-        failure_kind=failure_kind,
+        failure_kind=kind,
         message=message,
         recorded_at=now_iso,
     )
@@ -781,7 +858,8 @@ def _summarize(
     target: BackfillTarget,
     spec: BackfillSpec,
     target_fixture_count: int,
-    projected: int,
+    projected_total_requests: int,
+    planned_requests_this_run: int,
     provider_request_count: int,
     now_iso: str,
 ) -> BackfillResult:
@@ -811,6 +889,8 @@ def _summarize(
         incomplete_count=incomplete,
         request_count=provider_request_count,
         request_cap=spec.max_request_cap,
+        projected_total_requests=projected_total_requests,
+        planned_requests_this_run=planned_requests_this_run,
         missing_field_counts=missing_field_counts,
         run_state=run_state,
         retryable_failure_count=len(retryable),
@@ -825,7 +905,8 @@ def _summarize(
         dry_run=False,
         permitted=True,
         block_reason=None,
-        projected_request_count=projected,
+        projected_total_requests=projected_total_requests,
+        planned_requests_this_run=planned_requests_this_run,
         max_request_cap=spec.max_request_cap,
         target_fixture_count=target_fixture_count,
         completed_count=len(completed),
@@ -896,4 +977,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

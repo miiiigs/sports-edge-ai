@@ -41,7 +41,7 @@ SCHEMA_STATEMENTS = (
         required_statistics_json TEXT NOT NULL,
         max_request_cap INTEGER NOT NULL,
         max_retries_per_fixture INTEGER NOT NULL,
-        projected_request_count INTEGER NOT NULL,
+        projected_total_requests INTEGER NOT NULL,
         target_fixture_count INTEGER NOT NULL,
         start_timestamp TEXT NOT NULL,
         completion_state TEXT NOT NULL,
@@ -59,7 +59,7 @@ SCHEMA_STATEMENTS = (
         state TEXT NOT NULL,
         failure_kind TEXT,
         missing_fields_json TEXT NOT NULL,
-        retry_count INTEGER NOT NULL DEFAULT 0,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
         event_id TEXT,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (job_id, canonical_fixture_id)
@@ -112,7 +112,7 @@ def create_job(
     required_statistics: Sequence[str],
     max_request_cap: int,
     max_retries_per_fixture: int,
-    projected_request_count: int,
+    projected_total_requests: int,
     target_fixture_count: int,
     start_timestamp: str,
     completion_state: str,
@@ -123,11 +123,11 @@ def create_job(
             job_id, provider, competition_id, competition_name, division_code,
             season, season_code, provider_league_id, source_version,
             required_statistics_json, max_request_cap, max_retries_per_fixture,
-            projected_request_count, target_fixture_count, start_timestamp,
+            projected_total_requests, target_fixture_count, start_timestamp,
             completion_state, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id) DO UPDATE SET
-            projected_request_count = excluded.projected_request_count,
+            projected_total_requests = excluded.projected_total_requests,
             target_fixture_count = excluded.target_fixture_count,
             updated_at = excluded.updated_at
         """,
@@ -144,7 +144,7 @@ def create_job(
             json.dumps(list(required_statistics), sort_keys=True),
             int(max_request_cap),
             int(max_retries_per_fixture),
-            int(projected_request_count),
+            int(projected_total_requests),
             int(target_fixture_count),
             start_timestamp,
             completion_state,
@@ -173,6 +173,25 @@ def update_job_state(conn: sqlite3.Connection, *, job_id: str, completion_state:
     )
 
 
+def update_job_plan(
+    conn: sqlite3.Connection,
+    *,
+    job_id: str,
+    projected_total_requests: int,
+    target_fixture_count: int,
+    updated_at: str,
+) -> None:
+    """Persist the authoritative plan once the fixture list has been read."""
+    conn.execute(
+        """
+        UPDATE football_backfill_jobs
+        SET projected_total_requests = ?, target_fixture_count = ?, updated_at = ?
+        WHERE job_id = ?
+        """,
+        (int(projected_total_requests), int(target_fixture_count), updated_at, job_id),
+    )
+
+
 def upsert_fixture_progress(
     conn: sqlite3.Connection,
     *,
@@ -185,7 +204,7 @@ def upsert_fixture_progress(
     state: str,
     failure_kind: str | None,
     missing_fields: Sequence[str],
-    retry_count: int,
+    attempt_count: int,
     event_id: str | None,
     updated_at: str,
 ) -> None:
@@ -194,7 +213,7 @@ def upsert_fixture_progress(
         INSERT INTO football_backfill_fixture_progress (
             job_id, canonical_fixture_id, provider_fixture_id, match_date,
             home_team, away_team, state, failure_kind, missing_fields_json,
-            retry_count, event_id, updated_at
+            attempt_count, event_id, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id, canonical_fixture_id) DO UPDATE SET
             provider_fixture_id = excluded.provider_fixture_id,
@@ -204,7 +223,7 @@ def upsert_fixture_progress(
             state = excluded.state,
             failure_kind = excluded.failure_kind,
             missing_fields_json = excluded.missing_fields_json,
-            retry_count = excluded.retry_count,
+            attempt_count = excluded.attempt_count,
             event_id = excluded.event_id,
             updated_at = excluded.updated_at
         """,
@@ -218,7 +237,7 @@ def upsert_fixture_progress(
             state,
             failure_kind,
             json.dumps(list(missing_fields), sort_keys=True),
-            int(retry_count),
+            int(attempt_count),
             event_id,
             updated_at,
         ),
@@ -229,7 +248,7 @@ def fetch_fixture_progress(conn: sqlite3.Connection, job_id: str) -> list[dict[s
     rows = conn.execute(
         """
         SELECT canonical_fixture_id, provider_fixture_id, match_date, home_team,
-               away_team, state, failure_kind, missing_fields_json, retry_count,
+               away_team, state, failure_kind, missing_fields_json, attempt_count,
                event_id, updated_at
         FROM football_backfill_fixture_progress
         WHERE job_id = ?

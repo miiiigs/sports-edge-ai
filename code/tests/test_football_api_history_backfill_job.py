@@ -8,7 +8,6 @@ SQLite store.
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -17,6 +16,7 @@ from sports_ai.data_sources.api_football_backfill import (
     FAILURE_MALFORMED,
     FAILURE_MISSING_STATS,
     FAILURE_NOT_FOUND,
+    FAILURE_TERMINAL_GAP,
     FAILURE_TRANSIENT,
     FIXTURE_COMPLETE,
     FIXTURE_RETRYABLE,
@@ -40,7 +40,6 @@ from sports_ai.experiments.football_api_history_backfill import (
 )
 from sports_ai.storage import football_backfill_store as backfill_store
 from sports_ai.storage import football_research_store
-from sports_ai.storage.football_canonical_fixture import canonical_fixture_id_from_identity
 
 FRA1 = "FRA1"
 
@@ -60,12 +59,18 @@ class _Budget:
     def allow_paid_provider_calls(self):
         return self.allowed
 
+    def consume(self, n=1):
+        if self.remaining is not None:
+            self.remaining -= n
+
 
 class _Provider:
-    def __init__(self, fixtures, stats_by_id=None, raise_on=None):
+    def __init__(self, fixtures, stats_by_id=None, raise_on=None, budget=None, raise_on_fixtures=None):
         self.fixtures = list(fixtures)
         self.stats = dict(stats_by_id or {})
         self.raise_on = dict(raise_on or {})
+        self.raise_on_fixtures = raise_on_fixtures
+        self.budget = budget
         self.calls = []
 
     def get_historical_league_by_id(self, *, league_id, season):
@@ -74,6 +79,11 @@ class _Provider:
 
     def get_historical_fixtures(self, *, league_id, season):
         self.calls.append(("fixtures", league_id, season))
+        if self.raise_on_fixtures is not None:
+            exc = self.raise_on_fixtures
+            raise exc() if callable(exc) else exc
+        if self.budget is not None:
+            self.budget.consume(1)
         return list(self.fixtures)
 
     def get_historical_fixture_statistics(self, *, provider_fixture_id):
@@ -81,6 +91,8 @@ class _Provider:
         if provider_fixture_id in self.raise_on:
             exc = self.raise_on[provider_fixture_id]
             raise exc() if callable(exc) else exc
+        if self.budget is not None:
+            self.budget.consume(1)
         return list(self.stats.get(str(provider_fixture_id), []))
 
 
@@ -138,15 +150,22 @@ def _store_conn(tmp_path):
 
 
 def _dates(n):
-    return [f"2025-08-{i + 1:02d}T15:00:00+00:00" for i in range(n)]
+    from datetime import datetime, timedelta, timezone
+
+    base = datetime(2025, 8, 1, 15, 0, 0, tzinfo=timezone.utc)
+    return [(base + timedelta(days=i)).isoformat() for i in range(n)]
 
 
 def _fixtures(n, *, league_id=61, season=2025):
     return [_fixture(100 + i, _dates(n)[i], league_id=league_id, season=season) for i in range(n)]
 
 
-def _spec(cap=100, competition_id=FRA1, season=2025):
-    return BackfillSpec(competition_id, season, cap)
+def _spec(cap=100, competition_id=FRA1, season=2025, max_retries_per_fixture=3):
+    return BackfillSpec(competition_id, season, cap, max_retries_per_fixture=max_retries_per_fixture)
+
+
+def _fid(fixtures, index):
+    return str(fixtures[index]["fixture"]["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +191,8 @@ def test_dry_run_makes_zero_provider_calls(tmp_path):
     assert provider.calls == []
     assert result.completed_count == 0
     assert result.incomplete_count == 3
+    assert result.projected_total_requests == 4
+    assert result.planned_requests_this_run == 4
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +212,8 @@ def test_hard_request_cap_bounds_provider_requests(tmp_path):
     assert result.completed_count == 2
     assert result.incomplete_count == 3
     assert result.completion_state == "PARTIAL"
-    assert result.projected_request_count == 6  # 1 list + 5 stats
+    assert result.projected_total_requests == 6  # 1 list + 5 stats
+    assert result.planned_requests_this_run == 3  # 1 list + 2 stats (cap 3)
 
 
 def test_invalid_hard_cap_blocks_run(tmp_path):
@@ -235,6 +257,75 @@ def test_paid_provider_gate_blocked_makes_zero_calls(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# FIX 1 — bounded budget planning
+# ---------------------------------------------------------------------------
+def test_exact_budget_full_run_stays_eligible(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(308)
+    budget = _Budget(state="HEALTHY", remaining=309, allowed=True)
+    provider = _Provider(fixtures, _full_stats(fixtures), budget=budget)
+
+    result = run_backfill(provider, budget, spec=_spec(cap=320), store_conn=conn)
+
+    assert result.permitted is True
+    assert result.projected_total_requests == 309
+    assert result.provider_request_count == 309  # 1 list + 308 stats
+    assert result.completed_count == 308
+    assert result.completion_state == "COMPLETE"
+    assert budget.remaining == 0  # exactly 309 consumed
+
+
+def test_bounded_partial_run_with_cap_100(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(308)
+    budget = _Budget(state="HEALTHY", remaining=100, allowed=True)
+    provider = _Provider(fixtures, _full_stats(fixtures), budget=budget)
+
+    result = run_backfill(provider, budget, spec=_spec(cap=100), store_conn=conn)
+
+    assert result.permitted is True
+    assert result.projected_total_requests == 309
+    assert result.planned_requests_this_run == 100  # 1 list + 99 stats
+    assert result.provider_request_count == 100
+    assert result.completed_count == 99
+    assert result.completion_state == "PARTIAL"
+
+
+def test_resume_plans_only_remaining_fixtures(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(308)
+
+    budget1 = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+    provider1 = _Provider(fixtures, _full_stats(fixtures), budget=budget1)
+    first = run_backfill(provider1, budget1, spec=_spec(cap=201), store_conn=conn)
+    assert first.completed_count == 200
+
+    budget2 = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+    provider2 = _Provider(fixtures, _full_stats(fixtures), budget=budget2)
+    second = run_backfill(provider2, budget2, spec=_spec(cap=50), store_conn=conn)
+
+    assert second.projected_total_requests == 309
+    assert second.planned_requests_this_run == 50  # 1 list + 49 stats
+    stats_calls = [c for c in provider2.calls if c[0] == "stats"]
+    assert len(stats_calls) == 49
+    assert second.completed_count == 249  # 200 + 49
+
+
+def test_insufficient_bounded_budget_blocks_before_any_call(tmp_path):
+    conn = _store_conn(tmp_path)
+    provider = _Provider(_fixtures(308), _full_stats(_fixtures(308)))
+    budget = _Budget(state="HEALTHY", remaining=50, allowed=True)
+
+    result = run_backfill(provider, budget, spec=_spec(cap=100), store_conn=conn, fixture_count_hint=308)
+
+    assert result.permitted is False
+    assert result.block_reason == "BUDGET_INSUFFICIENT"
+    assert provider.calls == []
+    assert result.provider_request_count == 0
+    assert result.planned_requests_this_run == 100  # the exact required amount
+
+
+# ---------------------------------------------------------------------------
 # 4. interruption after partial progress resumes remaining
 # ---------------------------------------------------------------------------
 def test_interruption_after_partial_progress_resumes_remaining(tmp_path):
@@ -274,6 +365,40 @@ def test_resume_skips_completed_fixture(tmp_path):
     assert [c for c in provider2.calls if c[0] == "stats"] == []
     # The fixture list is re-fetched (cheap) but no statistics are repurchased.
     assert [c for c in provider2.calls if c[0] == "fixtures"] == [("fixtures", 61, 2025)]
+
+
+# ---------------------------------------------------------------------------
+# FIX 2 — fixture-list request accounting
+# ---------------------------------------------------------------------------
+def test_fixture_list_success_accounts_one_request(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(1)
+    provider = _Provider(fixtures, _full_stats(fixtures))
+    budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+
+    result = run_backfill(provider, budget, spec=_spec(cap=100), store_conn=conn)
+
+    assert result.provider_request_count == 2  # 1 list + 1 stats
+    assert [c for c in provider.calls if c[0] == "fixtures"] == [("fixtures", 61, 2025)]
+
+
+def test_fixture_list_failure_accounts_request_attempt(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(3)
+    provider = _Provider(
+        fixtures,
+        _full_stats(fixtures),
+        raise_on_fixtures=lambda: BackfillProviderError(FAILURE_TRANSIENT, "timeout"),
+    )
+    budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+
+    result = run_backfill(provider, budget, spec=_spec(cap=100), store_conn=conn, fixture_count_hint=3)
+
+    assert result.permitted is False
+    assert result.block_reason == FAILURE_TRANSIENT
+    assert result.provider_request_count == 1  # the list attempt was counted
+    assert [c for c in provider.calls if c[0] == "stats"] == []
+    assert result.completion_state == "BLOCKED"
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +467,7 @@ def test_backfill_progress_keyed_by_canonical_id(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 8-10. missing shots / SOT / corners remain incomplete
+# 8-10. missing shots / SOT / corners remain incomplete (bounded retry)
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     ("drop", "expected_field"),
@@ -363,9 +488,53 @@ def test_missing_required_statistics_remain_incomplete(tmp_path, drop, expected_
 
     assert result.completed_count == 0
     assert result.gap_ready_count == 0
-    assert result.terminal_failure_count == 1
+    assert result.retryable_failure_count == 1
+    assert result.terminal_failure_count == 0
     assert result.missing_field_counts[expected_field] == 1
     assert backfill_store.event_row_count(conn) == 0
+
+    progress = backfill_store.fetch_fixture_progress(conn, result.job_id)
+    assert progress[0]["state"] == FIXTURE_RETRYABLE
+    assert progress[0]["failure_kind"] == FAILURE_MISSING_STATS
+
+
+# ---------------------------------------------------------------------------
+# FIX 3 — empty/incomplete statistics are retryable, not immediately terminal
+# ---------------------------------------------------------------------------
+def test_empty_statistics_are_retryable_not_terminal(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(1)
+    provider = _Provider(fixtures, {})
+    budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+
+    result = run_backfill(provider, budget, spec=_spec(cap=100), store_conn=conn)
+
+    assert result.retryable_failure_count == 1
+    assert result.terminal_failure_count == 0
+    progress = backfill_store.fetch_fixture_progress(conn, result.job_id)
+    assert progress[0]["state"] == FIXTURE_RETRYABLE
+    assert progress[0]["failure_kind"] == FAILURE_MISSING_STATS
+
+
+def test_missing_stats_becomes_terminal_only_after_retries(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(1)
+    spec = _spec(cap=100, max_retries_per_fixture=2)
+
+    for _ in range(3):
+        provider = _Provider(fixtures, {})
+        budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+        run_backfill(provider, budget, spec=spec, store_conn=conn)
+
+    provider4 = _Provider(fixtures, _full_stats(fixtures))
+    budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+    result = run_backfill(provider4, budget, spec=spec, store_conn=conn)
+
+    assert result.terminal_failure_count == 1
+    assert result.completed_count == 0
+    progress = backfill_store.fetch_fixture_progress(conn, result.job_id)
+    assert progress[0]["state"] == FIXTURE_TERMINAL
+    assert progress[0]["failure_kind"] == FAILURE_TERMINAL_GAP
 
 
 # ---------------------------------------------------------------------------
@@ -417,12 +586,12 @@ def test_partial_fixture_not_marked_complete(tmp_path):
     assert len(complete) == 1
     partial = [row for row in by_canonical.values() if row["state"] != FIXTURE_COMPLETE]
     assert len(partial) == 1
-    assert partial[0]["state"] == FIXTURE_TERMINAL
+    assert partial[0]["state"] == FIXTURE_RETRYABLE
     assert backfill_store.event_row_count(conn) == 1
 
 
 # ---------------------------------------------------------------------------
-# 13. malformed payload
+# 13. malformed payload (immediately terminal)
 # ---------------------------------------------------------------------------
 def test_malformed_payload_is_terminal(tmp_path):
     conn = _store_conn(tmp_path)
@@ -490,31 +659,74 @@ def test_terminal_source_failure_classified_terminal(tmp_path):
     progress = backfill_store.fetch_fixture_progress(conn, result.job_id)
     assert progress[0]["state"] == FIXTURE_TERMINAL
     assert is_terminal_failure(FAILURE_NOT_FOUND) is True
-    assert is_terminal_failure(FAILURE_MISSING_STATS) is True
+    assert is_retryable_failure(FAILURE_MISSING_STATS) is True
+    assert is_terminal_failure(FAILURE_TERMINAL_GAP) is True
 
 
-def test_retry_budget_exhaustion_becomes_terminal(tmp_path):
+# ---------------------------------------------------------------------------
+# FIX 4 — explicit retry semantics
+# ---------------------------------------------------------------------------
+def test_max_retries_two_success_on_final_retry(tmp_path):
     conn = _store_conn(tmp_path)
     fixtures = _fixtures(1)
-    spec = BackfillSpec(FRA1, 2025, 100, max_retries_per_fixture=2)
-
-    for _ in range(2):
-        provider = _Provider(
-            fixtures,
-            {},
-            raise_on={str(fixtures[0]["fixture"]["id"]): lambda: BackfillProviderError(FAILURE_TRANSIENT, "timeout")},
-        )
-        budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
-        run_backfill(provider, budget, spec=spec, store_conn=conn)
-
-    provider3 = _Provider(fixtures, _full_stats(fixtures))
+    fid = str(fixtures[0]["fixture"]["id"])
+    spec = _spec(cap=100, max_retries_per_fixture=2)
     budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
-    result = run_backfill(provider3, budget, spec=spec, store_conn=conn)
 
-    assert result.terminal_failure_count == 1
+    transient = {fid: lambda: BackfillProviderError(FAILURE_TRANSIENT, "timeout")}
+    providers = [
+        _Provider(fixtures, {}, raise_on=transient),
+        _Provider(fixtures, {}, raise_on=transient),
+        _Provider(fixtures, _full_stats(fixtures)),
+    ]
+    result = None
+    for provider in providers:
+        result = run_backfill(provider, budget, spec=spec, store_conn=conn)
+
+    assert result.completed_count == 1
+    assert result.terminal_failure_count == 0
+    total_stats_calls = sum(len([c for c in p.calls if c[0] == "stats"]) for p in providers)
+    assert total_stats_calls == 3  # initial + 2 retries
+
+
+def test_max_retries_two_exhaustion_is_terminal_after_third_failure(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(1)
+    fid = str(fixtures[0]["fixture"]["id"])
+    spec = _spec(cap=100, max_retries_per_fixture=2)
+    budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+
+    transient = {fid: lambda: BackfillProviderError(FAILURE_TRANSIENT, "timeout")}
+    for _ in range(3):
+        run_backfill(_Provider(fixtures, {}, raise_on=transient), budget, spec=spec, store_conn=conn)
+
+    provider4 = _Provider(fixtures, _full_stats(fixtures))
+    result = run_backfill(provider4, budget, spec=spec, store_conn=conn)
+
     assert result.completed_count == 0
+    assert result.terminal_failure_count == 1
+    assert [c for c in provider4.calls if c[0] == "stats"] == []  # no 4th attempt
     progress = backfill_store.fetch_fixture_progress(conn, result.job_id)
     assert progress[0]["state"] == FIXTURE_TERMINAL
+    assert progress[0]["attempt_count"] == 3
+
+
+def test_max_retries_zero_single_attempt_then_terminal(tmp_path):
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(1)
+    fid = str(fixtures[0]["fixture"]["id"])
+    spec = _spec(cap=100, max_retries_per_fixture=0)
+    budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+
+    provider1 = _Provider(fixtures, {}, raise_on={fid: lambda: BackfillProviderError(FAILURE_TRANSIENT, "timeout")})
+    result = run_backfill(provider1, budget, spec=spec, store_conn=conn)
+
+    assert result.terminal_failure_count == 1
+    assert [c for c in provider1.calls if c[0] == "stats"] == [("stats", fid)]  # exactly one attempt
+
+    provider2 = _Provider(fixtures, _full_stats(fixtures))
+    run_backfill(provider2, budget, spec=spec, store_conn=conn)
+    assert [c for c in provider2.calls if c[0] == "stats"] == []  # no second attempt
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +745,8 @@ def test_manifest_reproducible():
         incomplete_count=0,
         request_count=307,
         request_cap=320,
+        projected_total_requests=307,
+        planned_requests_this_run=307,
         missing_field_counts={},
         run_state="COMPLETE",
     )
@@ -559,7 +773,7 @@ def test_request_estimate_is_fixture_scoped():
     assert estimate.total_requests == 307
 
 
-def test_backfill_projected_request_count_matches_target(tmp_path):
+def test_backfill_request_plan_fields(tmp_path):
     conn = _store_conn(tmp_path)
     fixtures = _fixtures(4)
     provider = _Provider(fixtures, _full_stats(fixtures))
@@ -568,7 +782,8 @@ def test_backfill_projected_request_count_matches_target(tmp_path):
     result = run_backfill(provider, budget, spec=_spec(cap=100), store_conn=conn)
 
     assert result.target_fixture_count == 4
-    assert result.projected_request_count == 5
+    assert result.projected_total_requests == 5
+    assert result.planned_requests_this_run == 5
     assert result.provider_request_count == 5
 
 
@@ -611,7 +826,7 @@ def test_production_supported_league_list_unchanged():
 
 def test_evaluate_backfill_eligibility_invalid_cap():
     decision = evaluate_backfill_eligibility(
-        projected_requests=10,
+        required_requests=10,
         max_request_cap=0,
         budget_state="HEALTHY",
         budget_remaining=1000,
@@ -622,7 +837,7 @@ def test_evaluate_backfill_eligibility_invalid_cap():
 
 def test_evaluate_backfill_eligibility_budget_insufficient():
     decision = evaluate_backfill_eligibility(
-        projected_requests=10,
+        required_requests=10,
         max_request_cap=100,
         budget_state="HEALTHY",
         budget_remaining=5,
