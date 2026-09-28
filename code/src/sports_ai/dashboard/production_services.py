@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ..diagnostics.football_preexec_readonly import log_fra1_preexec_readonly
 from ..football_market_focus import configured_live_market_focus
 from ..experiments.football_api_history_probe import (
     run_historical_coverage_probe,
@@ -207,6 +208,7 @@ class ProductionDashboardServices(DashboardServices):
         self._refresh_competition_freshness()
         self._run_history_probe_once()
         self._log_live_market_evidence()
+        self._log_fra1_preexec_readonly()
         self._log_production_freshness()
         self._persist_production_runtime_state()
 
@@ -238,6 +240,29 @@ class ProductionDashboardServices(DashboardServices):
             "football live market evidence: focus=%s %s",
             list(focus),
             " | ".join(evidence),
+        )
+
+    def _log_fra1_preexec_readonly(self) -> None:
+        """Emit a read-only FRA1 pre-execution diagnostic during startup.
+
+        Strictly read-only: opens the operational budget DB and the persistent
+        research DB with SQLite ``mode=ro`` + ``PRAGMA query_only=ON`` and
+        SELECT-only queries. Never makes provider requests, never writes, and
+        never raises into startup.
+        """
+        try:
+            config = getattr(self, "config", None)
+            if config is None:
+                return
+            budget_db_path = getattr(config, "dashboard_db_path", None)
+            research_db_path = getattr(config, "research_db_path", None)
+            if not budget_db_path or not research_db_path:
+                return
+        except Exception:  # noqa: BLE001
+            return
+        log_fra1_preexec_readonly(
+            budget_db_path=budget_db_path,
+            research_db_path=research_db_path,
         )
 
     def _run_history_probe_once(self) -> None:
