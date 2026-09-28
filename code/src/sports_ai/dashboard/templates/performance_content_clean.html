@@ -38,6 +38,42 @@
 </section>
 {% endif %}
 
+{% set prospective = payload.prospective_focus %}
+{% if prospective %}
+<section class="clean-section" id="prospective-focus">
+  <div class="clean-section__head">
+    <div>
+      <p class="eyebrow">Prospective · Live Focus</p>
+      <h2>Prospective AH + Corners</h2>
+      <p>Prospective since AH + Corners focus activation on {{ prospective.cohort.effective_from }}. Only reconciled focused positions decided on or after this instant are counted.</p>
+    </div>
+    <span class="clean-section__meta">{{ prospective.sample_status | replace('_', ' ') }}</span>
+  </div>
+
+  {% if prospective.by_market %}
+    <div class="clean-summary-grid">
+      {% for market, row in prospective.by_market.items() %}
+        <article class="clean-stat">
+          <span class="clean-stat__label">{{ market | replace('_', ' ') | title }}</span>
+          <strong class="clean-stat__value">{{ row.settled_positions }} settled · {{ row.pending_positions }} pending</strong>
+          <span class="clean-stat__note">
+            {% if row.net_units is not none %}{{ "{:+.2f}".format(row.net_units|float) }}u{% else %}N/A{% endif %}
+            · {% if row.roi is not none %}{{ "{:+.2%}".format(row.roi|float) }} ROI{% else %}ROI N/A{% endif %}
+            · {% if row.strike_rate is not none %}{{ "{:.2%}".format(row.strike_rate|float) }} strike{% else %}strike N/A{% endif %}
+          </span>
+          <span class="clean-stat__note">
+            CLV {% if row.clv_coverage is not none %}{{ "{:.0%}".format(row.clv_coverage|float) }} coverage{% else %}coverage N/A{% endif %}
+            · {% if row.average_clv is not none %}{{ "{:+.2%}".format(row.average_clv|float) }} avg{% else %}avg N/A{% endif %}
+          </span>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="clean-empty">No prospective AH + Corners positions yet. The prospective cohort fills as focused positions are decided after focus activation.</div>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if latest_day %}
 <section class="clean-section" id="latest-day">
   <div class="clean-section__head">
