@@ -5561,3 +5561,47 @@ def test_prospective_focus_payload_separates_historical_and_prospective(tmp_path
     assert "clv" in payload
     assert payload["prospective"]["positions"] == 0
     assert payload["clv"]["average_clv"] is None
+
+
+def test_prospective_cohort_schema_initialized_at_startup(tmp_path):
+    services, _fixtures = _build_today_read_path_services(tmp_path)
+    assert services._schema_initialized is False
+
+    asyncio.run(services.initialize())
+
+    assert services._schema_initialized is True
+    with football_paper_trading.connect(services.config.paper_trading_db_path) as conn:
+        tables = {
+            str(row["name"])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    assert "prospective_focus_cohort" in tables
+
+    payload = services.get_prospective_focus_payload()
+    assert payload["cohort"]["cohort_id"] == "football_ah_corners_focus_v1"
+    assert payload["cohort"]["effective_from"] == "2026-09-26T10:16:20.567997950+00:00"
+
+
+def test_api_performance_exposes_prospective_focus(tmp_path):
+    app = create_app(
+        config=_dashboard_config(tmp_path),
+        fixture_provider=FakeFixtureProvider([]),
+        market_provider=FakeMarketProvider(configured=False),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/performance")
+        assert response.status_code == 200
+        payload = response.json()
+        assert "prospective_focus" in payload
+        assert payload["prospective_focus"]["cohort"]["focus_markets"] == [
+            "asian_handicap",
+            "corner_total",
+        ]
+        assert "prospective" in payload["prospective_focus"]
+        assert "by_market" in payload["prospective_focus"]
+        assert "clv" in payload["prospective_focus"]
+
+        page = client.get("/performance")
+        assert page.status_code == 200
+        assert "Prospective AH + Corners" in page.text

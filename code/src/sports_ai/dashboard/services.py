@@ -687,6 +687,7 @@ class DashboardServices:
             football_paper_trading.initialize_database(conn)
             football_canonical_fixture.ensure_schema(conn)
             football_portfolio_selection.ensure_schema(conn)
+            football_prospective_cohort.ensure_schema(conn)
             self._schema_initialized = True
         self._record_storage_runtime_state(initialized_at=initialized_at)
         self._build_snapshot()
@@ -6536,6 +6537,7 @@ class DashboardServices:
             "calibration_status_label": "NOT YET AVAILABLE",
             "brier_status_label": "NOT YET AVAILABLE",
             "performance_status": status,
+            "prospective_focus": self._prospective_focus_data(paper_positions),
             "system_status": system_status,
         }
 
@@ -6610,6 +6612,14 @@ class DashboardServices:
             ),
         }
 
+    def _prospective_focus_data(self, paper_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            cohort = football_prospective_cohort.resolve_cohort(
+                conn,
+                initialize_schema=self._read_requires_schema_init(),
+            )
+        return football_prospective_cohort.prospective_focus_performance(paper_rows, cohort)
+
     def get_prospective_focus_payload(self) -> dict[str, Any]:
         """Historical reconciled vs prospective focused (AH + Corners) evidence.
 
@@ -6619,12 +6629,7 @@ class DashboardServices:
         performance is reported separately so the two can never be conflated.
         """
         paper_rows, paper_status = self._paper_positions()
-        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            cohort = football_prospective_cohort.resolve_cohort(
-                conn,
-                initialize_schema=self._read_requires_schema_init(),
-            )
-        prospective = football_prospective_cohort.prospective_focus_performance(paper_rows, cohort)
+        prospective = self._prospective_focus_data(paper_rows)
         return {
             **prospective,
             "paper_status": paper_status,

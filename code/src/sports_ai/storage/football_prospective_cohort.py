@@ -27,7 +27,9 @@ CLV is price-quality evidence only. It is never derived from realized win/loss.
 
 from __future__ import annotations
 
+import calendar
 import math
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -39,9 +41,16 @@ from .football_paper_trading import margin_adjusted_clv, paper_trading_performan
 FOCUS_COHORT_ID = "football_ah_corners_focus_v1"
 FOCUS_MARKETS = ("asian_handicap", "corner_total")
 
-# The AH + Corners focus landed on main 2026-09-27. Any focused position decided
-# at or after this timestamp is prospective; everything earlier is historical.
-DEFAULT_EFFECTIVE_FROM = "2026-09-27T00:00:00+00:00"
+# The auditable prospective boundary is the FIRST production log confirming the
+# active focus configuration, not the merge date. Railway production evidence:
+#   deployment        f162db1f-b2e2-43b4-8bb8-8f7b89e3da43
+#   commit            d6c532fb1b1b0132bf6711909e931d49e7e1b5dc
+#   startup complete  2026-09-26T10:15:58.102894084Z
+#   first focus log   2026-09-26T10:16:20.567997950Z
+#       "football live market evidence: focus=['asian_handicap', 'corner_total']"
+# Any focused position decided at or after this instant is prospective; anything
+# earlier is historical.
+DEFAULT_EFFECTIVE_FROM = "2026-09-26T10:16:20.567997950+00:00"
 
 MIN_CLV_SAMPLE = 20
 
@@ -163,43 +172,65 @@ def cohort_decision_timestamp(row: dict[str, Any]) -> str:
     return str(row.get("decision_timestamp") or row.get("created_at") or "")
 
 
-def _parse_ts(value: Any) -> datetime | None:
+_TS_PATTERN = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
+def _tz_offset_seconds(tz: str | None) -> int:
+    if tz in (None, "", "Z"):
+        return 0
+    sign = 1 if tz[0] == "+" else -1
+    digits = tz[1:].replace(":", "")
+    return sign * (int(digits[:2]) * 3600 + int(digits[2:4]) * 60)
+
+
+def _ts_key(value: Any) -> int | str | None:
+    """Normalize an ISO-8601 timestamp to a nanosecond-precision comparable key.
+
+    ``datetime.fromisoformat`` truncates fractional seconds to microseconds, which
+    would erase sub-microsecond differences such as the prospective boundary
+    ``...20.567997950`` vs the instant before it ``...20.567997949``. This parser
+    preserves full precision as nanoseconds-since-epoch (UTC) for exact instant
+    comparison. Unparseable inputs fall back to a deterministic raw string.
+    """
     text = str(value or "").strip()
     if not text:
         return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
+    match = _TS_PATTERN.match(text)
+    if match is None:
+        return text
+    year, month, day, hour, minute, second, frac, tz = match.groups()
     try:
-        parsed = datetime.fromisoformat(text)
+        epoch_seconds = calendar.timegm(
+            (int(year), int(month), int(day), int(hour), int(minute), int(second), 0, 0, 0)
+        )
     except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+        return text
+    nanos = int((frac or "").ljust(9, "0"))
+    return (epoch_seconds - _tz_offset_seconds(tz)) * 1_000_000_000 + nanos
+
+
+def _ts_cmp(left: str, right: str) -> int:
+    left_key = _ts_key(left)
+    right_key = _ts_key(right)
+    if isinstance(left_key, int) and isinstance(right_key, int):
+        return (left_key > right_key) - (left_key < right_key)
+    left_text = str(left or "")
+    right_text = str(right or "")
+    return (left_text > right_text) - (left_text < right_text)
 
 
 def _ts_ge(left: str, right: str) -> bool:
-    left_dt = _parse_ts(left)
-    right_dt = _parse_ts(right)
-    if left_dt is not None and right_dt is not None:
-        return left_dt >= right_dt
-    return left >= right
+    return _ts_cmp(left, right) >= 0
 
 
 def _ts_lt(left: str, right: str) -> bool:
-    left_dt = _parse_ts(left)
-    right_dt = _parse_ts(right)
-    if left_dt is not None and right_dt is not None:
-        return left_dt < right_dt
-    return left < right
+    return _ts_cmp(left, right) < 0
 
 
 def _ts_gt(left: str, right: str) -> bool:
-    left_dt = _parse_ts(left)
-    right_dt = _parse_ts(right)
-    if left_dt is not None and right_dt is not None:
-        return left_dt > right_dt
-    return left > right
+    return _ts_cmp(left, right) > 0
 
 
 def is_prospective_focus_row(row: dict[str, Any], cohort: ProspectiveCohort) -> bool:

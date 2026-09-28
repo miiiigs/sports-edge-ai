@@ -1,36 +1,38 @@
 from __future__ import annotations
 
-import pytest
+import sqlite3
 
+import pytest
 from sports_ai.storage import football_canonical_fixture
-from sports_ai.storage.football_prospective_cohort import (
-    FOCUS_COHORT_ID,
-    ProspectiveCohort,
-    clv_summary_for_rows,
-    closing_line_value,
-    closing_quote_matches_position,
-    default_cohort,
-    is_prospective_focus_row,
-    prospective_focus_performance,
-    resolve_closing_quote,
-    resolve_cohort,
-    connect,
-    ensure_schema,
-    fetch_cohort,
-    record_cohort,
-)
 from sports_ai.storage.football_paper_trading import (
     PaperTradeEntry,
     StoredMarketSnapshot,
     attach_closing_snapshot,
-    connect as paper_connect,
     fetch_paper_trade_rows,
     initialize_database,
     record_market_snapshot,
     record_paper_trade_entry,
 )
+from sports_ai.storage.football_paper_trading import (
+    connect as paper_connect,
+)
+from sports_ai.storage.football_prospective_cohort import (
+    FOCUS_COHORT_ID,
+    ProspectiveCohort,
+    closing_line_value,
+    closing_quote_matches_position,
+    clv_summary_for_rows,
+    connect,
+    ensure_schema,
+    fetch_cohort,
+    is_prospective_focus_row,
+    prospective_focus_performance,
+    record_cohort,
+    resolve_closing_quote,
+    resolve_cohort,
+)
 
-EFFECTIVE = "2026-09-27T00:00:00+00:00"
+EFFECTIVE = "2026-09-26T10:16:20.567997950+00:00"
 
 
 def _cohort(effective_from: str = EFFECTIVE) -> ProspectiveCohort:
@@ -101,6 +103,42 @@ def test_valid_new_row_included():
     cohort = _cohort()
     row = _row(paper_trade_id="p1", market="asian_handicap", selection="AWAY", line=-0.25, decision_timestamp="2026-09-27T00:00:00+00:00")
     assert is_prospective_focus_row(row, cohort) is True
+
+
+def test_boundary_one_instant_before_is_historical():
+    cohort = _cohort()
+    before = _row(
+        paper_trade_id="p1",
+        market="asian_handicap",
+        selection="HOME",
+        line=-0.5,
+        decision_timestamp="2026-09-26T10:16:20.567997949+00:00",
+    )
+    assert is_prospective_focus_row(before, cohort) is False
+
+
+def test_boundary_exact_instant_is_prospective():
+    cohort = _cohort()
+    exact = _row(
+        paper_trade_id="p1",
+        market="asian_handicap",
+        selection="HOME",
+        line=-0.5,
+        decision_timestamp="2026-09-26T10:16:20.567997950+00:00",
+    )
+    assert is_prospective_focus_row(exact, cohort) is True
+
+
+def test_boundary_one_instant_after_is_prospective():
+    cohort = _cohort()
+    after = _row(
+        paper_trade_id="p1",
+        market="asian_handicap",
+        selection="HOME",
+        line=-0.5,
+        decision_timestamp="2026-09-26T10:16:20.567997951+00:00",
+    )
+    assert is_prospective_focus_row(after, cohort) is True
 
 
 def test_canonical_duplicate_excluded_from_prospective_performance():
@@ -351,8 +389,19 @@ def test_cohort_redefinition_conflicts_fail_closed(tmp_path):
     with connect(db_path) as conn:
         ensure_schema(conn)
         record_cohort(conn, _cohort())
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.IntegrityError):
             record_cohort(conn, _cohort(effective_from="2026-09-01T00:00:00+00:00"))
+
+
+def test_startup_schema_init_and_resolve_idempotent(tmp_path):
+    db_path = tmp_path / "cohort.sqlite"
+    with connect(db_path) as conn:
+        ensure_schema(conn)
+        ensure_schema(conn)
+        first = resolve_cohort(conn)
+        second = resolve_cohort(conn)
+    assert first == second
+    assert fetch_cohort(connect(db_path)) == first
 
 
 # ----------------------------------------------------- integration with CLV attach
@@ -426,6 +475,97 @@ def test_ah_closing_attach_different_line_fails_closed(tmp_path):
             conn,
             paper_trade_id=entry.paper_trade_id,
             closing_odds=1.70,
+            closing_captured_at="2026-09-28T14:59:00+00:00",
+            closing_snapshot_id=wrong_line_id,
+            initialize_schema=False,
+        )
+        row = fetch_paper_trade_rows(conn, initialize_schema=False)[0]
+    assert row["clv_pct"] is None
+
+
+def test_clv_denominator_semantics_worked_example(tmp_path):
+    """Prove closing_margin is the overround expected by the CLV formula.
+
+    Entry: AH HOME -0.5 @ 2.10.
+    Closing book: HOME -0.5 @ 1.90, AWAY +0.5 @ 1.95.
+    overround = 1/1.90 + 1/1.95 - 1.
+    clv = entry / closing / (1 + overround) - 1.
+    """
+    db_path = tmp_path / "paper.sqlite"
+    with paper_connect(db_path) as conn:
+        initialize_database(conn)
+        home_id = record_market_snapshot(conn, _ah_snapshot(selection="HOME", line=-0.5, odds=1.90), initialize_schema=False)
+        record_market_snapshot(conn, _ah_snapshot(selection="AWAY", line=-0.5, odds=1.95), initialize_schema=False)
+        entry = _ah_entry()
+        record_paper_trade_entry(conn, entry, initialize_schema=False)
+        attach_closing_snapshot(
+            conn,
+            paper_trade_id=entry.paper_trade_id,
+            closing_odds=1.90,
+            closing_captured_at="2026-09-28T14:59:00+00:00",
+            closing_snapshot_id=home_id,
+            initialize_schema=False,
+        )
+        row = fetch_paper_trade_rows(conn, initialize_schema=False)[0]
+
+    expected_margin = (1 / 1.90) + (1 / 1.95) - 1.0
+    expected_clv = 2.10 / 1.90 / (1.0 + expected_margin) - 1.0
+    assert row["closing_margin"] == pytest.approx(expected_margin)
+    assert row["clv_pct"] == pytest.approx(expected_clv)
+    assert expected_clv > 0.0
+
+
+def _corner_entry() -> PaperTradeEntry:
+    return PaperTradeEntry(
+        prediction_id="pred-corners",
+        fixture_id="fixture-corners-1",
+        model_snapshot_id="model-1",
+        model_version="v1",
+        market="corner_total",
+        selection="OVER",
+        line=9.5,
+        model_fair_price=1.90,
+        available_market_price=2.00,
+        decision="PAPER_CANDIDATE",
+        decision_timestamp="2026-09-28T09:00:00+00:00",
+        kickoff="2026-09-28T15:00:00+00:00",
+        safeguard_state="PASS",
+        entry_eligibility="ELIGIBLE",
+        model_probability=0.52,
+        bookmaker="pinnacle",
+        provider="the-odds-api",
+        entry_odds=2.00,
+    )
+
+
+def _corner_snapshot(*, selection: str, line: float, odds: float) -> StoredMarketSnapshot:
+    return StoredMarketSnapshot(
+        fixture_id="fixture-corners-1",
+        provider="the-odds-api",
+        bookmaker="pinnacle",
+        market="corner_total",
+        selection=selection,
+        line=line,
+        odds=odds,
+        ingestion_version="test-v1",
+        provider_timestamp="2026-09-28T14:59:00+00:00",
+        captured_at="2026-09-28T14:59:00+00:00",
+        is_pre_match=True,
+    )
+
+
+def test_corners_closing_attach_different_line_fails_closed(tmp_path):
+    """Corners Over 9.5 must not adopt a closing quote for Over 10.5."""
+    db_path = tmp_path / "paper.sqlite"
+    with paper_connect(db_path) as conn:
+        initialize_database(conn)
+        wrong_line_id = record_market_snapshot(conn, _corner_snapshot(selection="OVER", line=10.5, odds=1.80), initialize_schema=False)
+        entry = _corner_entry()
+        record_paper_trade_entry(conn, entry, initialize_schema=False)
+        attach_closing_snapshot(
+            conn,
+            paper_trade_id=entry.paper_trade_id,
+            closing_odds=1.80,
             closing_captured_at="2026-09-28T14:59:00+00:00",
             closing_snapshot_id=wrong_line_id,
             initialize_schema=False,
