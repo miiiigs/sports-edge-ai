@@ -532,6 +532,28 @@ def fetch_market_snapshots(
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
 
+def persisted_snapshot_reader(db_path: str | Path):
+    """Return a lazy reader for persisted market_snapshots rows by fixture_id.
+
+    The reader fails closed to an empty list (for example when the database or
+    table has not been initialized yet) so a caller can always fall through to
+    the live provider path instead of raising on a cold store.
+    """
+
+    def reader(fixture_id: str) -> list[dict[str, Any]]:
+        try:
+            with connect(db_path) as conn:
+                return fetch_market_snapshots(
+                    conn,
+                    fixture_id=fixture_id,
+                    initialize_schema=False,
+                )
+        except sqlite3.OperationalError:
+            return []
+
+    return reader
+
+
 _EXPECTED_SELECTIONS_BY_MARKET = {
     "1x2": frozenset({"HOME", "DRAW", "AWAY"}),
     "btts": frozenset({"YES", "NO"}),

@@ -205,7 +205,11 @@ def _default_fixture_provider() -> FixtureProvider:
 
 
 def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
-    provider = TheOddsApiProvider()
+    provider = TheOddsApiProvider(
+        persisted_snapshot_reader=football_paper_trading.persisted_snapshot_reader(
+            config.paper_trading_db_path
+        )
+    )
     if provider.configured():
         return provider
     return NotConfiguredMarketProvider(
