@@ -247,6 +247,27 @@ def increment_job_requests(
     )
 
 
+def heartbeat_job(
+    conn: sqlite3.Connection,
+    *,
+    job_id: str,
+    now_iso: str,
+) -> None:
+    """Renew the concurrency-claim lease by advancing ``updated_at`` to now.
+
+    ``try_claim_job`` treats an ``IN_PROGRESS`` job as stale once its
+    ``updated_at`` is older than the lease. An executor must therefore call this
+    with the CURRENT time immediately before each historical provider request, so
+    a run that lasts longer than the lease keeps a fresh claim and cannot be
+    reclaimed by a second executor while it is still making progress. The
+    timestamp must come from the current clock, never from the run-start time.
+    """
+    conn.execute(
+        "UPDATE football_backfill_jobs SET updated_at = ? WHERE job_id = ?",
+        (now_iso, job_id),
+    )
+
+
 def try_claim_job(
     conn: sqlite3.Connection,
     *,

@@ -51,11 +51,13 @@ Concurrency and durability
 Exactly one executor may run a given deterministic job: an atomic conditional
 claim keyed on ``IN_PROGRESS`` + ``updated_at`` serializes competing processes,
 and a second executor fails closed with zero provider traffic (a crashed run is
-reclaimable after ``JOB_CLAIM_STALE_SECONDS``). The checkpoint store commits every
-write immediately (``synchronous=NORMAL`` autocommit), and the lifetime request
-counter is incremented and committed BEFORE each provider call, so a crash can at
-worst over-count a request — never silently under-count and allow the cap to be
-exceeded.
+reclaimable after ``JOB_CLAIM_STALE_SECONDS``). The winning executor heartbeats
+``updated_at`` with the CURRENT clock before every provider request, so a run
+that lasts longer than the lease stays claimed and is never falsely reclaimed.
+The checkpoint store commits every write immediately (``synchronous=NORMAL``
+autocommit), and the lifetime request counter is incremented and committed BEFORE
+each provider call, so a crash can at worst over-count a request — never silently
+under-count and allow the cap to be exceeded.
 """
 
 from __future__ import annotations
@@ -463,6 +465,18 @@ def _next_eligible_state(completion_state: str, pause_reason: str | None) -> str
     return "RESUMABLE"
 
 
+def _format_utc(value: datetime) -> str:
+    """Normalize any datetime to a UTC ``...Z``-style second-resolution string."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def _utc_iso(clock) -> str:
+    """CURRENT UTC timestamp from the run clock (used for lease heartbeats)."""
+    return _format_utc(clock())
+
+
 def run_backfill(
     provider: BackfillProvider,
     budget: BackfillBudget,
@@ -472,10 +486,22 @@ def run_backfill(
     dry_run: bool = False,
     fixture_count_hint: int | None = None,
     now: datetime | None = None,
+    clock=None,
 ) -> BackfillResult:
-    """Run (or dry-run) one bounded, resumable league-season backfill."""
-    current = now or datetime.now(timezone.utc)
-    now_iso = current.isoformat(timespec="seconds")
+    """Run (or dry-run) one bounded, resumable league-season backfill.
+
+    ``now`` fixes the run-start instant. ``clock`` supplies the CURRENT instant
+    used for lease heartbeats and checkpoint timestamps; it defaults to real UTC,
+    or to the fixed ``now`` when one is injected for deterministic tests. Lease
+    heartbeats must never reuse the run-start stamp, otherwise a run longer than
+    ``JOB_CLAIM_STALE_SECONDS`` would look stale while still making progress.
+    """
+    clock = clock or (lambda: now if now is not None else datetime.now(timezone.utc))
+    current = now or clock()
+    now_iso = _format_utc(current)
+
+    def _stamp() -> str:
+        return _utc_iso(clock)
 
     validation_error = spec.validate()
     if validation_error is not None:
@@ -773,7 +799,7 @@ def run_backfill(
     if not store.try_claim_job(
         store_conn,
         job_id=job_id,
-        now_iso=now_iso,
+        now_iso=_stamp(),
         stale_before_iso=claim_stale_before,
     ):
         return _blocked_result(
@@ -799,10 +825,14 @@ def run_backfill(
 
     # The fixture-list request is accounted for as soon as it is initiated, so a
     # failure after the request is sent still reflects a consumed attempt. It is
-    # counted against both this run and the lifetime cap for the logical job.
+    # counted against both this run and the lifetime cap for the logical job, and
+    # the lease is refreshed with the CURRENT clock BEFORE dispatch so a long list
+    # step cannot let the claim go stale.
+    list_stamp = _stamp()
+    store.heartbeat_job(store_conn, job_id=job_id, now_iso=list_stamp)
     provider_request_count = 1
     requests_consumed = requests_consumed_before + 1
-    store.increment_job_requests(store_conn, job_id=job_id, count=1, updated_at=now_iso)
+    store.increment_job_requests(store_conn, job_id=job_id, count=1, updated_at=list_stamp)
     try:
         # The raw fixture payload is required to normalize statistics into events
         # and is not persisted in the checkpoint, so the list is re-read once per
@@ -812,7 +842,7 @@ def run_backfill(
             season=spec.season,
         )
     except Exception as exc:  # noqa: BLE001
-        store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=now_iso)
+        store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=_stamp())
         return _blocked_result(
             job_id=job_id,
             spec=spec,
@@ -828,7 +858,7 @@ def run_backfill(
             lifetime_cap=lifetime_cap,
         )
     if raw_fixtures is None:
-        store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=now_iso)
+        store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=_stamp())
         return _blocked_result(
             job_id=job_id,
             spec=spec,
@@ -857,11 +887,11 @@ def run_backfill(
         job_id=job_id,
         projected_total_requests=projected_total_requests,
         target_fixture_count=target_fixture_count,
-        updated_at=now_iso,
+        updated_at=_stamp(),
     )
 
     if target_fixture_count == 0:
-        store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=now_iso)
+        store.update_job_state(store_conn, job_id=job_id, completion_state=JOB_BLOCKED, updated_at=_stamp())
         return _blocked_result(
             job_id=job_id,
             spec=spec,
@@ -895,7 +925,7 @@ def run_backfill(
             missing_fields=(),
             attempt_count=0,
             event_id=None,
-            updated_at=now_iso,
+            updated_at=_stamp(),
         )
 
     # Refresh progress view after seeding.
@@ -918,7 +948,7 @@ def run_backfill(
             store_conn,
             job_id=job_id,
             target_fixture_count=target_fixture_count,
-            now_iso=now_iso,
+            now_iso=_stamp(),
         )
         return _summarize(
             store_conn,
@@ -929,7 +959,7 @@ def run_backfill(
             projected_total_requests=projected_total_requests,
             planned_requests_this_run=planned_requests_this_run,
             provider_request_count=provider_request_count,
-            now_iso=now_iso,
+            now_iso=_stamp(),
             completion_state=completion_state,
             protected_floor=tranche.protected_floor,
             historical_headroom=tranche.historical_headroom,
@@ -958,7 +988,7 @@ def run_backfill(
         else:
             paused_state = JOB_BUDGET_PAUSED
             reason = pause_reason or PAUSE_NO_HISTORICAL_HEADROOM
-        store.update_job_state(store_conn, job_id=job_id, completion_state=paused_state, updated_at=now_iso)
+        store.update_job_state(store_conn, job_id=job_id, completion_state=paused_state, updated_at=_stamp())
         return _summarize(
             store_conn,
             job_id=job_id,
@@ -968,7 +998,7 @@ def run_backfill(
             projected_total_requests=projected_total_requests,
             planned_requests_this_run=provider_request_count,
             provider_request_count=provider_request_count,
-            now_iso=now_iso,
+            now_iso=_stamp(),
             completion_state=paused_state,
             pause_reason=reason,
             protected_floor=tranche.protected_floor,
@@ -1001,9 +1031,14 @@ def run_backfill(
         existing = progress_by_canonical.get(target_row.canonical_fixture_id, {})
         attempt_count = int(existing.get("attempt_count") or 0)
 
+        # Refresh the lease with the CURRENT clock and account the attempt BEFORE
+        # dispatch: a run longer than the stale window stays claimed, and a crash
+        # after dispatch is already counted (never silently under-counted).
+        request_stamp = _stamp()
+        store.heartbeat_job(store_conn, job_id=job_id, now_iso=request_stamp)
         provider_request_count += 1
         requests_consumed += 1
-        store.increment_job_requests(store_conn, job_id=job_id, count=1, updated_at=now_iso)
+        store.increment_job_requests(store_conn, job_id=job_id, count=1, updated_at=request_stamp)
         try:
             statistics = provider.get_historical_fixture_statistics(
                 provider_fixture_id=target_row.provider_fixture_id,
@@ -1018,7 +1053,7 @@ def run_backfill(
                 missing_fields=(),
                 attempt_count=attempt_count,
                 max_retries_per_fixture=spec.max_retries_per_fixture,
-                now_iso=now_iso,
+                now_iso=_stamp(),
             )
             continue
 
@@ -1039,7 +1074,7 @@ def run_backfill(
                 missing_fields=(),
                 attempt_count=attempt_count,
                 max_retries_per_fixture=spec.max_retries_per_fixture,
-                now_iso=now_iso,
+                now_iso=_stamp(),
             )
             continue
 
@@ -1062,7 +1097,7 @@ def run_backfill(
                 missing_fields=(),
                 attempt_count=attempt_count,
                 max_retries_per_fixture=spec.max_retries_per_fixture,
-                now_iso=now_iso,
+                now_iso=_stamp(),
             )
             continue
 
@@ -1076,7 +1111,7 @@ def run_backfill(
                 missing_fields=missing_gap_fields(normalized),
                 attempt_count=attempt_count,
                 max_retries_per_fixture=spec.max_retries_per_fixture,
-                now_iso=now_iso,
+                now_iso=_stamp(),
             )
             continue
 
@@ -1092,7 +1127,7 @@ def run_backfill(
                 missing_fields=(),
                 attempt_count=attempt_count,
                 max_retries_per_fixture=spec.max_retries_per_fixture,
-                now_iso=now_iso,
+                now_iso=_stamp(),
             )
             continue
 
@@ -1109,14 +1144,14 @@ def run_backfill(
             missing_fields=(),
             attempt_count=attempt_count + 1,
             event_id=normalized.event_id,
-            updated_at=now_iso,
+            updated_at=_stamp(),
         )
 
     completion_state = _finalize(
         store_conn,
         job_id=job_id,
         target_fixture_count=target_fixture_count,
-        now_iso=now_iso,
+        now_iso=_stamp(),
         pause_reason=pause_reason,
     )
     return _summarize(
@@ -1128,7 +1163,7 @@ def run_backfill(
         projected_total_requests=projected_total_requests,
         planned_requests_this_run=planned_requests_this_run,
         provider_request_count=provider_request_count,
-        now_iso=now_iso,
+        now_iso=_stamp(),
         completion_state=completion_state,
         pause_reason=pause_reason,
         protected_floor=tranche.protected_floor,

@@ -846,3 +846,92 @@ def test_repeated_resumes_cannot_exceed_lifetime_cap(tmp_path):
         if result.completion_state == "COMPLETE":
             break
     assert total == cap  # exhausted once, never exceeded despite repeated resumes
+
+
+# ---------------------------------------------------------------------------
+# Lease heartbeat
+# ---------------------------------------------------------------------------
+def test_heartbeat_job_advances_updated_at(tmp_path):
+    conn = _store_conn(tmp_path)
+    _seed_in_progress_job(conn, marker_iso="2026-09-29T00:00:00+00:00")
+    backfill_store.heartbeat_job(conn, job_id=FRA1_JOB_ID, now_iso="2026-09-29T00:45:00+00:00")
+    assert backfill_store.load_job(conn, FRA1_JOB_ID)["updated_at"] == "2026-09-29T00:45:00+00:00"
+
+
+def test_active_run_heartbeat_prevents_reclaim_after_30_minutes(tmp_path):
+    # Executor A claims at T0 and keeps making progress; wall clock advances ~10
+    # minutes per fixture request. After >30 minutes a second executor B must
+    # still be refused, because A's per-request heartbeat keeps updated_at fresh.
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(8)
+    stats = _full_stats(fixtures)
+
+    t0 = datetime(2026, 9, 29, 0, 0, 0, tzinfo=timezone.utc)
+    state = {"now": t0}
+
+    def clock():
+        return state["now"]
+
+    claim_attempts: list[bool] = []
+
+    def advance_and_probe(provider):
+        state["now"] = state["now"] + timedelta(minutes=10)
+        if provider.stat_calls == 5:  # >30 minutes have elapsed since T0
+            now = state["now"]
+            stale_before = (now - timedelta(seconds=1800)).isoformat(timespec="seconds")
+            claim_attempts.append(
+                backfill_store.try_claim_job(
+                    conn,
+                    job_id=FRA1_JOB_ID,
+                    now_iso=now.isoformat(timespec="seconds"),
+                    stale_before_iso=stale_before,
+                )
+            )
+
+    budget = _GovernedBudget(limit=7500, remaining=7500)
+    provider = _TrancheProvider(fixtures, stats, budget=budget, after_stat=advance_and_probe)
+    result = run_backfill(provider, budget, spec=_spec(cap=320), store_conn=conn, clock=clock)
+
+    assert claim_attempts == [False]  # B could NOT reclaim an actively-progressing job
+    assert result.completed_count == 8
+
+
+def test_run_that_stops_heartbeating_is_reclaimable(tmp_path):
+    # Executor A stopped (crashed) with its last heartbeat at T0. Once the lease
+    # exceeds JOB_CLAIM_STALE_SECONDS, executor B may safely reclaim the job.
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(10)
+    _seed_in_progress_job(conn, marker_iso="2026-09-29T00:00:00+00:00")
+
+    budget = _GovernedBudget(limit=7500, remaining=7500)
+    provider = _TrancheProvider(fixtures, _full_stats(fixtures), budget=budget)
+    now = datetime(2026, 9, 29, 1, 0, 0, tzinfo=timezone.utc)  # 60 min > 30 min lease
+    result = run_backfill(provider, budget, spec=_spec(cap=320), store_conn=conn, now=now)
+
+    assert result.permitted is True
+    assert result.completed_count == 10  # reclaimed after staleness and completed
+
+
+def test_increment_is_committed_before_dispatch(tmp_path):
+    # The lifetime counter must already include a request (and be durable on a
+    # separate connection) BEFORE the provider call is dispatched.
+    conn = _store_conn(tmp_path)
+    db_path = tmp_path / "backfill.sqlite"
+    fixtures = _fixtures(1)
+    observed: list[int] = []
+
+    class _ProbeProvider(_TrancheProvider):
+        def get_historical_fixture_statistics(self, *, provider_fixture_id):
+            probe = backfill_store.connect(db_path)
+            try:
+                observed.append(backfill_store.load_job(probe, FRA1_JOB_ID)["requests_consumed"])
+            finally:
+                probe.close()
+            return super().get_historical_fixture_statistics(provider_fixture_id=provider_fixture_id)
+
+    budget = _GovernedBudget(limit=7500, remaining=7500)
+    provider = _ProbeProvider(fixtures, _full_stats(fixtures), budget=budget)
+    run_backfill(provider, budget, spec=_spec(cap=320), store_conn=conn)
+
+    # The list request (1) plus this statistics request (1) were committed first.
+    assert observed == [2]
