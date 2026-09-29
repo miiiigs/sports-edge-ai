@@ -14,7 +14,8 @@ Fail-closed rules:
 * a fixture is GAP-ready only when shots, shots-on-target and corners exist for
   both teams (missing is never imputed, and a genuine provider zero is NOT
   missing);
-* a backfill never exceeds its explicit hard request cap;
+* a backfill never exceeds its explicit hard request cap, which is pinned on
+  first creation and never raised by a later resume;
 * a backfill never expands beyond the single pinned competition + season.
 
 Historical traffic is always LOW priority; current/live operational requests
@@ -25,6 +26,7 @@ made.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
 
@@ -122,6 +124,28 @@ JOB_IN_PROGRESS = "IN_PROGRESS"
 JOB_COMPLETE = "COMPLETE"
 JOB_PARTIAL = "PARTIAL"
 JOB_BLOCKED = "BLOCKED"
+# A quota-limited (multi-window) stop that is NOT a failure: the job keeps all
+# checkpoint progress and is resumable in the next provider quota window.
+JOB_BUDGET_PAUSED = "BUDGET_PAUSED"
+# The authorized lifetime request cap has been fully consumed while fixtures
+# remain. Unlike BUDGET_PAUSED this is NOT cleared by a quota reset: resuming
+# requires an explicit new authorization, never a silent cap increase.
+JOB_LIFETIME_CAP_EXHAUSTED = "LIFETIME_CAP_EXHAUSTED"
+
+# Pause/stop reasons reported when a resumable historical run stops early.
+PAUSE_NO_HISTORICAL_HEADROOM = "NO_HISTORICAL_HEADROOM"
+PAUSE_REQUEST_CAP_EXHAUSTED = "REQUEST_CAP_EXHAUSTED"
+PAUSE_CIRCUIT_OPEN = "PROVIDER_CIRCUIT_OPEN"
+PAUSE_GOVERNOR_BLOCKED = "LOW_PRIORITY_GOVERNOR_BLOCKED"
+# A second executor tried to run the same deterministic job concurrently.
+PAUSE_ALREADY_RUNNING = "BACKFILL_ALREADY_RUNNING"
+
+# Fraction of the effective daily allowance that must remain reserved for
+# current/live production traffic. Historical (LOW priority) backfill may only
+# spend the headroom ABOVE this floor. This MUST equal
+# ``sports_ai.dashboard.provider_budget.QUOTA_CONSERVE_THRESHOLD`` so the
+# tranche planner and the authoritative provider governor agree on the boundary.
+HISTORICAL_HEALTHY_RATIO = 0.40
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +283,121 @@ def evaluate_backfill_eligibility(
 
 
 # ---------------------------------------------------------------------------
+# Quota-window tranche planning
+# ---------------------------------------------------------------------------
+def protected_historical_floor(
+    effective_limit: int | None,
+    *,
+    ratio: float = HISTORICAL_HEALTHY_RATIO,
+) -> int | None:
+    """Provider requests that must remain unspent for current/live production.
+
+    ``None`` means the effective allowance is unknown, so no floor can be
+    derived; callers must then defer entirely to the provider governor.
+    """
+    if effective_limit is None:
+        return None
+    try:
+        limit = int(effective_limit)
+    except (TypeError, ValueError):
+        return None
+    if limit <= 0:
+        return None
+    return math.ceil(limit * float(ratio))
+
+
+def historical_tranche_allowance(
+    *,
+    effective_remaining: int | None,
+    effective_limit: int | None,
+    ratio: float = HISTORICAL_HEALTHY_RATIO,
+) -> int | None:
+    """LOW-priority historical requests safely spendable in the current window.
+
+    The allowance is the remaining effective quota minus the protected floor, so
+    a run can never push the shared quota at or below the level current/live
+    production relies on. ``None`` means the allowance is unknown.
+    """
+    if effective_remaining is None:
+        return None
+    try:
+        remaining = max(0, int(effective_remaining))
+    except (TypeError, ValueError):
+        return None
+    floor = protected_historical_floor(effective_limit, ratio=ratio)
+    if floor is None:
+        return remaining
+    return max(0, remaining - floor)
+
+
+@dataclass(frozen=True)
+class BackfillTranchePlan:
+    """Deterministic bound on how much historical work one window may do."""
+
+    full_plan_requests: int
+    planned_requests: int
+    effective_remaining: int | None
+    effective_limit: int | None
+    protected_floor: int | None
+    historical_headroom: int | None
+    capped_by: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def plan_backfill_tranche(
+    *,
+    full_plan_requests: int,
+    effective_remaining: int | None,
+    effective_limit: int | None,
+    max_request_cap: int,
+    requests_consumed: int = 0,
+    ratio: float = HISTORICAL_HEALTHY_RATIO,
+) -> BackfillTranchePlan:
+    """Bound one invocation by the hard cap, the lifetime cap and the headroom.
+
+    ``full_plan_requests`` is what the whole outstanding job would cost this run.
+    ``requests_consumed`` is the cumulative provider cost already attributed to
+    this deterministic job across every prior quota window, so ``max_request_cap``
+    stays a LIFETIME cap for the logical backfill rather than a per-resume cap.
+
+    ``planned_requests`` is never greater than any of: the full outstanding plan,
+    the lifetime cap remaining, and the current-window historical headroom.
+    """
+    full = max(0, int(full_plan_requests))
+    cap = max(0, int(max_request_cap))
+    lifetime_remaining = max(0, cap - max(0, int(requests_consumed)))
+    headroom = historical_tranche_allowance(
+        effective_remaining=effective_remaining,
+        effective_limit=effective_limit,
+        ratio=ratio,
+    )
+
+    planned = full
+    capped_by = "FULL_PLAN"
+    if lifetime_remaining < planned:
+        planned = lifetime_remaining
+        capped_by = "REQUEST_CAP"
+    if headroom is not None:
+        if headroom < planned:
+            planned = headroom
+            capped_by = "HEADROOM"
+    elif planned == full:
+        capped_by = "UNKNOWN"
+
+    return BackfillTranchePlan(
+        full_plan_requests=full,
+        planned_requests=max(0, planned),
+        effective_remaining=effective_remaining,
+        effective_limit=effective_limit,
+        protected_floor=protected_historical_floor(effective_limit, ratio=ratio),
+        historical_headroom=headroom,
+        capped_by=capped_by,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Classification helpers
 # ---------------------------------------------------------------------------
 def classify_exception(exc: BaseException) -> str:
@@ -304,6 +443,13 @@ def build_backfill_audit_manifest(
     retryable_failure_count: int = 0,
     terminal_failure_count: int = 0,
     dry_run: bool = False,
+    protected_floor: int | None = None,
+    historical_headroom: int | None = None,
+    pause_reason: str | None = None,
+    requests_consumed_total: int = 0,
+    effective_remaining: int | None = None,
+    next_eligible_state: str | None = None,
+    lifetime_cap: int | None = None,
 ) -> dict[str, Any]:
     """Build a reproducible, secret-free audit summary.
 
@@ -336,6 +482,13 @@ def build_backfill_audit_manifest(
         "missing_field_counts": missing,
         "run_state": run_state,
     }
+    body["protected_floor"] = protected_floor
+    body["historical_headroom"] = historical_headroom
+    body["pause_reason"] = pause_reason
+    body["requests_consumed_total"] = int(requests_consumed_total)
+    body["effective_remaining"] = effective_remaining
+    body["next_eligible_state"] = next_eligible_state
+    body["lifetime_cap"] = lifetime_cap
     signature_payload = {
         "provider": provider,
         "league_id": int(provider_league_id),

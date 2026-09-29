@@ -45,16 +45,24 @@ FRA1 = "FRA1"
 
 
 class _Budget:
-    def __init__(self, state="HEALTHY", remaining=None, allowed=True):
+    def __init__(self, state="HEALTHY", remaining=None, allowed=True, limit=None, circuit="CLOSED"):
         self.state = state
         self.remaining = remaining
         self.allowed = allowed
+        self.limit = limit
+        self.circuit = circuit
 
     def quota_state(self):
         return self.state
 
     def effective_remaining(self):
         return self.remaining
+
+    def effective_limit(self):
+        return self.limit
+
+    def circuit_state(self):
+        return self.circuit
 
     def allow_paid_provider_calls(self):
         return self.allowed
@@ -211,7 +219,8 @@ def test_hard_request_cap_bounds_provider_requests(tmp_path):
     assert len(stats_calls) == 2
     assert result.completed_count == 2
     assert result.incomplete_count == 3
-    assert result.completion_state == "PARTIAL"
+    assert result.completion_state == "LIFETIME_CAP_EXHAUSTED"
+    assert result.pause_reason == "REQUEST_CAP_EXHAUSTED"
     assert result.projected_total_requests == 6  # 1 list + 5 stats
     assert result.planned_requests_this_run == 3  # 1 list + 2 stats (cap 3)
 
@@ -288,41 +297,69 @@ def test_bounded_partial_run_with_cap_100(tmp_path):
     assert result.planned_requests_this_run == 100  # 1 list + 99 stats
     assert result.provider_request_count == 100
     assert result.completed_count == 99
-    assert result.completion_state == "PARTIAL"
+    assert result.completion_state == "LIFETIME_CAP_EXHAUSTED"
 
 
 def test_resume_plans_only_remaining_fixtures(tmp_path):
     conn = _store_conn(tmp_path)
     fixtures = _fixtures(308)
 
-    budget1 = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+    # First window is quota-limited to 100 requests (1 list + 99 stats).
+    budget1 = _Budget(state="HEALTHY", remaining=100, allowed=True)
     provider1 = _Provider(fixtures, _full_stats(fixtures), budget=budget1)
-    first = run_backfill(provider1, budget1, spec=_spec(cap=201), store_conn=conn)
-    assert first.completed_count == 200
+    first = run_backfill(provider1, budget1, spec=_spec(cap=320), store_conn=conn)
+    assert first.completed_count == 99
+    assert first.completion_state == "BUDGET_PAUSED"
 
+    # Second window resumes the SAME job and only fetches the outstanding 209.
     budget2 = _Budget(state="HEALTHY", remaining=1000, allowed=True)
     provider2 = _Provider(fixtures, _full_stats(fixtures), budget=budget2)
-    second = run_backfill(provider2, budget2, spec=_spec(cap=50), store_conn=conn)
+    second = run_backfill(provider2, budget2, spec=_spec(cap=320), store_conn=conn)
 
-    assert second.projected_total_requests == 309
-    assert second.planned_requests_this_run == 50  # 1 list + 49 stats
+    assert second.job_id == first.job_id
+    assert second.completed_count == 308
+    assert second.completion_state == "COMPLETE"
     stats_calls = [c for c in provider2.calls if c[0] == "stats"]
-    assert len(stats_calls) == 49
-    assert second.completed_count == 249  # 200 + 49
+    assert len(stats_calls) == 209  # only the outstanding fixtures
+    assert second.requests_consumed_total == 310  # 100 + 210, within the cap
 
 
-def test_insufficient_bounded_budget_blocks_before_any_call(tmp_path):
+def test_partial_tranche_when_full_job_unaffordable(tmp_path):
+    # 50 requests remain but the whole bounded plan needs 100. Under quota-tranche
+    # semantics the run is NOT rejected; it spends the affordable tranche, pauses
+    # at the headroom boundary and stays resumable.
     conn = _store_conn(tmp_path)
-    provider = _Provider(_fixtures(308), _full_stats(_fixtures(308)))
+    fixtures = _fixtures(308)
     budget = _Budget(state="HEALTHY", remaining=50, allowed=True)
+    provider = _Provider(fixtures, _full_stats(fixtures), budget=budget)
 
     result = run_backfill(provider, budget, spec=_spec(cap=100), store_conn=conn, fixture_count_hint=308)
 
+    assert result.permitted is True
+    assert result.provider_request_count == 50  # 1 list + 49 stats
+    assert result.completed_count == 49
+    assert result.completion_state == "BUDGET_PAUSED"
+    assert result.pause_reason == "NO_HISTORICAL_HEADROOM"
+    stats_calls = [c for c in provider.calls if c[0] == "stats"]
+    assert len(stats_calls) == 49
+
+
+def test_zero_historical_headroom_blocks_before_any_call(tmp_path):
+    # The protected floor equals the remaining allowance, so no LOW-priority
+    # historical work may proceed. Fail closed with zero provider calls.
+    conn = _store_conn(tmp_path)
+    fixtures = _fixtures(308)
+    budget = _Budget(state="HEALTHY", remaining=40, allowed=True, limit=100)
+    provider = _Provider(fixtures, _full_stats(fixtures), budget=budget)
+
+    result = run_backfill(provider, budget, spec=_spec(cap=320), store_conn=conn, fixture_count_hint=308)
+
     assert result.permitted is False
-    assert result.block_reason == "BUDGET_INSUFFICIENT"
-    assert provider.calls == []
+    assert result.block_reason == "NO_HISTORICAL_HEADROOM"
+    assert result.completion_state == "BUDGET_PAUSED"
     assert result.provider_request_count == 0
-    assert result.planned_requests_this_run == 100  # the exact required amount
+    assert result.historical_headroom == 0
+    assert provider.calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -331,14 +368,18 @@ def test_insufficient_bounded_budget_blocks_before_any_call(tmp_path):
 def test_interruption_after_partial_progress_resumes_remaining(tmp_path):
     conn = _store_conn(tmp_path)
     fixtures = _fixtures(5)
-    provider1 = _Provider(fixtures, _full_stats(fixtures))
-    budget = _Budget(state="HEALTHY", remaining=1000, allowed=True)
 
-    first = run_backfill(provider1, budget, spec=_spec(cap=3), store_conn=conn)
+    # The first run is quota-limited (not cap-limited), so its pinned lifetime cap
+    # is 100 and the same cap can resume it later.
+    budget1 = _Budget(state="HEALTHY", remaining=3, allowed=True)
+    provider1 = _Provider(fixtures, _full_stats(fixtures), budget=budget1)
+    first = run_backfill(provider1, budget1, spec=_spec(cap=100), store_conn=conn)
     assert first.completed_count == 2
+    assert first.completion_state == "BUDGET_PAUSED"
 
-    provider2 = _Provider(fixtures, _full_stats(fixtures))
-    second = run_backfill(provider2, budget, spec=_spec(cap=100), store_conn=conn)
+    budget2 = _Budget(state="HEALTHY", remaining=1000, allowed=True)
+    provider2 = _Provider(fixtures, _full_stats(fixtures), budget=budget2)
+    second = run_backfill(provider2, budget2, spec=_spec(cap=100), store_conn=conn)
 
     assert second.completed_count == 5
     # Remaining 3 fixtures are fetched; the 2 already-complete fixtures are NOT repurchased.

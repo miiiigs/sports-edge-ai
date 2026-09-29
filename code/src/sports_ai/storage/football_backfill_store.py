@@ -45,7 +45,8 @@ SCHEMA_STATEMENTS = (
         target_fixture_count INTEGER NOT NULL,
         start_timestamp TEXT NOT NULL,
         completion_state TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        requests_consumed INTEGER NOT NULL DEFAULT 0
     )
     """,
     """
@@ -88,6 +89,18 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # Autocommit: every checkpoint write (job plan, lifetime request counter,
+    # fixture progress, failures) is durable the instant it is issued. Without
+    # this a process exit/restart would roll back uncommitted progress and the
+    # lifetime request counter, silently losing resume state and under-counting
+    # billable provider spend. Each store statement is independently valid, so
+    # per-statement durability is safe; the orchestrator always re-reads state
+    # before acting.
+    conn.isolation_level = None
+    # NORMAL keeps committed writes durable across application/process crashes
+    # (the threat model here) while avoiding an fsync per checkpoint write. Full
+    # power-loss durability is not required for a resumable request checkpoint.
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 
@@ -95,6 +108,22 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     with conn:
         for statement in SCHEMA_STATEMENTS:
             conn.execute(statement)
+        _ensure_job_columns(conn)
+
+
+def _ensure_job_columns(conn: sqlite3.Connection) -> None:
+    """Additively add columns introduced after the first release.
+
+    ``CREATE TABLE IF NOT EXISTS`` cannot add columns to an existing table, so a
+    pre-existing checkpoint database is upgraded in place. Existing rows default
+    ``requests_consumed`` to 0, which is the correct value for a job created
+    before lifetime request accounting existed. No data is rewritten or dropped.
+    """
+    existing = {str(row[1]) for row in conn.execute("PRAGMA table_info(football_backfill_jobs)")}
+    if "requests_consumed" not in existing:
+        conn.execute(
+            "ALTER TABLE football_backfill_jobs ADD COLUMN requests_consumed INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def create_job(
@@ -115,8 +144,12 @@ def create_job(
     projected_total_requests: int,
     target_fixture_count: int,
     start_timestamp: str,
-    completion_state: str,
+        completion_state: str,
 ) -> None:
+    # Create the job once. On an existing job this only refreshes the plan; it
+    # deliberately does NOT touch ``max_request_cap`` (the pinned lifetime cap)
+    # or ``updated_at`` (the concurrency-claim lease marker), which must survive
+    # every resume unchanged.
     conn.execute(
         """
         INSERT INTO football_backfill_jobs (
@@ -128,8 +161,7 @@ def create_job(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(job_id) DO UPDATE SET
             projected_total_requests = excluded.projected_total_requests,
-            target_fixture_count = excluded.target_fixture_count,
-            updated_at = excluded.updated_at
+            target_fixture_count = excluded.target_fixture_count
         """,
         (
             job_id,
@@ -190,6 +222,63 @@ def update_job_plan(
         """,
         (int(projected_total_requests), int(target_fixture_count), updated_at, job_id),
     )
+
+
+def increment_job_requests(
+    conn: sqlite3.Connection,
+    *,
+    job_id: str,
+    count: int,
+    updated_at: str,
+) -> None:
+    """Add ``count`` provider request attempts to the lifetime job counter.
+
+    This makes ``max_request_cap`` a lifetime ceiling for the logical backfill:
+    the counter is persisted on the job row and preserved across every resume and
+    quota window, so split execution cannot silently multiply the allowed cost.
+    """
+    conn.execute(
+        """
+        UPDATE football_backfill_jobs
+        SET requests_consumed = COALESCE(requests_consumed, 0) + ?, updated_at = ?
+        WHERE job_id = ?
+        """,
+        (int(count), updated_at, job_id),
+    )
+
+
+def try_claim_job(
+    conn: sqlite3.Connection,
+    *,
+    job_id: str,
+    now_iso: str,
+    stale_before_iso: str,
+) -> bool:
+    """Atomically claim exclusive execution of one deterministic backfill job.
+
+    The job is claimed only when it is not already ``IN_PROGRESS`` or when its
+    last-progress marker (``updated_at``) is older than ``stale_before_iso``. The
+    conditional ``UPDATE`` is a single SQL statement, so SQLite's write
+    serialization guarantees exactly one concurrent executor wins. Returns
+    ``True`` for the winner and ``False`` for a second executor, which must then
+    exit without any provider traffic.
+
+    Using ``IN_PROGRESS`` + ``updated_at`` as a self-expiring lease means no extra
+    columns are needed, a completed/paused run releases the job immediately (its
+    terminal-for-now state is not ``IN_PROGRESS``), and a crashed run is
+    reclaimable after the staleness window. The orchestrator refreshes
+    ``updated_at`` on every claim and request, so a live run stays claimed.
+    """
+    cursor = conn.execute(
+        """
+        UPDATE football_backfill_jobs
+        SET completion_state = 'IN_PROGRESS', updated_at = ?
+        WHERE job_id = ?
+          AND (completion_state <> 'IN_PROGRESS' OR updated_at <= ?)
+        """,
+        (now_iso, job_id, stale_before_iso),
+    )
+    return cursor.rowcount == 1
 
 
 def upsert_fixture_progress(
