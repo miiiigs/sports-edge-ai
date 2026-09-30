@@ -544,6 +544,14 @@ class ProviderRequestBudget:
             return int(provider_remaining)
         return min(int(provider_remaining), operational_remaining)
 
+    def effective_limit(self) -> int | None:
+        """Effective daily allowance = min(provider limit, operational cap)."""
+        return self._effective_quota_limit()
+
+    def circuit_state(self) -> str:
+        """Current circuit-breaker state (``CLOSED`` when no row exists)."""
+        return str(self.circuit_snapshot().get("state") or CIRCUIT_CLOSED)
+
     def _effective_quota_limit(self) -> int | None:
         snapshot = self._quota_snapshot()
         provider_limit = snapshot.get("daily_limit")
