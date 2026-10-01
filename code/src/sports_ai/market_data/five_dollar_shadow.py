@@ -65,6 +65,19 @@ class ShadowConfig:
     max_provider_calls_per_cycle: int = DEFAULT_MAX_PROVIDER_CALLS_PER_CYCLE
     max_provider_calls_per_hour: int = DEFAULT_MAX_PROVIDER_CALLS_PER_HOUR
 
+    def __post_init__(self) -> None:
+        # Hard caps: lower values allowed, oversized/invalid fail safe to the max.
+        object.__setattr__(
+            self,
+            "max_provider_calls_per_cycle",
+            max(0, min(int(self.max_provider_calls_per_cycle), DEFAULT_MAX_PROVIDER_CALLS_PER_CYCLE)),
+        )
+        object.__setattr__(
+            self,
+            "max_provider_calls_per_hour",
+            max(0, min(int(self.max_provider_calls_per_hour), DEFAULT_MAX_PROVIDER_CALLS_PER_HOUR)),
+        )
+
     def shadow_flag(self) -> bool:
         return _env_bool(self.shadow_enabled_env_var, False)
 
@@ -123,6 +136,7 @@ def _empty_counters() -> dict[str, int]:
         "corner_quotes": 0,
         "alias_misses": 0,
         "rate_blocked": 0,
+        "fixtures_skipped_no_fixture_id": 0,
     }
 
 
@@ -194,11 +208,35 @@ class FiveDollarShadowCollector:
                 written += 1
         return written, reused
 
+    # ------------------------------------------------------------------ budgeted provider calls
+    def _accounted(self, fn, *args, **kwargs):
+        """Run a provider operation and ALWAYS account its real call delta.
+
+        The delta is taken from the provider governor's ``requests_allowed`` in a
+        ``finally`` block, so a call consumed by a failure/exception can never
+        escape ShadowBudget or the provider_calls counter.
+        """
+        before = self._provider_calls()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            delta = max(0, self._provider_calls() - before)
+            if delta:
+                self._budget.record(delta)
+                self._counters["provider_calls"] += delta
+
     # ------------------------------------------------------------------ alias evidence
     def _record_alias_evidence(self, fixture_context: Mapping[str, Any]) -> None:
         self._counters["alias_misses"] += 1
+        # Prefer already-fetched/cached match evidence; when a network call is
+        # genuinely required it is pre-checked against the budget AND accounted
+        # exactly like any other provider operation. A failure never triggers a
+        # second (unbudgeted) attempt.
+        if not self._budget.can_spend(1):
+            self._counters["rate_blocked"] += 1
+            return
         try:
-            window = self._provider._fixtures_window(fixture_context)  # cached; no extra call
+            window = self._accounted(self._provider._fixtures_window, fixture_context)
         except Exception:  # noqa: BLE001
             return
         expected = {adapter_team_name(fixture_context.get("home_team_name")), adapter_team_name(fixture_context.get("away_team_name"))}
@@ -225,14 +263,24 @@ class FiveDollarShadowCollector:
         if not self.shadow_enabled():
             return self._result()
 
+        max_cycle = self._config.max_provider_calls_per_cycle
         for row in fixtures:
             competition = str(row.get("competition_id") or "").strip().upper()
             if competition not in SHADOW_COMPETITIONS:
                 continue  # no provider call for unsupported competitions
             if not self.eligible(row):
                 continue
+
+            # A canonical/internal fixture id is REQUIRED for pipeline rows. Never
+            # synthesise one; skip/fail closed with zero provider calls.
+            fixture_id = str(row.get("fixture_id") or "").strip()
+            if not fixture_id:
+                self._counters["fixtures_skipped_no_fixture_id"] += 1
+                continue
+
             self._counters["fixtures_considered"] += 1
 
+            # A fixture needs at most two provider calls (window/alias + odds).
             if not self._budget.can_spend(2):
                 self._counters["rate_blocked"] += 1
                 continue
@@ -243,15 +291,15 @@ class FiveDollarShadowCollector:
                 "away_team_name": row.get("away_team_name"),
                 "kickoff_utc": row.get("kickoff_utc"),
             }
-            fixture_id = str(row.get("fixture_id") or "")
-
-            calls_before = self._provider_calls()
             cache_before = self._cache_hits()
+
             try:
-                match = self._provider.match_fixture(context)
+                match = self._accounted(self._provider.match_fixture, context)
             except MarketProviderError:
                 self._counters["fixtures_unmatched"] += 1
                 self._record_alias_evidence(context)
+                if self._budget.snapshot()["cycle_calls"] >= max_cycle:
+                    break
                 continue
 
             state = getattr(match, "state", "UNMATCHED")
@@ -261,21 +309,24 @@ class FiveDollarShadowCollector:
                 else:
                     self._counters["fixtures_unmatched"] += 1
                     self._record_alias_evidence(context)
+                if self._budget.snapshot()["cycle_calls"] >= max_cycle:
+                    break
                 continue
 
             self._counters["fixtures_matched"] += 1
-            provider_fixture_id = str(getattr(match, "provider_fixture_id", "") or "")
-            if not fixture_id:
-                fixture_id = f"{_FIVE_DOLLAR_PROVIDER}:{provider_fixture_id}"
-            try:
-                quotes = self._provider.get_fixture_quotes(fixture_id, fixture_context=context)
-            except MarketProviderError:
-                self._counters["fixtures_unmatched"] += 1
+
+            if not self._budget.can_spend(1):
+                self._counters["rate_blocked"] += 1
                 continue
 
-            delta_calls = max(0, self._provider_calls() - calls_before)
-            self._budget.record(delta_calls)
-            self._counters["provider_calls"] += delta_calls
+            try:
+                quotes = self._accounted(self._provider.get_fixture_quotes, fixture_id, fixture_context=context)
+            except MarketProviderError:
+                self._counters["fixtures_unmatched"] += 1
+                if self._budget.snapshot()["cycle_calls"] >= max_cycle:
+                    break
+                continue
+
             self._counters["cache_hits"] += max(0, self._cache_hits() - cache_before)
             self._counters["ah_quotes"] += sum(1 for q in quotes if q.market == MARKET_ASIAN_HANDICAP)
             self._counters["corner_quotes"] += sum(1 for q in quotes if q.market == MARKET_CORNER_TOTAL)
@@ -285,32 +336,61 @@ class FiveDollarShadowCollector:
                 self._counters["snapshots_written"] += written
                 self._counters["snapshots_reused"] += reused
 
+            if self._budget.snapshot()["cycle_calls"] >= max_cycle:
+                break
+
         return self._result()
 
     # ------------------------------------------------------------------ comparison (read-only)
-    def compare_with_api_football(self, fixture_id: str) -> list[dict[str, Any]]:
-        """Observation-only comparison. No averaging, no replacement, no winner."""
+    def compare_with_api_football(self, fixture_id: str, *, include_inplay: bool = False) -> list[dict[str, Any]]:
+        """Pre-match-only, observation-only comparison.
+
+        By default only pre-match rows are compared (``is_pre_match == 1``), so an
+        in-play 5Dollar quote can never be compared against a pre-match
+        API-Football quote. Phase is preserved for 5Dollar rows, so opening and
+        closing remain separate observations. No averaging, no winner, no
+        replacement. Strictly read-only (no schema creation/migration/backfill).
+        """
         if self._conn is None:
             return []
         from ..storage import football_paper_trading as paper
 
-        rows = paper.fetch_market_snapshots(self._conn, fixture_id=fixture_id)
-        api = {self._key(r): r for r in rows if r.get("provider") == _API_FOOTBALL_PROVIDER}
-        five = {self._key(r): r for r in rows if r.get("provider") == _FIVE_DOLLAR_PROVIDER}
+        rows = paper.fetch_market_snapshots(self._conn, fixture_id=fixture_id, initialize_schema=False)
+
+        def _phase(row: Mapping[str, Any]) -> str | None:
+            parts = str(row.get("provider_market_id") or "").split(":")
+            return parts[3] if len(parts) >= 6 else None
+
+        five = [
+            r
+            for r in rows
+            if r.get("provider") == _FIVE_DOLLAR_PROVIDER and (include_inplay or r.get("is_pre_match") == 1)
+        ]
+        api_by_key = {
+            self._key(r): r
+            for r in rows
+            if r.get("provider") == _API_FOOTBALL_PROVIDER and (include_inplay or r.get("is_pre_match") == 1)
+        }
         out: list[dict[str, Any]] = []
-        for key in sorted(set(api) | set(five), key=lambda k: (str(k[0]), str(k[1]), k[2] if k[2] is not None else 0.0)):
-            a = api.get(key)
-            f = five.get(key)
+        key_fn = lambda r: (
+            str(r.get("market")),
+            str(r.get("selection")),
+            r.get("line") if r.get("line") is not None else 0.0,
+            str(_phase(r)),
+        )
+        for f in sorted(five, key=key_fn):
+            a = api_by_key.get(self._key(f))
             out.append(
                 {
-                    "market": key[0],
-                    "selection": key[1],
-                    "line": key[2],
-                    "five_dollar_price": f.get("odds") if f else None,
+                    "market": f.get("market"),
+                    "selection": f.get("selection"),
+                    "line": f.get("line"),
+                    "five_dollar_phase": _phase(f),
+                    "five_dollar_price": f.get("odds"),
+                    "five_dollar_captured_at": f.get("captured_at"),
                     "api_football_price": a.get("odds") if a else None,
-                    "difference": (f.get("odds") - a.get("odds")) if (f and a) else None,
-                    "five_dollar_captured_at": f.get("captured_at") if f else None,
                     "api_football_captured_at": a.get("captured_at") if a else None,
+                    "difference": (f.get("odds") - a.get("odds")) if a else None,
                 }
             )
         return out

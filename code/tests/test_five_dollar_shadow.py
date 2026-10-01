@@ -334,3 +334,197 @@ def test_shadow_run_wrapper(monkeypatch, tmp_path):
     assert run.shadow_enabled is True
     assert run.counters["fixtures_matched"] == 1
     assert "budget" in run.to_dict()
+
+
+# =========================================================================== corrections
+class _ScriptedProvider(_FakeProvider):
+    """Provider whose per-fixture behaviour follows a script."""
+
+    def __init__(self, *, enabled=True, behaviors=None):
+        super().__init__(enabled=enabled)
+        self._behaviors = list(behaviors or [])
+        self._idx = -1
+
+    def _behavior(self):
+        if 0 <= self._idx < len(self._behaviors):
+            return self._behaviors[self._idx]
+        return "matched"
+
+    def match_fixture(self, fixture_context):
+        self._idx += 1
+        self.requests_allowed += 1
+        behavior = self._behavior()
+        if behavior == "match_error":
+            raise MarketProviderError("PROVIDER_ERROR status=500")
+        state = {"matched": "MATCHED", "unmatched": "UNMATCHED", "ambiguous": "AMBIGUOUS", "odds_error": "MATCHED"}.get(
+            behavior, "MATCHED"
+        )
+        return five.FixtureMatch(
+            state=state,
+            provider_fixture_id="2311636891" if state == "MATCHED" else None,
+            kickoff_utc=fixture_context.get("kickoff_utc"),
+        )
+
+    def get_fixture_quotes(self, fixture_id, *, fixture_context=None):
+        self.requests_allowed += 1
+        if self._behavior() == "odds_error":
+            raise MarketProviderError("PROVIDER_ERROR status=500")
+        return list(self._quotes)
+
+
+class _AliasBoomProvider(_FakeProvider):
+    def __init__(self, **kwargs):
+        super().__init__(state="UNMATCHED", **kwargs)
+        self.alias_calls = 0
+
+    def _fixtures_window(self, fixture_context):
+        self.alias_calls += 1
+        self.requests_allowed += 1  # alias lookup is a real provider call here
+        raise MarketProviderError("PROVIDER_ERROR status=500")
+
+
+def _collect_capped(monkeypatch, provider, *, rows, cap_cycle=5, conn=None):
+    monkeypatch.setenv(shadow.ENV_SHADOW_ENABLED, "1")
+    collector = shadow.FiveDollarShadowCollector(
+        provider=provider,
+        config=shadow.ShadowConfig(max_provider_calls_per_cycle=cap_cycle, max_provider_calls_per_hour=20),
+        conn=conn,
+    )
+    return collector.collect(rows)
+
+
+def test_five_unmatched_fixtures_respect_budget(monkeypatch, tmp_path):
+    provider = _FakeProvider(enabled=True, state="UNMATCHED", window=[])
+    rows = [{**FRA1_ROW, "fixture_id": f"f{i}"} for i in range(5)]
+    result = _collect_capped(monkeypatch, provider, rows=rows, conn=_db(tmp_path))
+    assert provider.requests_allowed <= 5
+    assert result["counters"]["provider_calls"] == provider.requests_allowed
+    assert result["counters"]["fixtures_unmatched"] >= 1
+
+
+def test_five_ambiguous_fixtures_respect_budget(monkeypatch, tmp_path):
+    provider = _FakeProvider(enabled=True, state="AMBIGUOUS")
+    rows = [{**FRA1_ROW, "fixture_id": f"f{i}"} for i in range(5)]
+    result = _collect_capped(monkeypatch, provider, rows=rows, conn=_db(tmp_path))
+    assert provider.requests_allowed <= 5
+    assert result["counters"]["provider_calls"] == provider.requests_allowed
+    assert result["counters"]["fixtures_ambiguous"] >= 1
+
+
+def test_match_exceptions_are_accounted(monkeypatch, tmp_path):
+    provider = _ScriptedProvider(behaviors=["match_error", "match_error", "match_error", "match_error", "match_error"])
+    rows = [{**FRA1_ROW, "fixture_id": f"f{i}"} for i in range(5)]
+    result = _collect_capped(monkeypatch, provider, rows=rows, conn=_db(tmp_path))
+    assert provider.requests_allowed <= 5
+    assert result["counters"]["provider_calls"] == provider.requests_allowed
+    assert result["counters"]["provider_calls"] >= 1
+
+
+def test_odds_exceptions_are_accounted(monkeypatch, tmp_path):
+    provider = _ScriptedProvider(behaviors=["odds_error", "odds_error", "odds_error", "odds_error", "odds_error"])
+    rows = [{**FRA1_ROW, "fixture_id": f"f{i}"} for i in range(5)]
+    result = _collect_capped(monkeypatch, provider, rows=rows, conn=_db(tmp_path))
+    assert provider.requests_allowed <= 5
+    assert result["counters"]["provider_calls"] == provider.requests_allowed
+
+
+def test_mixed_slate_never_exceeds_cap(monkeypatch, tmp_path):
+    provider = _ScriptedProvider(behaviors=["matched", "unmatched", "ambiguous", "match_error", "odds_error"])
+    rows = [{**FRA1_ROW, "fixture_id": f"f{i}"} for i in range(5)]
+    result = _collect_capped(monkeypatch, provider, rows=rows, conn=_db(tmp_path))
+    assert provider.requests_allowed <= 5
+    assert result["counters"]["provider_calls"] == provider.requests_allowed
+
+
+def test_alias_failure_is_accounted_and_not_retried(monkeypatch, tmp_path):
+    provider = _AliasBoomProvider(enabled=True)
+    rows = [{**FRA1_ROW, "fixture_id": f"f{i}"} for i in range(2)]
+    result = _collect_capped(monkeypatch, provider, rows=rows, conn=_db(tmp_path))
+    assert provider.alias_calls == 2  # exactly one alias lookup per unmatched fixture
+    assert provider.requests_allowed == 4  # match(1) + alias(1) per fixture
+    assert result["counters"]["provider_calls"] == 4
+    assert result["counters"]["alias_misses"] == 2
+
+
+def test_opening_closing_identical_corner_prices_preserved(monkeypatch, tmp_path):
+    conn = _db(tmp_path)
+    quotes = []
+    for phase in ("opening", "closing"):
+        quotes.append(_quote("corner_total", phase, "OVER", 8.5, 1.85))
+        quotes.append(_quote("corner_total", phase, "UNDER", 8.5, 1.95))
+    collector = _collector(monkeypatch, provider=_FakeProvider(enabled=True, quotes=quotes), conn=conn)
+    first = collector.collect([FRA1_ROW])
+    assert first["counters"]["snapshots_written"] == 4
+    assert len(paper.fetch_market_snapshots(conn, fixture_id=FIXTURE_ID)) == 4
+    second = collector.collect([FRA1_ROW])
+    assert second["counters"]["snapshots_written"] == 0
+    assert second["counters"]["snapshots_reused"] == 4
+    assert len(paper.fetch_market_snapshots(conn, fixture_id=FIXTURE_ID)) == 4
+    conn.close()
+
+
+def test_opening_closing_identical_ah_prices_preserved(monkeypatch, tmp_path):
+    conn = _db(tmp_path)
+    quotes = []
+    for phase in ("opening", "closing"):
+        quotes.append(_quote("asian_handicap", phase, "HOME", -0.5, 1.9))
+        quotes.append(_quote("asian_handicap", phase, "AWAY", -0.5, 1.9))
+    collector = _collector(monkeypatch, provider=_FakeProvider(enabled=True, quotes=quotes), conn=conn)
+    first = collector.collect([FRA1_ROW])
+    assert first["counters"]["snapshots_written"] == 4
+    second = collector.collect([FRA1_ROW])
+    assert second["counters"]["snapshots_written"] == 0
+    assert len(paper.fetch_market_snapshots(conn, fixture_id=FIXTURE_ID)) == 4
+    conn.close()
+
+
+def test_comparison_pre_match_only_and_phase_preserved(monkeypatch, tmp_path):
+    conn = _db(tmp_path)
+    collector = _collector(monkeypatch, provider=_FakeProvider(enabled=True), conn=conn)
+    collector.collect([FRA1_ROW])
+    rows = collector.compare_with_api_football(FIXTURE_ID)
+    assert rows
+    assert all(r["five_dollar_phase"] != "inplay" for r in rows)  # pre-match only by default
+    assert {"opening", "closing"} <= {r["five_dollar_phase"] for r in rows}
+    with_inplay = collector.compare_with_api_football(FIXTURE_ID, include_inplay=True)
+    assert any(r["five_dollar_phase"] == "inplay" for r in with_inplay)
+    # opening and closing are distinct observations, never collapsed
+    corner = [r for r in rows if r["market"] == "corner_total" and r["selection"] == "OVER"]
+    assert len({r["five_dollar_phase"] for r in corner}) == len(corner)
+    conn.close()
+
+
+def test_comparison_is_strictly_read_only(monkeypatch, tmp_path):
+    conn = _db(tmp_path)
+    _collector(monkeypatch, provider=_FakeProvider(enabled=True), conn=conn).collect([FRA1_ROW])
+    tables_before = sorted(r[0] for r in conn.execute("select name from sqlite_master"))
+    changes_before = conn.total_changes
+    collector = _collector(monkeypatch, provider=_FakeProvider(enabled=True), conn=conn)
+    collector.compare_with_api_football(FIXTURE_ID)
+    assert conn.total_changes == changes_before  # no INSERT/UPDATE/DELETE
+    assert sorted(r[0] for r in conn.execute("select name from sqlite_master")) == tables_before  # no DDL
+    conn.close()
+
+
+@pytest.mark.parametrize(("raw", "expected"), [(100, 5), (10, 5), (3, 3), (0, 0), (-5, 0)])
+def test_shadow_cycle_cap_clamped(raw, expected):
+    assert shadow.ShadowConfig(max_provider_calls_per_cycle=raw).max_provider_calls_per_cycle == expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [(100, 20), (50, 20), (10, 10), (-1, 0)])
+def test_shadow_hour_cap_clamped(raw, expected):
+    assert shadow.ShadowConfig(max_provider_calls_per_hour=raw).max_provider_calls_per_hour == expected
+
+
+def test_missing_fixture_id_fails_closed(monkeypatch, tmp_path):
+    provider = _FakeProvider(enabled=True)
+    conn = _db(tmp_path)
+    collector = _collector(monkeypatch, provider=provider, conn=conn)
+    row = {k: v for k, v in FRA1_ROW.items() if k != "fixture_id"}
+    result = collector.collect([row])
+    assert provider.requests_allowed == 0  # no synthetic id, no provider call
+    assert result["counters"]["provider_calls"] == 0
+    assert result["counters"]["snapshots_written"] == 0
+    assert result["counters"]["fixtures_skipped_no_fixture_id"] == 1
+    assert paper.fetch_market_snapshots(conn, fixture_id=FIXTURE_ID) == []
+    conn.close()
