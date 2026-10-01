@@ -357,3 +357,17 @@ def test_compare_provider_snapshots_is_read_only(monkeypatch):
     secondary = [{"market": "asian_handicap", "selection": "HOME", "line": -0.25, "decimal_odds": 1.95}]
     rows = five.compare_provider_snapshots(primary, secondary)
     assert rows and rows[0]["api_football"] == [2.0] and rows[0]["five_dollar"] == [1.95]
+
+
+def test_adapter_team_alias_normalization():
+    assert five.adapter_team_name("PSG") == five.adapter_team_name("Paris Saint Germain")
+    assert five.adapter_team_name("Brest") == five.adapter_team_name("Stade Brestois 29")
+    assert five.adapter_team_name("Troyes") == five.adapter_team_name("Estac Troyes")
+
+
+def test_fra1_provider_alias_matching_psg(monkeypatch):
+    # The provider lists the club as "PSG"; our DB uses "Paris Saint Germain".
+    provider, _, _ = _provider(monkeypatch, fixtures=[_event(home="Marseille", away="PSG")], odds=_odds())
+    match = provider.match_fixture(CONTEXT)  # CONTEXT away == "Paris Saint Germain"
+    assert match.state == five.MATCH_MATCHED
+    assert match.provider_fixture_id == "2311636891"

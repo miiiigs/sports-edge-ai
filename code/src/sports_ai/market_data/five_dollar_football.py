@@ -89,6 +89,24 @@ DEFAULT_MAX_PER_MINUTE = 15
 DEFAULT_KICKOFF_TOLERANCE_SECONDS = 0
 DEFAULT_CACHE_TTL_SECONDS = 300
 
+# Provider-vs-API-Football FRA1 naming differences. Applied AFTER the shared
+# normalize/canonical step. Keys/values are alphanumeric-normalized. These are
+# reviewed, deterministic equivalences (never fuzzy) and only for FRA1.
+PROVIDER_TEAM_ALIASES: Mapping[str, str] = {
+    "psg": "parissaintgermain",
+    "parissaintgermain": "parissaintgermain",
+    "brest": "stadebrestois29",
+    "stadebrestois29": "stadebrestois29",
+    "troyes": "estactroyes",
+    "estactroyes": "estactroyes",
+}
+
+
+def adapter_team_name(value: Any) -> str:
+    """Canonical team key with FRA1 provider-alias normalization applied."""
+    key = canonical_team_name(value)
+    return PROVIDER_TEAM_ALIASES.get(key, key)
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -444,14 +462,14 @@ class FiveDollarFootballProvider:
 
     def match_fixture(self, fixture_context: Mapping[str, Any]) -> FixtureMatch:
         """Deterministic MATCHED / UNMATCHED / AMBIGUOUS (no fuzzy guessing)."""
-        expected_home = canonical_team_name(fixture_context.get("home_team_name"))
-        expected_away = canonical_team_name(fixture_context.get("away_team_name"))
+        expected_home = adapter_team_name(fixture_context.get("home_team_name"))
+        expected_away = adapter_team_name(fixture_context.get("away_team_name"))
         expected_kickoff = normalize_kickoff_utc(fixture_context.get("kickoff_utc"))
         candidates: list[dict[str, Any]] = []
         for fixture in self._fixtures_window(fixture_context):
             teams = fixture.get("teams") or {}
-            home = canonical_team_name((teams.get("home") or {}).get("name"))
-            away = canonical_team_name((teams.get("away") or {}).get("name"))
+            home = adapter_team_name((teams.get("home") or {}).get("name"))
+            away = adapter_team_name((teams.get("away") or {}).get("name"))
             if home != expected_home or away != expected_away:
                 continue
             candidate_kickoff = normalize_kickoff_utc(fixture.get("kickoff_utc"))
