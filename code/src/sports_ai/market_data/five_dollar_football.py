@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -80,14 +81,26 @@ MATCH_MATCHED = "MATCHED"
 MATCH_UNMATCHED = "UNMATCHED"
 MATCH_AMBIGUOUS = "AMBIGUOUS"
 
-# Provider hard limits (documented) and conservative internal defaults.
+# Provider hard limits (documented) and our approved internal caps. The internal
+# caps are the MAXIMUM the adapter will ever use: env overrides may only lower
+# them, never raise them above these values.
 PROVIDER_MAX_PER_HOUR = 60
 PROVIDER_MAX_PER_MINUTE = 20
-DEFAULT_MAX_PER_HOUR = 50
-DEFAULT_MAX_PER_MINUTE = 15
+INTERNAL_MAX_PER_HOUR = 50
+INTERNAL_MAX_PER_MINUTE = 15
+DEFAULT_MAX_PER_HOUR = INTERNAL_MAX_PER_HOUR
+DEFAULT_MAX_PER_MINUTE = INTERNAL_MAX_PER_MINUTE
 
 DEFAULT_KICKOFF_TOLERANCE_SECONDS = 0
 DEFAULT_CACHE_TTL_SECONDS = 300
+
+# Secret redaction: replace the WHOLE credential, leaving no suffix behind.
+_REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)\S+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(bearer\s+)\S+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(x-api-key\s*[:=]\s*)\S+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(api[_-]?key\s*[:=]\s*)\S+"), r"\1[REDACTED]"),
+)
 
 # Provider-vs-API-Football FRA1 naming differences. Applied AFTER the shared
 # normalize/canonical step. Keys/values are alphanumeric-normalized. These are
@@ -149,8 +162,19 @@ class FiveDollarConfig:
     max_requests_per_minute: int = DEFAULT_MAX_PER_MINUTE
     user_agent: str = "sports-edge-ai/0.1 (5dollar-football secondary current market provider)"
 
+    def __post_init__(self) -> None:
+        # Clamp to [0, internal_cap]. Lower values are allowed; oversized,
+        # negative or nonsensical values fail safe to the approved internal cap.
+        object.__setattr__(
+            self, "max_requests_per_hour", max(0, min(int(self.max_requests_per_hour), INTERNAL_MAX_PER_HOUR))
+        )
+        object.__setattr__(
+            self, "max_requests_per_minute", max(0, min(int(self.max_requests_per_minute), INTERNAL_MAX_PER_MINUTE))
+        )
+
     @classmethod
     def from_env(cls) -> FiveDollarConfig:
+        # Invalid env values fall back to the default; the constructor then clamps.
         return cls(
             max_requests_per_hour=_env_int(ENV_MAX_PER_HOUR, DEFAULT_MAX_PER_HOUR),
             max_requests_per_minute=_env_int(ENV_MAX_PER_MINUTE, DEFAULT_MAX_PER_MINUTE),
@@ -160,7 +184,8 @@ class FiveDollarConfig:
         return bool(os.environ.get(self.api_key_env_var, "").strip())
 
     def enabled(self) -> bool:
-        return _env_bool(self.enabled_env_var, True)
+        # SECONDARY_ONLY: disabled unless EXPLICITLY enabled (1/true/yes/on).
+        return _env_bool(self.enabled_env_var, False)
 
 
 @dataclass(frozen=True)
@@ -196,9 +221,10 @@ class FiveDollarQuote:
         return is_pre_match_phase(self.phase)
 
     def provider_market_id(self) -> str:
-        # The existing market_snapshots table has no ``phase`` column, so the
-        # phase is encoded here (documented gap) while remaining append-only.
-        return f"{self.bookmaker}:{self.market}:{self.phase}:{self.line}"
+        # Unique per selection (HOME/AWAY and OVER/UNDER must not collide) and
+        # deterministic. The existing market_snapshots table has no ``phase``
+        # column, so phase is encoded here while remaining append-only.
+        return f"{self.provider_fixture_id}:{self.bookmaker}:{self.market}:{self.phase}:{self.selection}:{self.line}"
 
     def to_normalized_snapshot(self) -> NormalizedMarketSnapshot:
         return NormalizedMarketSnapshot(
@@ -375,9 +401,8 @@ class FiveDollarFootballProvider:
     @staticmethod
     def sanitize(text: Any) -> str:
         out = str(text)
-        for marker in ("Bearer ", "apiKey=", "X-API-Key"):
-            if marker in out:
-                out = out.replace(marker, f"{marker}[REDACTED]")
+        for pattern, repl in _REDACT_PATTERNS:
+            out = pattern.sub(repl, out)
         return out
 
     def _cache_get(self, key: str) -> dict[str, Any] | None:
@@ -460,11 +485,27 @@ class FiveDollarFootballProvider:
         data = payload.get("data")
         return list(data) if isinstance(data, list) else []
 
+    @staticmethod
+    def _parse_kickoff(value: Any) -> datetime | None:
+        text = normalize_kickoff_utc(value)
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+
     def match_fixture(self, fixture_context: Mapping[str, Any]) -> FixtureMatch:
         """Deterministic MATCHED / UNMATCHED / AMBIGUOUS (no fuzzy guessing)."""
         expected_home = adapter_team_name(fixture_context.get("home_team_name"))
         expected_away = adapter_team_name(fixture_context.get("away_team_name"))
         expected_kickoff = normalize_kickoff_utc(fixture_context.get("kickoff_utc"))
+        expected_dt = self._parse_kickoff(expected_kickoff)
+        if not expected_kickoff or expected_dt is None:
+            # Invalid context: a kickoff is required to match deterministically.
+            return FixtureMatch(state=MATCH_UNMATCHED, candidate_count=0)
+        tolerance = int(self._config.kickoff_tolerance_seconds)
+
         candidates: list[dict[str, Any]] = []
         for fixture in self._fixtures_window(fixture_context):
             teams = fixture.get("teams") or {}
@@ -473,13 +514,18 @@ class FiveDollarFootballProvider:
             if home != expected_home or away != expected_away:
                 continue
             candidate_kickoff = normalize_kickoff_utc(fixture.get("kickoff_utc"))
-            if (
-                expected_kickoff
-                and candidate_kickoff
-                and self._config.kickoff_tolerance_seconds <= 0
-                and candidate_kickoff != expected_kickoff
-            ):
+            if not candidate_kickoff:
+                # Provider omitted the kickoff: cannot verify -> never match.
                 continue
+            if tolerance <= 0:
+                if candidate_kickoff != expected_kickoff:
+                    continue
+            else:
+                candidate_dt = self._parse_kickoff(candidate_kickoff)
+                if candidate_dt is None:
+                    continue
+                if abs((candidate_dt - expected_dt).total_seconds()) > tolerance:
+                    continue
             candidates.append(fixture)
 
         if len(candidates) == 1:
@@ -634,13 +680,28 @@ class FiveDollarFootballProvider:
         ]
 
     # ------------------------------------------------------------------ protocol compat
+    # MarketProvider-compatible methods MUST return pre-match rows only. The
+    # dashboard sends these straight into build_fixture_market_evaluation(),
+    # which does NOT independently filter is_pre_match, so exposing in-play here
+    # would leak protocol prices into pre-match evaluation. In-play remains
+    # available via get_fixture_quotes() (all phases) for shadow diagnostics.
+    def _pre_match_snapshots(
+        self,
+        fixture_id: str,
+        fixture_context: Mapping[str, Any] | None,
+    ) -> list[NormalizedMarketSnapshot]:
+        return [
+            quote.to_normalized_snapshot()
+            for quote in self.get_pre_match_quotes(fixture_id, fixture_context=fixture_context)
+        ]
+
     def get_fixture_markets(
         self,
         fixture_id: str,
         *,
         fixture_context: Mapping[str, Any] | None = None,
     ) -> list[NormalizedMarketSnapshot]:
-        return [q.to_normalized_snapshot() for q in self.get_fixture_quotes(fixture_id, fixture_context=fixture_context)]
+        return self._pre_match_snapshots(fixture_id, fixture_context)
 
     def get_best_prices(
         self,
@@ -712,8 +773,9 @@ def persist_quotes(conn, quotes: Sequence[FiveDollarQuote]) -> list[int]:
     """Append-only persistence into the existing ``market_snapshots`` table.
 
     The existing table has no ``phase`` column; the phase is encoded in
-    ``provider_market_id`` (``bookmaker:market:phase:line``) to avoid creating a
-    competing snapshot table. In-play rows are stored with ``is_pre_match=0``.
+    ``provider_market_id`` (``provider_fixture_id:bookmaker:market:phase:selection:line``)
+    to avoid creating a competing snapshot table. In-play rows are stored with
+    ``is_pre_match=0``.
     """
     from ..storage import football_paper_trading as paper_store
 

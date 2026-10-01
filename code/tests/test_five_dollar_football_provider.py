@@ -106,8 +106,12 @@ def _router(fixtures=None, odds=None, fixtures_status=200):
     return route
 
 
-def _provider(monkeypatch, *, fixtures=None, odds=None, fixtures_status=200, key="test-key", config=None):
+def _provider(monkeypatch, *, fixtures=None, odds=None, fixtures_status=200, key="test-key", config=None, enabled=True):
     monkeypatch.setenv(five.ENV_API_KEY, key)
+    if enabled:
+        monkeypatch.setenv(five.ENV_ENABLED, "1")
+    else:
+        monkeypatch.delenv(five.ENV_ENABLED, raising=False)
     calls: list = []
     router = _router(fixtures, odds, fixtures_status)
     return five.FiveDollarFootballProvider(
@@ -280,6 +284,7 @@ def test_minute_burst_guard():
 
 def test_governor_blocks_fail_closed_without_provider_call(monkeypatch):
     monkeypatch.setenv(five.ENV_API_KEY, "k")
+    monkeypatch.setenv(five.ENV_ENABLED, "1")
     calls: list = []
     router = _router([_event()], _odds())
     gov = five.FiveDollarRateGovernor(max_per_hour=0, max_per_minute=0, clock=lambda: 1000.0)
@@ -349,7 +354,7 @@ def test_phase_encoded_in_provider_market_id(monkeypatch):
     provider, _, _ = _provider(monkeypatch, fixtures=[_event()], odds=_odds())
     quotes = provider.get_fixture_quotes(FIXTURE_ID, fixture_context=CONTEXT)
     opening = next(q for q in quotes if q.phase == "opening" and q.market == five.MARKET_ASIAN_HANDICAP and q.selection == "HOME")
-    assert opening.provider_market_id() == "Bet 365:asian_handicap:opening:-0.25"
+    assert opening.provider_market_id() == "2311636891:Bet 365:asian_handicap:opening:HOME:-0.25"
 
 
 def test_compare_provider_snapshots_is_read_only(monkeypatch):
@@ -371,3 +376,168 @@ def test_fra1_provider_alias_matching_psg(monkeypatch):
     match = provider.match_fixture(CONTEXT)  # CONTEXT away == "Paris Saint Germain"
     assert match.state == five.MATCH_MATCHED
     assert match.provider_fixture_id == "2311636891"
+
+
+# --------------------------------------------------------------------------- in-play firewall
+def test_protocol_methods_exclude_inplay(monkeypatch):
+    provider, _, _ = _provider(monkeypatch, fixtures=[_event()], odds=_odds())
+    all_phases = provider.get_fixture_quotes(FIXTURE_ID, fixture_context=CONTEXT)
+    assert any(q.phase == "inplay" for q in all_phases)  # capability retained
+    pre = provider.get_pre_match_quotes(FIXTURE_ID, fixture_context=CONTEXT)
+    assert pre and all(q.phase in {"opening", "closing"} for q in pre)
+    for method in (provider.get_fixture_markets, provider.get_market_snapshot, provider.get_best_prices):
+        snaps = method(FIXTURE_ID, fixture_context=CONTEXT)
+        assert snaps
+        assert all(s.is_pre_match for s in snaps)
+        assert all((s.provider_market_id or "").split(":")[3] in {"opening", "closing"} for s in snaps)
+
+
+# --------------------------------------------------------------------------- provider market identity
+def test_provider_market_id_unique_per_selection_and_phase(monkeypatch):
+    provider, _, _ = _provider(monkeypatch, fixtures=[_event()], odds=_odds())
+    quotes = provider.get_fixture_quotes(FIXTURE_ID, fixture_context=CONTEXT)
+    ids = [q.provider_market_id() for q in quotes]
+    assert len(ids) == len(set(ids))  # globally unique across selections and phases
+
+    def pick(market, phase, selection):
+        return next(q for q in quotes if q.market == market and q.phase == phase and q.selection == selection)
+
+    home = pick(five.MARKET_ASIAN_HANDICAP, "opening", "HOME")
+    away = pick(five.MARKET_ASIAN_HANDICAP, "opening", "AWAY")
+    over = pick(five.MARKET_CORNER_TOTAL, "opening", "OVER")
+    under = pick(five.MARKET_CORNER_TOTAL, "opening", "UNDER")
+    closing = pick(five.MARKET_ASIAN_HANDICAP, "closing", "HOME")
+    assert home.provider_market_id() != away.provider_market_id()
+    assert over.provider_market_id() != under.provider_market_id()
+    assert home.provider_market_id() != closing.provider_market_id()
+    assert home.provider_market_id() == home.provider_market_id()  # stable
+    assert home.provider_market_id() == "2311636891:Bet 365:asian_handicap:opening:HOME:-0.25"
+
+
+def test_persistence_maps_each_selection_independently(tmp_path, monkeypatch):
+    from sports_ai.storage import football_paper_trading as paper
+
+    provider, _, _ = _provider(monkeypatch, fixtures=[_event()], odds=_odds())
+    quotes = provider.get_pre_match_quotes(FIXTURE_ID, fixture_context=CONTEXT)
+    conn = paper.connect(tmp_path / "paper.sqlite")
+    try:
+        five.persist_quotes(conn, quotes)
+        rows = paper.fetch_market_snapshots(conn, fixture_id=FIXTURE_ID)
+        mapping = {r["provider_market_id"]: r["snapshot_id"] for r in rows}
+        assert len(mapping) == len(quotes)  # every selection maps independently
+        assert len(set(mapping.values())) == len(quotes)
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- enablement
+def test_enablement_requires_explicit_flag(monkeypatch):
+    # key present + flag absent -> configured True, enabled False
+    monkeypatch.setenv(five.ENV_API_KEY, "k")
+    monkeypatch.delenv(five.ENV_ENABLED, raising=False)
+    provider = five.FiveDollarFootballProvider(five.FiveDollarConfig())
+    assert provider.configured() is True
+    assert provider.enabled() is False
+    # key present + flag false -> enabled False
+    monkeypatch.setenv(five.ENV_ENABLED, "false")
+    assert provider.enabled() is False
+    # key present + flag true -> enabled True
+    monkeypatch.setenv(five.ENV_ENABLED, "true")
+    assert provider.enabled() is True
+    # no key + flag true -> configured False, enabled False
+    monkeypatch.delenv(five.ENV_API_KEY, raising=False)
+    assert provider.configured() is False
+    assert provider.enabled() is False
+
+
+# --------------------------------------------------------------------------- rate caps
+@pytest.mark.parametrize(("raw", "expected"), [("100", 50), ("60", 50), ("10", 10)])
+def test_hourly_env_clamped_to_internal(monkeypatch, raw, expected):
+    monkeypatch.setenv(five.ENV_MAX_PER_HOUR, raw)
+    assert five.FiveDollarConfig.from_env().max_requests_per_hour == expected
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("100", 15), ("20", 15), ("5", 5)])
+def test_minute_env_clamped_to_internal(monkeypatch, raw, expected):
+    monkeypatch.setenv(five.ENV_MAX_PER_MINUTE, raw)
+    assert five.FiveDollarConfig.from_env().max_requests_per_minute == expected
+
+
+@pytest.mark.parametrize("raw", ["abc", "", "-5", "0", "99999"])
+def test_invalid_or_extreme_env_fails_safe(monkeypatch, raw):
+    monkeypatch.setenv(five.ENV_MAX_PER_HOUR, raw)
+    monkeypatch.setenv(five.ENV_MAX_PER_MINUTE, raw)
+    cfg = five.FiveDollarConfig.from_env()
+    assert 0 <= cfg.max_requests_per_hour <= five.INTERNAL_MAX_PER_HOUR
+    assert 0 <= cfg.max_requests_per_minute <= five.INTERNAL_MAX_PER_MINUTE
+
+
+def test_direct_config_cannot_exceed_internal_caps():
+    cfg = five.FiveDollarConfig(max_requests_per_hour=100, max_requests_per_minute=100)
+    assert cfg.max_requests_per_hour == five.INTERNAL_MAX_PER_HOUR
+    assert cfg.max_requests_per_minute == five.INTERNAL_MAX_PER_MINUTE
+
+
+# --------------------------------------------------------------------------- fail-closed matching
+def test_match_requires_expected_kickoff(monkeypatch):
+    provider, _, _ = _provider(monkeypatch, fixtures=[_event()], odds=_odds())
+    assert provider.match_fixture({**CONTEXT, "kickoff_utc": None}).state == five.MATCH_UNMATCHED
+    assert provider.match_fixture({**CONTEXT, "kickoff_utc": ""}).state == five.MATCH_UNMATCHED
+
+
+def test_match_missing_provider_kickoff_unmatched(monkeypatch):
+    event = _event()
+    event["kickoff_utc"] = None
+    provider, _, _ = _provider(monkeypatch, fixtures=[event], odds=_odds())
+    assert provider.match_fixture(CONTEXT).state == five.MATCH_UNMATCHED
+
+
+def test_match_zero_tolerance_rejects_one_second(monkeypatch):
+    provider, _, _ = _provider(monkeypatch, fixtures=[_event(kickoff="2026-09-20T18:45:01+00:00")], odds=_odds())
+    assert provider.match_fixture(CONTEXT).state == five.MATCH_UNMATCHED
+
+
+def test_match_within_tolerance(monkeypatch):
+    provider, _, _ = _provider(
+        monkeypatch,
+        fixtures=[_event(kickoff="2026-09-20T18:45:30+00:00")],
+        odds=_odds(),
+        config=five.FiveDollarConfig(kickoff_tolerance_seconds=60),
+    )
+    assert provider.match_fixture(CONTEXT).state == five.MATCH_MATCHED
+
+
+def test_match_outside_tolerance(monkeypatch):
+    provider, _, _ = _provider(
+        monkeypatch,
+        fixtures=[_event(kickoff="2026-09-20T18:47:00+00:00")],
+        odds=_odds(),
+        config=five.FiveDollarConfig(kickoff_tolerance_seconds=30),
+    )
+    assert provider.match_fixture(CONTEXT).state == five.MATCH_UNMATCHED
+
+
+def test_same_teams_multiple_dates_never_guessed(monkeypatch):
+    provider, _, _ = _provider(
+        monkeypatch,
+        fixtures=[_event(fid=1, kickoff="2025-09-20T18:45:00+00:00"), _event(fid=2, kickoff="2026-09-20T18:45:00+00:00")],
+        odds=_odds(),
+    )
+    match = provider.match_fixture(CONTEXT)  # CONTEXT kickoff == 2026-09-20T18:45:00Z
+    assert match.state == five.MATCH_MATCHED
+    assert match.provider_fixture_id == "2"
+
+
+# --------------------------------------------------------------------------- secret sanitizer
+def test_sanitize_redacts_whole_secret():
+    sentinel = "abc123secretXYZ"
+    for text in (
+        f"Authorization: Bearer {sentinel}",
+        f"Bearer {sentinel}",
+        f"apiKey={sentinel}",
+        f"api_key={sentinel}",
+        f"X-API-Key: {sentinel}",
+    ):
+        out = five.FiveDollarFootballProvider.sanitize(text)
+        assert sentinel not in out
+        assert "[REDACTED]" in out
