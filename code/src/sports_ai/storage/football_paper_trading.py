@@ -430,10 +430,17 @@ def find_identical_market_snapshot(
     Identical means the same immutable price state for the same provider event
     and bookmaker selection: same fixture, provider, provider event id,
     bookmaker, market, selection, line, odds, and provider update timestamp.
+
+    When ``snapshot.provider_market_id`` is provided it is ALSO part of the
+    identity. Some providers (5DollarFootballAPI) encode a market *phase*
+    (opening/closing/inplay) only inside ``provider_market_id`` — the
+    ``market_snapshots`` table has no phase column — so without it an opening and
+    a closing quote that happen to share line/odds/timestamp would wrongly
+    collapse into one row. When ``provider_market_id`` is NULL the previous
+    behaviour is preserved (it is not used as a filter).
     """
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
-    row = conn.execute(
-        """
+    sql = """
         SELECT snapshot_id
         FROM market_snapshots
         WHERE fixture_id = ?
@@ -446,22 +453,24 @@ def find_identical_market_snapshot(
           AND provider_timestamp IS ?
           AND provider_fixture_id IS ?
           AND is_pre_match = ?
-        ORDER BY snapshot_id DESC
-        LIMIT 1
-        """,
-        (
-            snapshot.fixture_id,
-            snapshot.provider,
-            snapshot.bookmaker,
-            snapshot.market,
-            snapshot.selection,
-            snapshot.line,
-            snapshot.odds,
-            snapshot.provider_timestamp,
-            snapshot.provider_fixture_id,
-            1 if snapshot.is_pre_match else 0,
-        ),
-    ).fetchone()
+    """
+    params: list[Any] = [
+        snapshot.fixture_id,
+        snapshot.provider,
+        snapshot.bookmaker,
+        snapshot.market,
+        snapshot.selection,
+        snapshot.line,
+        snapshot.odds,
+        snapshot.provider_timestamp,
+        snapshot.provider_fixture_id,
+        1 if snapshot.is_pre_match else 0,
+    ]
+    if snapshot.provider_market_id is not None:
+        sql += " AND provider_market_id IS ?"
+        params.append(snapshot.provider_market_id)
+    sql += " ORDER BY snapshot_id DESC LIMIT 1"
+    row = conn.execute(sql, params).fetchone()
     return None if row is None else int(row["snapshot_id"])
 
 
