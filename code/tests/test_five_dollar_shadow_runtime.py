@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+import sqlite3
+from datetime import datetime
 
 # Pre-existing market_data <-> dashboard import cycle guard (same as other provider tests).
 import sports_ai.dashboard.services  # noqa: F401
 from sports_ai.dashboard import scheduler_worker
 from sports_ai.market_data import five_dollar_football as five
 from sports_ai.market_data import five_dollar_shadow as shadow
+from sports_ai.market_data import five_dollar_shadow_reporting as reporting
 from sports_ai.market_data import five_dollar_shadow_runtime as runtime_mod
 from sports_ai.storage import football_paper_trading as paper
+from sports_ai.storage.football_canonical_fixture import (
+    canonical_fixture_id_from_identity,
+)
 
 FRA1 = "FRA1"
 
@@ -34,7 +40,17 @@ def _window():
     ]
 
 
-def _quote(market, phase, selection, line, odds, *, provider_id="p1", fixture_id="canon"):
+def _quote(
+    market,
+    phase,
+    selection,
+    line,
+    odds,
+    *,
+    provider_id="p1",
+    fixture_id="canon",
+    captured_at="2026-10-01T00:00:00+00:00",
+):
     return five.FiveDollarQuote(
         provider=five.PROVIDER,
         provider_fixture_id=provider_id,
@@ -46,7 +62,7 @@ def _quote(market, phase, selection, line, odds, *, provider_id="p1", fixture_id
         selection=selection,
         line=line,
         decimal_odds=odds,
-        captured_at="2026-10-01T00:00:00+00:00",
+        captured_at=captured_at,
         kickoff_utc="2026-10-03T18:45:00+00:00",
     )
 
@@ -111,7 +127,19 @@ class _FakeProvider:
 
     def get_fixture_quotes(self, fixture_id, *, fixture_context=None):
         self.requests_allowed += 1
-        return list(self._quotes)
+        return [
+            _quote(
+                q.market,
+                q.phase,
+                q.selection,
+                q.line,
+                q.decimal_odds,
+                provider_id=q.provider_fixture_id,
+                fixture_id=fixture_id,
+                captured_at=q.captured_at,
+            )
+            for q in self._quotes
+        ]
 
     def diagnostics(self):
         return {"governor": {"requests_allowed": self.requests_allowed}, "cache": {"hits": self.cache_hits}}
@@ -132,6 +160,7 @@ def _runtime(
     clock=None,
     shadow_flag=True,
     provider_flag=True,
+    now_fn=None,
 ):
     if shadow_flag:
         monkeypatch.setenv(shadow.ENV_SHADOW_ENABLED, "1")
@@ -146,6 +175,34 @@ def _runtime(
         config=config,
         conn=conn,
         clock=clock if clock is not None else _Clock(),
+        now_fn=now_fn,
+    )
+
+
+def _canon(home, away, kickoff):
+    return canonical_fixture_id_from_identity(
+        competition_id=FRA1,
+        home_team_name=home,
+        away_team_name=away,
+        kickoff_utc=kickoff,
+    )
+
+
+def _snapshot(fixture_id, market, capture, phase, *, is_pre_match=1, line, odds, kickoff, selection="HOME"):
+    return paper.StoredMarketSnapshot(
+        fixture_id=fixture_id,
+        provider=five.PROVIDER,
+        bookmaker="Bet 365",
+        market=market,
+        selection=selection,
+        odds=odds,
+        ingestion_version="test",
+        line=line,
+        provider_market_id=f"999:Bet 365:{market}:{phase}:{selection}:{line}",
+        captured_at=capture,
+        is_pre_match=is_pre_match,
+        provider_fixture_id="999",
+        kickoff_utc=kickoff,
     )
 
 
@@ -350,3 +407,160 @@ def test_runtime_creates_no_paper_or_decision_rows(monkeypatch, tmp_path):
     assert conn.execute("select count(*) from paper_trade_entries").fetchone()[0] == 0
     assert conn.execute("select count(*) from paper_trade_updates").fetchone()[0] == 0
     conn.close()
+
+
+# --------------------------------------------------------------------------- durable rotation (restart-safe)
+_CAP = "2026-10-20T00:00:00+00:00"
+_NOW = datetime.fromisoformat("2026-10-20T01:00:00+00:00")
+_WINDOW3 = [
+    _fx("p1", "Marseille", "Paris Saint Germain", "2026-10-22T18:45:00+00:00"),
+    _fx("p2", "Lens", "Lyon", "2026-10-23T18:45:00+00:00"),
+    _fx("p3", "Monaco", "Toulouse", "2026-10-24T15:00:00+00:00"),
+]
+
+
+def test_durable_recent_skip_survives_new_runtime_instance(monkeypatch, tmp_path):
+    monkeypatch.setenv(shadow.ENV_SHADOW_ENABLED, "1")
+    monkeypatch.setenv(five.ENV_ENABLED, "1")
+    config = runtime_mod.ShadowRuntimeConfig(recent_skip_seconds=108000)
+    quotes = [_quote("asian_handicap", "opening", "HOME", -0.25, 1.95, captured_at=_CAP)]
+    conn = _db(tmp_path)
+
+    runtime_a = runtime_mod.FiveDollarShadowRuntime(
+        provider=_FakeProvider(window=_WINDOW3, quotes=quotes),
+        config=config,
+        conn=conn,
+        now_fn=lambda: _NOW,
+    )
+    first = runtime_a.run_cycle()
+    assert first["counters"]["fixtures_selected"] == 2
+    assert conn.execute(
+        "select count(distinct fixture_id) from market_snapshots where provider='5dollar-football-api'"
+    ).fetchone()[0] == 2
+
+    # Brand-new runtime instance (simulates a Railway restart/deploy).
+    provider_b = _FakeProvider(window=_WINDOW3, quotes=quotes)
+    runtime_b = runtime_mod.FiveDollarShadowRuntime(
+        provider=provider_b,
+        config=config,
+        conn=conn,
+        now_fn=lambda: _NOW,
+    )
+    second = runtime_b.run_cycle()
+    third_id = _canon("Monaco", "Toulouse", "2026-10-24T15:00:00+00:00")
+    assert second["counters"]["fixtures_selected"] == 1
+    assert second["runtime"]["selected"][0]["fixture_id"] == third_id
+    assert second["counters"]["fixtures_skipped_recently_collected"] == 2
+    conn.close()
+
+
+def test_durable_skip_makes_zero_match_odds_calls(monkeypatch, tmp_path):
+    monkeypatch.setenv(shadow.ENV_SHADOW_ENABLED, "1")
+    monkeypatch.setenv(five.ENV_ENABLED, "1")
+    config = runtime_mod.ShadowRuntimeConfig(recent_skip_seconds=108000)
+    window = _WINDOW3[:2]
+    quotes = [_quote("asian_handicap", "opening", "HOME", -0.25, 1.95, captured_at=_CAP)]
+    conn = _db(tmp_path)
+    runtime_mod.FiveDollarShadowRuntime(
+        provider=_FakeProvider(window=window, quotes=quotes), config=config, conn=conn, now_fn=lambda: _NOW
+    ).run_cycle()
+
+    provider_b = _FakeProvider(window=window, quotes=quotes)
+    runtime_b = runtime_mod.FiveDollarShadowRuntime(
+        provider=provider_b, config=config, conn=conn, now_fn=lambda: _NOW
+    )
+    result = runtime_b.run_cycle()
+    assert result["counters"]["fixtures_selected"] == 0
+    assert result["counters"]["fixtures_skipped_recently_collected"] == 2
+    assert result["counters"]["provider_calls"] == 1  # discovery only
+    assert provider_b.requests_allowed == 1
+    conn.close()
+
+
+def test_durable_read_error_fails_closed(monkeypatch, tmp_path):
+    provider = _FakeProvider(window=[_fx("p1", "Marseille", "Paris Saint Germain", "2026-10-22T18:45:00+00:00")])
+    runtime = _runtime(monkeypatch, provider=provider, conn=_db(tmp_path))
+
+    def boom(_ids):
+        raise sqlite3.OperationalError("no such table: market_snapshots")
+
+    monkeypatch.setattr(runtime, "_persisted_latest_capture", boom)
+    result = runtime.run_cycle()
+    assert result["counters"]["fixtures_selected"] == 0
+    assert result["counters"]["provider_calls"] == 1  # discovery only, no broad querying
+    assert result["runtime"]["durable_read_failed"] is True
+
+
+def test_empty_eligible_set_is_safe(monkeypatch, tmp_path):
+    provider = _FakeProvider(window=[])
+    runtime = _runtime(monkeypatch, provider=provider, conn=_db(tmp_path))
+    result = runtime.run_cycle()
+    assert result["counters"]["fixtures_considered"] == 0
+    assert result["counters"]["fixtures_selected"] == 0
+    assert result["counters"]["provider_calls"] == 1  # discovery only
+    assert result["state"] == "enabled"
+
+
+def test_shadow_hourly_cap_is_enforced_within_process(monkeypatch, tmp_path):
+    config = runtime_mod.ShadowRuntimeConfig(recent_skip_seconds=0)
+    provider = _FakeProvider(window=[_fx("p1", "Marseille", "Paris Saint Germain", "2026-10-22T18:45:00+00:00")])
+    runtime = _runtime(monkeypatch, provider=provider, conn=_db(tmp_path), config=config, clock=_Clock())
+    hourly = []
+    rate_blocked = 0
+    for _ in range(8):
+        result = runtime.run_cycle()
+        hourly.append(result["budget"]["hourly_calls"])
+        rate_blocked += result["counters"]["rate_blocked"]
+    assert max(hourly) <= 20
+    assert rate_blocked > 0  # the 20/hour ceiling eventually blocks
+
+
+# --------------------------------------------------------------------------- lifecycle / coverage reporting
+def test_last_pre_match_observed_uses_own_timestamp(monkeypatch, tmp_path):
+    conn = _db(tmp_path)
+    kickoff = "2026-10-10T15:00:00+00:00"
+    paper.record_market_snapshot(conn, _snapshot("f1", "asian_handicap", "2026-10-10T13:00:00+00:00", "opening", line=-0.25, odds=1.9, kickoff=kickoff))
+    paper.record_market_snapshot(conn, _snapshot("f1", "asian_handicap", "2026-10-10T14:00:00+00:00", "closing", line=-0.25, odds=1.95, kickoff=kickoff))
+    paper.record_market_snapshot(conn, _snapshot("f1", "asian_handicap", "2026-10-10T16:00:00+00:00", "inplay", is_pre_match=0, line=-0.25, odds=2.1, kickoff=kickoff))
+    rows = reporting.last_pre_match_observed(conn, fixture_id="f1")
+    assert len(rows) == 1
+    assert rows[0]["last_pre_match_observed"] == "2026-10-10T14:00:00+00:00"
+    assert rows[0]["provider_phase"] == "closing"
+    conn.close()
+
+
+def test_coverage_report_counts_missing_and_first_seen(monkeypatch, tmp_path):
+    conn = _db(tmp_path)
+    kickoff1 = "2026-10-10T15:00:00+00:00"
+    fixtures = [
+        {"fixture_id": "f1", "home_team_name": "Lens", "away_team_name": "Lyon", "kickoff_utc": kickoff1},
+        {"fixture_id": "f2", "home_team_name": "Monaco", "away_team_name": "Toulouse", "kickoff_utc": "2026-10-11T15:00:00+00:00"},
+    ]
+    paper.record_market_snapshot(conn, _snapshot("f1", "asian_handicap", "2026-10-09T00:00:00+00:00", "opening", line=-0.25, odds=1.9, kickoff=kickoff1))
+    paper.record_market_snapshot(conn, _snapshot("f1", "corner_total", "2026-10-09T00:00:00+00:00", "opening", line=8.5, odds=1.85, kickoff=kickoff1))
+    report = reporting.build_coverage_report(conn, fixtures, now=datetime.fromisoformat("2026-10-09T06:00:00+00:00"))
+    summary = report["summary"]
+    assert summary["fixtures_discovered"] == 2
+    assert summary["fixtures_ever_collected"] == 1
+    assert summary["ah_coverage_count"] == 1
+    assert summary["corner_coverage_count"] == 1
+    assert summary["fixtures_missing_ah"] == ["f2"]
+    assert summary["fixtures_missing_corners"] == ["f2"]
+    f1 = next(f for f in report["fixtures"] if f["fixture_id"] == "f1")
+    assert f1["corner"]["available"] is True
+    # corner first seen 2026-10-09T00:00Z, kickoff 2026-10-10T15:00Z -> 39.0h
+    assert f1["corner"]["hours_before_kickoff_when_first_seen"] == 39.0
+    assert f1["last_pre_match_observed"] == "2026-10-09T00:00:00+00:00"
+    conn.close()
+
+
+def test_coverage_report_read_error_is_safe():
+    class _BoomConn:
+        def execute(self, *_args, **_kwargs):
+            raise sqlite3.OperationalError("no such table")
+
+    report = reporting.build_coverage_report(
+        _BoomConn(),
+        [{"fixture_id": "f1", "home_team_name": "a", "away_team_name": "b", "kickoff_utc": "2026-10-10T15:00:00+00:00"}],
+    )
+    assert report.get("error") == "shadow_market_read_failed"
