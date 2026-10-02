@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -40,6 +40,7 @@ from .five_dollar_football import (
     normalize_kickoff_utc,
 )
 from .five_dollar_shadow import FiveDollarShadowCollector, ShadowConfig
+from .five_dollar_shadow_reporting import build_coverage_report, coverage_log_fields
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,24 @@ DEFAULT_RECENT_SKIP_SECONDS = 3600
 # FRA1 only. Never enumerate or query any other league.
 FRA1 = "FRA1"
 
+FIVE_DOLLAR_PROVIDER = "5dollar-football-api"
+
 SQLITE_BUSY_TIMEOUT_MS = 30_000
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if value in {None, ""}:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _env_int(name: str, default: int) -> int:
@@ -126,11 +144,13 @@ class FiveDollarShadowRuntime:
         shadow_config: ShadowConfig | None = None,
         conn: Any | None = None,
         clock: Callable[[], float] = monotonic,
+        now_fn: Callable[[], datetime] | None = None,
     ) -> None:
         self._provider = provider or FiveDollarFootballProvider(FiveDollarConfig.from_env())
         self._config = config or ShadowRuntimeConfig.from_env()
         self._shadow_config = shadow_config
         self._clock = clock
+        self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self._conn = conn
         self._owns_conn = False
         self._collector = FiveDollarShadowCollector(
@@ -140,9 +160,11 @@ class FiveDollarShadowRuntime:
             clock=clock,
         )
         self._last_collected: dict[str, float] = {}
+        self._discovered: list[dict[str, Any]] = []
         self._considered = 0
         self._selected: list[dict[str, Any]] = []
         self._skipped_recently = 0
+        self._durable_read_failed = False
         self.last_result: dict[str, Any] = {}
 
     # ------------------------------------------------------------------ wiring
@@ -207,6 +229,7 @@ class FiveDollarShadowRuntime:
         self._considered = 0
         self._selected = []
         self._skipped_recently = 0
+        self._durable_read_failed = False
 
         result = self._collector.run_cycle(
             discover=self._discover_and_select if self.enabled() else (list),
@@ -224,14 +247,17 @@ class FiveDollarShadowRuntime:
             "lookahead_hours": self._config.lookahead_hours,
             "max_fixtures_per_cycle": self._config.max_fixtures_per_cycle,
             "recent_skip_seconds": self._config.recent_skip_seconds,
+            "durable_read_failed": self._durable_read_failed,
         }
+        if result["state"] == "enabled" and self._conn is not None:
+            result["runtime"]["coverage"] = self.coverage_report()
         self.last_result = result
         self._log(result)
         return result
 
     # ------------------------------------------------------------------ discovery + selection
     def _discover_and_select(self) -> list[dict[str, Any]]:
-        now = datetime.now(timezone.utc)
+        now = self._now_fn()
         window = self._provider.list_league_fixtures(
             FRA1,
             from_utc=now - timedelta(minutes=15),
@@ -239,13 +265,24 @@ class FiveDollarShadowRuntime:
         )
         self._considered = len(window)
         candidates = self._candidates(window)
+        self._discovered = candidates
+
+        try:
+            persisted = self._persisted_latest_capture([row["fixture_id"] for row in candidates])
+        except sqlite3.Error:
+            # Fail closed: unreadable durable state means we must NOT re-select
+            # fixtures blindly. Discovery already ran (one governed call); no
+            # match/odds calls are made.
+            self._durable_read_failed = True
+            logger.warning("5dollar shadow: durable recent-collection read failed; failing closed")
+            self._selected = []
+            return []
 
         now_mono = self._clock()
         selected: list[dict[str, Any]] = []
         for row in candidates:
             fixture_id = row["fixture_id"]
-            recent = self._last_collected.get(fixture_id)
-            if recent is not None and (now_mono - recent) < self._config.recent_skip_seconds:
+            if self._is_recently_collected(fixture_id, persisted, now, now_mono):
                 self._skipped_recently += 1
                 continue
             selected.append(row)
@@ -256,6 +293,59 @@ class FiveDollarShadowRuntime:
             self._last_collected[row["fixture_id"]] = now_mono
         self._selected = selected
         return selected
+
+    def _persisted_latest_capture(self, fixture_ids: Sequence[str]) -> dict[str, str]:
+        """Latest 5Dollar ``captured_at`` per fixture_id, read-only.
+
+        This is the durable, restart-safe source of recent-collection state.
+        """
+        if self._conn is None:
+            return {}
+        ids = [str(f) for f in dict.fromkeys(fixture_ids) if f]
+        if not ids:
+            return {}
+        out: dict[str, str] = {}
+        chunk = 900
+        for start in range(0, len(ids), chunk):
+            part = ids[start : start + chunk]
+            placeholders = ",".join("?" for _ in part)
+            rows = self._conn.execute(
+                f"SELECT fixture_id, MAX(captured_at) AS latest FROM market_snapshots "
+                f"WHERE provider = ? AND fixture_id IN ({placeholders}) GROUP BY fixture_id",
+                [FIVE_DOLLAR_PROVIDER, *part],
+            ).fetchall()
+            for row in rows:
+                if row["latest"]:
+                    out[str(row["fixture_id"])] = str(row["latest"])
+        return out
+
+    def _is_recently_collected(
+        self,
+        fixture_id: str,
+        persisted: Mapping[str, str],
+        now_dt: datetime,
+        now_mono: float,
+    ) -> bool:
+        window = self._config.recent_skip_seconds
+        if window <= 0:
+            return False
+        # In-memory is only an optimization; persisted state is authoritative.
+        recent = self._last_collected.get(fixture_id)
+        if recent is not None and (now_mono - recent) < window:
+            return True
+        latest = persisted.get(fixture_id)
+        if not latest:
+            return False
+        latest_dt = _parse_iso(latest)
+        if latest_dt is None:
+            return False
+        return (now_dt - latest_dt).total_seconds() < window
+
+    def coverage_report(self) -> dict[str, Any]:
+        """Read-only coverage diagnostics for the last discovered fixtures."""
+        if self._conn is None:
+            return {"summary": {}, "fixtures": []}
+        return build_coverage_report(self._conn, self._discovered)
 
     def _candidates(self, window: Any) -> list[dict[str, Any]]:
         from ..storage.football_canonical_fixture import (
@@ -310,11 +400,13 @@ class FiveDollarShadowRuntime:
     def _log(self, result: Mapping[str, Any]) -> None:
         counters = result.get("counters") or {}
         budget = result.get("budget") or {}
+        coverage = coverage_log_fields((result.get("runtime") or {}).get("coverage") or {})
         logger.info(
             "5dollar shadow: state=%s fixtures_considered=%d fixtures_selected=%d "
             "matched=%d unmatched=%d ambiguous=%d skipped_recent=%d calls=%d "
             "cache_hits=%d written=%d reused=%d alias_misses=%d rate_blocked=%d "
-            "cycle_calls=%d hourly_calls=%d",
+            "cycle_calls=%d hourly_calls=%d coverage_discovered=%d coverage_ever=%d "
+            "coverage_24h=%d coverage_ah=%d coverage_corner=%d coverage_missing_corner=%d",
             result.get("state"),
             counters.get("fixtures_considered", 0),
             counters.get("fixtures_selected", 0),
@@ -330,4 +422,10 @@ class FiveDollarShadowRuntime:
             counters.get("rate_blocked", 0),
             budget.get("cycle_calls", 0),
             budget.get("hourly_calls", 0),
+            coverage["discovered"],
+            coverage["ever_collected"],
+            coverage["collected_24h"],
+            coverage["ah"],
+            coverage["corner"],
+            coverage["missing_corner"],
         )
