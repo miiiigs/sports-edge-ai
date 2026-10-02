@@ -142,6 +142,23 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _as_epoch_seconds(value: Any) -> int | None:
+    """Coerce an ISO-8601 string or epoch number to integer epoch seconds."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = normalize_kickoff_utc(value) or ""
+    if not text:
+        return None
+    try:
+        return int(datetime.fromisoformat(text).timestamp())
+    except ValueError:
+        return None
+
+
 def is_pre_match_phase(phase: str) -> bool:
     """Opening and closing are pre-match; in-play is NEVER pre-match."""
     return phase in _PRE_MATCH_PHASES
@@ -466,6 +483,35 @@ class FiveDollarFootballProvider:
         if status == 200 and isinstance(payload, dict):
             self._cache_set(cache_key, status, payload)
         return status, payload if isinstance(payload, dict) else {}
+
+    # ------------------------------------------------------------------ discovery
+    def list_league_fixtures(
+        self,
+        competition_id: str,
+        *,
+        from_utc: Any = None,
+        to_utc: Any = None,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Governed + cached FRA1 league-fixture window (discovery ONLY).
+
+        Used exclusively by the isolated shadow runtime to enumerate upcoming /
+        current FRA1 fixtures. It performs at most one governed request (cached by
+        path+params), persists nothing, and never feeds the decision path.
+        """
+        league_id = self.league_id(competition_id)
+        params: dict[str, Any] = {"per_page": int(per_page)}
+        start = _as_epoch_seconds(from_utc)
+        end = _as_epoch_seconds(to_utc)
+        if start is not None:
+            params["start_time"] = start
+        if end is not None:
+            params["end_time"] = end
+        status, payload = self._request(f"/leagues/{league_id}/fixtures", params)
+        if status != 200:
+            raise MarketProviderError(f"PROVIDER_ERROR status={status}")
+        data = payload.get("data")
+        return list(data) if isinstance(data, list) else []
 
     # ------------------------------------------------------------------ matching
     def _fixtures_window(self, fixture_context: Mapping[str, Any]) -> list[dict[str, Any]]:

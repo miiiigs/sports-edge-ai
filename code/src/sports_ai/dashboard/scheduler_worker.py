@@ -9,12 +9,13 @@ import signal
 import time
 from dataclasses import replace
 
+from ..market_data.five_dollar_shadow_runtime import FiveDollarShadowRuntime
 from . import storage
 from .live_production_services import LiveProductionDashboardServices
 from .models import utc_now_iso
 from .production_services import ProductionDashboardServices
 from .scoped_fixture_provider import ScopedApiFootballFixtureProvider
-from .services import DashboardConfig, DashboardServices, RUNTIME_ROLE_SCHEDULER
+from .services import RUNTIME_ROLE_SCHEDULER, DashboardConfig, DashboardServices
 
 logger = logging.getLogger(__name__)
 MODEL_SNAPSHOT_STATE_KEY = "model_snapshot_state"
@@ -66,6 +67,24 @@ def _production_fixture_provider() -> ScopedApiFootballFixtureProvider | None:
     return provider if provider.configured() else None
 
 
+async def _run_shadow_runtime(runtime: FiveDollarShadowRuntime, stop_event: asyncio.Event) -> None:
+    """Isolated, long-lived FRA1 shadow loop. No-op (no calls, no writes) when off."""
+    if not runtime.enabled():
+        logger.info("5dollar shadow: state=disabled (provider and/or shadow flag off); runtime idle")
+        return
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(runtime.run_cycle)
+        except Exception:
+            logger.exception("5dollar shadow cycle failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=runtime.interval_seconds)
+        except asyncio.TimeoutError:
+            continue
+        else:
+            return
+
+
 async def run_worker() -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -83,6 +102,14 @@ async def run_worker() -> int:
     await services.initialize()
     _persist_model_snapshot_state(services)
 
+    # Isolated shadow runtime: one long-lived collector for the process lifetime.
+    # The DB is opened ONLY when the runtime is enabled, so a disabled runtime
+    # performs zero provider calls and zero writes.
+    shadow_runtime = FiveDollarShadowRuntime()
+    if shadow_runtime.enabled():
+        shadow_runtime.attach_connection(services.config.paper_trading_db_path)
+    shadow_task = asyncio.create_task(_run_shadow_runtime(shadow_runtime, stop_event))
+
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
         await asyncio.to_thread(time.sleep, block_seconds)
@@ -90,6 +117,12 @@ async def run_worker() -> int:
     try:
         await stop_event.wait()
     finally:
+        shadow_task.cancel()
+        try:
+            await shadow_task
+        except asyncio.CancelledError:
+            pass
+        shadow_runtime.close()
         await services.shutdown()
     logger.info("scheduler worker stopped")
     return 0
