@@ -125,6 +125,7 @@ class ShadowBudget:
 def _empty_counters() -> dict[str, int]:
     return {
         "fixtures_considered": 0,
+        "fixtures_selected": 0,
         "fixtures_matched": 0,
         "fixtures_unmatched": 0,
         "fixtures_ambiguous": 0,
@@ -137,6 +138,8 @@ def _empty_counters() -> dict[str, int]:
         "alias_misses": 0,
         "rate_blocked": 0,
         "fixtures_skipped_no_fixture_id": 0,
+        "fixtures_skipped_recently_collected": 0,
+        "discovery_errors": 0,
     }
 
 
@@ -255,14 +258,42 @@ class FiveDollarShadowCollector:
                 )
 
     # ------------------------------------------------------------------ collection
-    def collect(self, fixtures: Iterable[Mapping[str, Any]], *, persist: bool = True) -> dict[str, Any]:
+    def begin_cycle(self) -> bool:
+        """Reset per-cycle state. Returns True only when a cycle may proceed."""
         self._counters = _empty_counters()
         self._alias_candidates = []
         self._budget.start_cycle()
+        return self.shadow_enabled()
 
-        if not self.shadow_enabled():
+    def collect(self, fixtures: Iterable[Mapping[str, Any]], *, persist: bool = True) -> dict[str, Any]:
+        if not self.begin_cycle():
             return self._result()
+        return self._collect_rows(fixtures, persist=persist)
 
+    def run_cycle(
+        self,
+        *,
+        discover: Callable[[], Iterable[Mapping[str, Any]]],
+        persist: bool = True,
+    ) -> dict[str, Any]:
+        """One full cycle: budgeted discovery + deterministic selection + collection.
+
+        ``discover`` runs at most once per cycle and its provider cost is charged to
+        the SAME ShadowBudget, so discovery can never escape the cycle/hour caps.
+        """
+        if not self.begin_cycle():
+            return self._result()
+        if not self._budget.can_spend(1):
+            self._counters["rate_blocked"] += 1
+            return self._result()
+        try:
+            fixtures = list(self._accounted(discover) or [])
+        except Exception:  # noqa: BLE001
+            self._counters["discovery_errors"] += 1
+            return self._result()
+        return self._collect_rows(fixtures, persist=persist)
+
+    def _collect_rows(self, fixtures: Iterable[Mapping[str, Any]], *, persist: bool = True) -> dict[str, Any]:
         max_cycle = self._config.max_provider_calls_per_cycle
         for row in fixtures:
             competition = str(row.get("competition_id") or "").strip().upper()
