@@ -38,6 +38,50 @@ STATE_FULL_LOSS = "FULL_LOSS"
 _FINAL_STATES = (STATE_FULL_WIN, STATE_HALF_WIN, STATE_PUSH, STATE_HALF_LOSS, STATE_FULL_LOSS)
 _STATE_ALIASES = {"WON": STATE_FULL_WIN, "LOST": STATE_FULL_LOSS}
 
+# Immutable audit identity: settlement state is mutable lifecycle and is NOT here.
+_IMMUTABLE_FIELDS = (
+    "policy_id",
+    "policy_version",
+    "fixture_id",
+    "canonical_fixture_id",
+    "market",
+    "line",
+    "selection",
+    "model_probability",
+    "model_fair_price",
+    "prediction_id",
+    "model_snapshot_id",
+    "model_version",
+    "prediction_generated_at",
+    "model_as_of",
+    "record_origin",
+    "source_prediction_version_key",
+)
+_NUMERIC_IMMUTABLE = frozenset({"line", "model_probability", "model_fair_price"})
+
+
+def _immutable_values_equal(existing: Mapping[str, Any], candidate: Mapping[str, Any]) -> bool:
+    for field in _IMMUTABLE_FIELDS:
+        left = existing.get(field)
+        right = candidate.get(field)
+        if field in _NUMERIC_IMMUTABLE:
+            if (left is None) != (right is None):
+                return False
+            if left is None:
+                continue
+            try:
+                if abs(float(left) - float(right)) > 1e-12:
+                    return False
+            except (TypeError, ValueError):
+                if str(left) != str(right):
+                    return False
+        else:
+            left_text = None if left is None else str(left)
+            right_text = None if right is None else str(right)
+            if left_text != right_text:
+                return False
+    return True
+
 SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS football_model_pick_entries (
@@ -116,16 +160,32 @@ def record_model_pick(
     now: str | None = None,
     initialize_schema: bool = True,
 ) -> str:
-    """Idempotently record a model pick (INSERT OR IGNORE on the unique key)."""
+    """Record a model pick immutably.
+
+    Identical retry -> IDEMPOTENT_NOOP. Any differing immutable field for the same
+    ``(policy_id, fixture_id, market)`` -> ``sqlite3.IntegrityError`` with code
+    ``MODEL_PICK_IMMUTABLE_CONFLICT`` (the stored row is never overwritten).
+    Settlement lifecycle fields are excluded from the immutable comparison.
+    """
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     origin = str(pick["record_origin"])
     if origin not in RECORD_ORIGINS:
         raise ValueError(f"invalid record_origin {origin!r}")
     timestamp = now or _utc_now()
     pick_id = model_pick_id(policy_id=str(pick["policy_id"]), fixture_id=str(pick["fixture_id"]), market=str(pick["market"]))
+    existing = conn.execute(
+        "SELECT * FROM football_model_pick_entries WHERE model_pick_id = ?", (pick_id,)
+    ).fetchone()
+    if existing is not None:
+        if _immutable_values_equal(dict(existing), pick):
+            return pick_id  # IDEMPOTENT_NOOP
+        raise sqlite3.IntegrityError(
+            "MODEL_PICK_IMMUTABLE_CONFLICT: "
+            f"policy={pick.get('policy_id')} fixture={pick.get('fixture_id')} market={pick.get('market')}"
+        )
     conn.execute(
         """
-        INSERT OR IGNORE INTO football_model_pick_entries (
+        INSERT INTO football_model_pick_entries (
             model_pick_id, policy_id, policy_version, fixture_id, canonical_fixture_id,
             competition_id, competition_name, kickoff_utc, market, line, selection,
             model_probability, model_fair_price, prediction_id, model_snapshot_id,
@@ -173,7 +233,22 @@ def update_settlement(
     now: str | None = None,
     initialize_schema: bool = True,
 ) -> None:
+    """One-way settlement. Identical -> NOOP; different final state -> conflict."""
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    existing = conn.execute(
+        "SELECT trade_state FROM football_model_pick_entries WHERE model_pick_id = ?",
+        (model_pick_id_value,),
+    ).fetchone()
+    if existing is None:
+        raise sqlite3.IntegrityError("MODEL_PICK_NOT_FOUND: " + str(model_pick_id_value))
+    current = normalize_settlement_state(existing["trade_state"])
+    new_state = normalize_settlement_state(trade_state)
+    if current is not None:
+        if current == new_state:
+            return  # NOOP
+        raise sqlite3.IntegrityError(
+            f"MODEL_PICK_SETTLEMENT_CONFLICT: {model_pick_id_value} {current} -> {new_state}"
+        )
     conn.execute(
         """
         UPDATE football_model_pick_entries
@@ -181,7 +256,7 @@ def update_settlement(
         WHERE model_pick_id = ?
         """,
         (
-            trade_state,
+            new_state,
             None if settlement_payload is None else json.dumps(dict(settlement_payload), sort_keys=True),
             now or _utc_now(),
             model_pick_id_value,
@@ -225,8 +300,6 @@ def settle_rows(
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     settled = 0
     for row in fetch_model_pick_rows(conn, initialize_schema=False):
-        if row.get("trade_state"):
-            continue
         result = results.get(str(row["fixture_id"]))
         if not result:
             continue
@@ -249,6 +322,13 @@ def settle_rows(
                 actual_home_goals=0, actual_away_goals=0, actual_total_corners=total,
             )
         normalized = normalize_settlement_state(state)
+        existing_state = normalize_settlement_state(row.get("trade_state"))
+        if existing_state is not None:
+            if existing_state == normalized:
+                continue  # NOOP
+            raise sqlite3.IntegrityError(
+                f"MODEL_PICK_SETTLEMENT_CONFLICT: {row['model_pick_id']} {existing_state} -> {normalized}"
+            )
         update_settlement(
             conn,
             model_pick_id_value=str(row["model_pick_id"]),

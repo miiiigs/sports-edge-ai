@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date
 
 import pytest
 
@@ -312,7 +313,7 @@ def test_timeline_includes_zero_fixture_and_replay_pending_days():
     ]
     predictions = [{"fixture_id": "fx1", "status": "READY"}]
     ledger_rows = [
-        {"fixture_id": "fx1", "market": "asian_handicap", "selection": "HOME", "kickoff_utc": "2026-09-20T15:00:00+00:00", "trade_state": "FULL_WIN"},
+        {"fixture_id": "fx1", "market": "asian_handicap", "selection": "HOME", "kickoff_utc": "2026-09-20T15:00:00+00:00", "prediction_generated_at": "2026-09-19T10:00:00+00:00", "trade_state": "FULL_WIN"},
     ]
     timeline = recon.build_daily_timeline(
         ledger_rows=ledger_rows,
@@ -328,7 +329,123 @@ def test_timeline_includes_zero_fixture_and_replay_pending_days():
     assert days["2026-09-21"]["origin_status"] == "NO_FIXTURES"
     assert days["2026-09-22"]["origin_status"] == "REPLAY_PENDING"
     assert days["2026-09-20"]["market_evidence"] == "NO_MARKET_EVIDENCE"
-    assert timeline["labels"]["latest_model_pick_day"] == "2026-09-20"
+    assert timeline["labels"]["latest_model_pick_issued_day"] == "2026-09-19"
+    assert timeline["labels"]["latest_model_pick_scheduled_kickoff_day"] == "2026-09-20"
+    assert timeline["labels"]["latest_settled_model_pick_fixture_day"] == "2026-09-20"
+
+
+def _pick_payload_rows():
+    return _ah_rows() + _corner_rows()
+
+
+def test_immutable_identical_retry_is_noop_and_conflicts_raise(tmp_path):
+    conn = _ledger_conn(tmp_path)
+    ledger.record_model_pick(conn, _pick(), initialize_schema=False)
+    conn.commit()
+    # identical retry -> noop
+    ledger.record_model_pick(conn, _pick(), initialize_schema=False)
+    assert conn.execute("select count(*) from football_model_pick_entries").fetchone()[0] == 1
+    # changed line
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
+        ledger.record_model_pick(conn, _pick(line=-0.5), initialize_schema=False)
+    # changed selection
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
+        ledger.record_model_pick(conn, _pick(selection="AWAY"), initialize_schema=False)
+    # changed lineage
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
+        ledger.record_model_pick(conn, _pick(prediction_id="prediction_other"), initialize_schema=False)
+    # changed origin
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
+        ledger.record_model_pick(conn, _pick(record_origin=ledger.RECORD_ORIGIN_CURRENT_SYSTEM_REPLAY), initialize_schema=False)
+    # existing row untouched
+    row = ledger.fetch_model_pick_rows(conn, initialize_schema=False)[0]
+    assert row["line"] == -0.25
+    assert row["selection"] == "HOME"
+    conn.close()
+
+
+def test_settlement_is_one_way(tmp_path):
+    conn = _ledger_conn(tmp_path)
+    ledger.record_model_pick(conn, _pick(), initialize_schema=False)
+    conn.commit()
+    ledger.settle_rows(conn, {"fx1": {"home_goals": 3, "away_goals": 1}}, initialize_schema=False)
+    conn.commit()
+    state = ledger.fetch_model_pick_rows(conn, initialize_schema=False)[0]["trade_state"]
+    assert state == "FULL_WIN"
+    # identical settlement -> noop
+    ledger.settle_rows(conn, {"fx1": {"home_goals": 3, "away_goals": 1}}, initialize_schema=False)
+    assert ledger.fetch_model_pick_rows(conn, initialize_schema=False)[0]["trade_state"] == "FULL_WIN"
+    # conflicting settlement -> error, not silent overwrite
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_SETTLEMENT_CONFLICT"):
+        ledger.settle_rows(conn, {"fx1": {"home_goals": 0, "away_goals": 3}}, initialize_schema=False)
+    assert ledger.fetch_model_pick_rows(conn, initialize_schema=False)[0]["trade_state"] == "FULL_WIN"
+    conn.close()
+
+
+def test_timeline_ends_at_today_and_lists_upcoming_separately(tmp_path):
+    fixtures = [
+        {"fixture_id": "fx_today", "kickoff_utc": "2026-10-05T15:00:00+00:00"},
+        {"fixture_id": "fx_future", "kickoff_utc": "2026-10-21T15:00:00+00:00"},
+    ]
+    ledger_rows = [
+        {"fixture_id": "fx_future", "market": "asian_handicap", "selection": "HOME", "kickoff_utc": "2026-10-21T15:00:00+00:00", "prediction_generated_at": "2026-10-05T09:00:00+00:00", "trade_state": None},
+    ]
+    timeline = recon.build_daily_timeline(
+        ledger_rows=ledger_rows,
+        predictions=[{"fixture_id": "fx_future", "status": "READY"}],
+        fixtures=fixtures,
+        first_day="2026-10-05",
+        last_day="2026-10-21",
+        today=date(2026, 10, 5),
+    )
+    assert timeline["days"][-1]["date"] == "2026-10-05"  # historical ends today
+    assert timeline["upcoming_kickoff_days"] == ["2026-10-21"]
+    assert timeline["labels"]["latest_model_pick_issued_day"] == "2026-10-05"
+    assert timeline["labels"]["latest_model_pick_scheduled_kickoff_day"] == "2026-10-21"
+
+
+def test_market_evidence_is_not_inferred_from_bet_count():
+    fixtures = [{"fixture_id": "fx1", "kickoff_utc": "2026-09-20T15:00:00+00:00"}]
+    # A) evidence available, 0 bets -> NO_BET (NOT NO_MARKET_EVIDENCE)
+    a = recon.build_daily_timeline(
+        ledger_rows=[], predictions=[], fixtures=fixtures,
+        value_bets_by_day={}, market_evidence_by_day={"2026-09-20": recon.MARKET_EVIDENCE_AVAILABLE},
+        first_day="2026-09-20", last_day="2026-09-20", today=date(2026, 9, 20),
+    )["days"][0]
+    assert a["market_evidence"] == recon.MARKET_EVIDENCE_AVAILABLE
+    assert a["value_bet_status"] == "NO_BET"
+    # B) no evidence, 0 bets -> NO_MARKET_EVIDENCE / NOT_EVALUATED
+    b = recon.build_daily_timeline(
+        ledger_rows=[], predictions=[], fixtures=fixtures,
+        first_day="2026-09-20", last_day="2026-09-20", today=date(2026, 9, 20),
+    )["days"][0]
+    assert b["market_evidence"] == recon.NO_MARKET_EVIDENCE
+    assert b["value_bet_status"] == "NOT_EVALUATED"
+    # C) evidence available, 1 bet -> QUALIFIED
+    c = recon.build_daily_timeline(
+        ledger_rows=[], predictions=[], fixtures=fixtures,
+        value_bets_by_day={"2026-09-20": 1}, market_evidence_by_day={"2026-09-20": recon.MARKET_EVIDENCE_AVAILABLE},
+        first_day="2026-09-20", last_day="2026-09-20", today=date(2026, 9, 20),
+    )["days"][0]
+    assert c["market_evidence"] == recon.MARKET_EVIDENCE_AVAILABLE
+    assert c["value_bet_status"] == "QUALIFIED"
+
+
+def test_daily_totals_count_fixtures_not_prediction_versions():
+    fixtures = [{"fixture_id": "fx1", "kickoff_utc": "2026-09-20T15:00:00+00:00"}]
+    predictions = [
+        {"fixture_id": "fx1", "status": "READY"},
+        {"fixture_id": "fx1", "status": "READY"},  # second version, same fixture
+        {"fixture_id": "fx1", "status": "BLOCKED"},
+    ]
+    day = recon.build_daily_timeline(
+        ledger_rows=[], predictions=predictions, fixtures=fixtures,
+        first_day="2026-09-20", last_day="2026-09-20", today=date(2026, 9, 20),
+    )["days"][0]
+    assert day["ready_fixtures"] == 1
+    assert day["ready_prediction_versions"] == 2
+    assert day["blocked_fixtures"] == 0  # fixture resolved READY, not blocked
+    assert day["blocked_prediction_versions"] == 1
 
 
 def test_no_market_evidence_is_distinct_from_no_bet():

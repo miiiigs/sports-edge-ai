@@ -303,46 +303,64 @@ def build_daily_timeline(
     predictions: Sequence[Mapping[str, Any]],
     fixtures: Sequence[Mapping[str, Any]],
     value_bets_by_day: Mapping[str, int] | None = None,
+    market_evidence_by_day: Mapping[str, str] | None = None,
+    manager_decisions_by_day: Mapping[str, int] | None = None,
     first_day: str | None = None,
     last_day: str | None = None,
     today: date | None = None,
+    include_future: bool = False,
 ) -> dict[str, Any]:
-    """Aligned calendar timeline. Every day appears; gaps are never silently zero."""
+    """Aligned calendar timeline.
+
+    The historical calendar ENDS AT TODAY (or the requested last_day, whichever is
+    earlier) unless ``include_future`` is set. Future scheduled matches are reported
+    separately as UPCOMING model picks and never extend the historical view.
+
+    Market-evidence availability is an EXPLICIT input; it is never inferred from the
+    number of qualified value bets (a day can have market evidence with 0 qualified
+    bets -> NO_BET, which is different from NO_MARKET_EVIDENCE).
+    """
     value_bets_by_day = dict(value_bets_by_day or {})
+    market_evidence_by_day = dict(market_evidence_by_day or {})
+    manager_decisions_by_day = dict(manager_decisions_by_day or {})
     resolved_today = today or datetime.now(timezone.utc).date()
+    today_iso = resolved_today.isoformat()
 
     fixture_days: dict[str, int] = {}
-    for fixture in fixtures:
-        day = _day(fixture.get("kickoff_utc"))
-        if day:
-            fixture_days[day] = fixture_days.get(day, 0) + 1
-
-    pred_ready_by_fixture: dict[str, int] = {}
-    pred_blocked_by_fixture: dict[str, int] = {}
-    for prediction in predictions:
-        fid = str(prediction.get("fixture_id") or "")
-        if str(prediction.get("status") or "").upper() == "READY":
-            pred_ready_by_fixture[fid] = pred_ready_by_fixture.get(fid, 0) + 1
-        elif str(prediction.get("status") or "").upper() == "BLOCKED":
-            pred_blocked_by_fixture[fid] = pred_blocked_by_fixture.get(fid, 0) + 1
-
     fixture_kickoff_day: dict[str, str] = {}
     for fixture in fixtures:
         day = _day(fixture.get("kickoff_utc"))
         if day:
+            fixture_days[day] = fixture_days.get(day, 0) + 1
             fixture_kickoff_day[str(fixture.get("fixture_id"))] = day
 
-    ledger_by_day: dict[str, list[dict[str, Any]]] = {}
-    for row in ledger_rows:
-        day = _day(row.get("kickoff_utc")) or _day(row.get("prediction_generated_at"))
-        if day:
-            ledger_by_day.setdefault(day, []).append(dict(row))
+    # Unique-fixture grain (never count prediction versions as fixtures).
+    fixture_has_ready: dict[str, bool] = {}
+    fixture_has_blocked: dict[str, bool] = {}
+    ready_versions: dict[str, int] = {}
+    blocked_versions: dict[str, int] = {}
+    for prediction in predictions:
+        fid = str(prediction.get("fixture_id") or "")
+        status = str(prediction.get("status") or "").upper()
+        if status == "READY":
+            fixture_has_ready[fid] = True
+            ready_versions[fid] = ready_versions.get(fid, 0) + 1
+        elif status == "BLOCKED":
+            fixture_has_blocked[fid] = True
+            blocked_versions[fid] = blocked_versions.get(fid, 0) + 1
 
-    present = sorted({*fixture_days, *ledger_by_day, *value_bets_by_day})
+    ledger_by_kickoff_day: dict[str, list[dict[str, Any]]] = {}
+    for row in ledger_rows:
+        day = _day(row.get("kickoff_utc"))
+        if day:
+            ledger_by_kickoff_day.setdefault(day, []).append(dict(row))
+
+    present = sorted({*fixture_days, *ledger_by_kickoff_day, *value_bets_by_day})
     start = first_day or (present[0] if present else None)
-    end = last_day or (present[-1] if present else None) or resolved_today.isoformat()
+    requested_end = last_day or today_iso
+    end = requested_end if include_future else min(requested_end, today_iso)
     if start is None:
-        all_days = []
+        all_days: list[str] = []
     else:
         start_dt = _parse(start).date()
         end_dt = _parse(end).date()
@@ -353,7 +371,7 @@ def build_daily_timeline(
 
     days: list[dict[str, Any]] = []
     for day in all_days:
-        picks = ledger_by_day.get(day, [])
+        picks = ledger_by_kickoff_day.get(day, [])
         ah = sum(1 for p in picks if p["market"] == "asian_handicap")
         corner = sum(1 for p in picks if p["market"] == "corner_total")
         states = [p.get("trade_state") for p in picks]
@@ -366,15 +384,25 @@ def build_daily_timeline(
         full_losses = sum(1 for s in states if s in ("FULL_LOSS", "LOST"))
 
         fixtures_today = fixture_days.get(day, 0)
-        ready_today = sum(pred_ready_by_fixture.get(fid, 0) for fid, d in fixture_kickoff_day.items() if d == day)
-        blocked_today = sum(pred_blocked_by_fixture.get(fid, 0) for fid, d in fixture_kickoff_day.items() if d == day)
+        fixtures_here = [fid for fid, d in fixture_kickoff_day.items() if d == day]
+        ready_fixtures = sum(1 for fid in fixtures_here if fixture_has_ready.get(fid))
+        blocked_fixtures = sum(
+            1 for fid in fixtures_here if not fixture_has_ready.get(fid) and fixture_has_blocked.get(fid)
+        )
+        ready_prediction_versions = sum(ready_versions.get(fid, 0) for fid in fixtures_here)
+        blocked_prediction_versions = sum(blocked_versions.get(fid, 0) for fid in fixtures_here)
         vb = value_bets_by_day.get(day, 0)
+        evidence = market_evidence_by_day.get(day, NO_MARKET_EVIDENCE)
+        if evidence == MARKET_EVIDENCE_AVAILABLE:
+            value_bet_status = "QUALIFIED" if vb > 0 else "NO_BET"
+        else:
+            value_bet_status = "NOT_EVALUATED"
 
-        if fixtures_today == 0 and not picks:
-            origin_status = DAY_NO_FIXTURES
-        elif picks:
+        if picks:
             origin_status = DAY_LIVE_ISSUED
-        elif fixtures_today > 0 and ready_today + blocked_today == 0:
+        elif fixtures_today == 0:
+            origin_status = DAY_NO_FIXTURES
+        elif ready_fixtures + blocked_fixtures == 0:
             origin_status = DAY_REPLAY_PENDING
         else:
             origin_status = DAY_NO_LIVE_PREDICTION
@@ -383,8 +411,10 @@ def build_daily_timeline(
             {
                 "date": day,
                 "fixtures": fixtures_today,
-                "ready_predictions": ready_today,
-                "blocked_predictions": blocked_today,
+                "ready_fixtures": ready_fixtures,
+                "blocked_fixtures": blocked_fixtures,
+                "ready_prediction_versions": ready_prediction_versions,
+                "blocked_prediction_versions": blocked_prediction_versions,
                 "ah_model_picks": ah,
                 "corner_model_picks": corner,
                 "settled": settled,
@@ -395,18 +425,25 @@ def build_daily_timeline(
                 "half_losses": half_losses,
                 "full_losses": full_losses,
                 "value_bets": vb,
-                "market_evidence": MARKET_EVIDENCE_AVAILABLE if vb > 0 else NO_MARKET_EVIDENCE,
+                "market_evidence": evidence,
+                "value_bet_status": value_bet_status,
+                "manager_decisions": manager_decisions_by_day.get(day),
                 "origin_status": origin_status,
             }
         )
 
-    pick_days = [d["date"] for d in days if d["ah_model_picks"] + d["corner_model_picks"] > 0]
-    settled_days = [d["date"] for d in days if d["settled"] > 0]
+    issued_days = [d for d in (_day(row.get("prediction_generated_at")) for row in ledger_rows) if d]
+    kickoff_days = [d for d in (_day(row.get("kickoff_utc")) for row in ledger_rows) if d]
+    settled_kickoff_days = [
+        d for d in (_day(row.get("kickoff_utc")) for row in ledger_rows if row.get("trade_state")) if d
+    ]
     labels = {
-        "latest_model_pick_day": max(pick_days) if pick_days else None,
-        "latest_settled_model_pick_day": max(settled_days) if settled_days else None,
+        "latest_model_pick_issued_day": max(issued_days, default=None),
+        "latest_model_pick_scheduled_kickoff_day": max(kickoff_days, default=None),
+        "latest_settled_model_pick_fixture_day": max(settled_kickoff_days, default=None),
     }
-    return {"days": days, "labels": labels}
+    upcoming = sorted({d for d in kickoff_days if d > end})
+    return {"days": days, "labels": labels, "upcoming_kickoff_days": upcoming}
 
 
 def build_value_bet_labels(paper_conn: Any | None) -> dict[str, Any]:
