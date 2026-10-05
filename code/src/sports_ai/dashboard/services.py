@@ -505,6 +505,8 @@ class DashboardConfig:
     portfolio_policy_id: str = PORTFOLIO_POLICY_ID_V1
     portfolio_policy_version: str = PORTFOLIO_POLICY_VERSION_V1
     portfolio_policy_effective_from: str = ""
+    # Physically separate model-pick ledger DB (never the paper/value-bet DB).
+    model_pick_db_path: Path | None = None
     runtime_role: str = RUNTIME_ROLE_COMBINED
 
     @classmethod
@@ -516,6 +518,7 @@ class DashboardConfig:
             research_db_path=repo_root / "research" / "football_research" / "store" / "football_research.sqlite",
             dashboard_db_path=operational_paths.dashboard_db_path,
             paper_trading_db_path=operational_paths.paper_trading_db_path,
+            model_pick_db_path=operational_paths.data_dir / "football_model_picks.sqlite",
             performance_output_dir=repo_root / "research" / "product_outputs" / "football" / "performance",
             operational_data_dir=operational_paths.data_dir,
             storage_mode=operational_paths.mode,

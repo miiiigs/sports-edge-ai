@@ -431,6 +431,153 @@ def test_market_evidence_is_not_inferred_from_bet_count():
     assert c["value_bet_status"] == "QUALIFIED"
 
 
+def test_immutable_kickoff_and_competition_conflicts(tmp_path):
+    conn = _ledger_conn(tmp_path)
+    ledger.record_model_pick(conn, _pick(), initialize_schema=False)
+    conn.commit()
+    for changed in (
+        {"kickoff_utc": "2026-09-21T15:00:00+00:00"},
+        {"competition_id": "ESP1"},
+        {"competition_name": "La Liga"},
+    ):
+        with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
+            ledger.record_model_pick(conn, _pick(**changed), initialize_schema=False)
+    row = ledger.fetch_model_pick_rows(conn, initialize_schema=False)[0]
+    assert row["kickoff_utc"] == "2026-09-20T15:00:00+00:00"
+    assert row["competition_id"] == "ENG1"
+    conn.close()
+
+
+def test_settlement_evidence_immutability(tmp_path):
+    conn = _ledger_conn(tmp_path)
+    ledger.record_model_pick(conn, _pick(market="asian_handicap", line=-0.5, selection="HOME"), initialize_schema=False)
+    conn.commit()
+    ledger.settle_rows(conn, {"fx1": {"home_goals": 3, "away_goals": 1}}, initialize_schema=False)
+    conn.commit()
+    assert ledger.fetch_model_pick_rows(conn, initialize_schema=False)[0]["trade_state"] == "FULL_WIN"
+    # identical evidence -> NOOP
+    ledger.settle_rows(conn, {"fx1": {"home_goals": 3, "away_goals": 1}}, initialize_schema=False)
+    # same state, different score evidence -> evidence conflict (not silent identical)
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_SETTLEMENT_EVIDENCE_CONFLICT"):
+        ledger.settle_rows(conn, {"fx1": {"home_goals": 2, "away_goals": 0}}, initialize_schema=False)
+    # different state -> state conflict
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_SETTLEMENT_CONFLICT"):
+        ledger.settle_rows(conn, {"fx1": {"home_goals": 0, "away_goals": 3}}, initialize_schema=False)
+    conn.close()
+
+
+def test_settlement_evidence_immutability_corners(tmp_path):
+    conn = _ledger_conn(tmp_path)
+    ledger.record_model_pick(conn, _pick(market="corner_total", line=9.5, selection="OVER"), initialize_schema=False)
+    conn.commit()
+    ledger.settle_rows(conn, {"fx1": {"total_corners": 10}}, initialize_schema=False)
+    conn.commit()
+    assert ledger.fetch_model_pick_rows(conn, initialize_schema=False)[0]["trade_state"] == "FULL_WIN"
+    ledger.settle_rows(conn, {"fx1": {"total_corners": 10}}, initialize_schema=False)  # NOOP
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_SETTLEMENT_EVIDENCE_CONFLICT"):
+        ledger.settle_rows(conn, {"fx1": {"total_corners": 12}}, initialize_schema=False)
+    conn.close()
+
+
+def test_config_has_separate_model_pick_db_path():
+    from sports_ai.dashboard.services import DashboardConfig
+
+    config = DashboardConfig.default()
+    assert config.model_pick_db_path is not None
+    assert config.model_pick_db_path.name == "football_model_picks.sqlite"
+    assert config.model_pick_db_path != config.paper_trading_db_path
+    assert config.model_pick_db_path.parent == config.operational_data_dir
+
+
+def test_maintenance_dry_run_is_zero_writes_and_hash_parity(tmp_path):
+    from sports_ai.dashboard import model_pick_maintenance as maintenance
+
+    dash = _dashboard_conn(tmp_path)
+    dash.execute(
+        "INSERT INTO dashboard_fixtures VALUES (?,?,?,?,?,?,?,?,?)",
+        ("fx1", "ENG1", "Premier League", "Home", "Away", "2026-09-20T15:00:00+00:00", "PRE_MATCH", None, None),
+    )
+    _add_prediction(dash, prediction_id="p1", fixture_id="fx1", status="READY", generated_at="2026-09-19T10:00:00+00:00", model_as_of="2026-09-18T23:59:59+00:00", version_key="a")
+    dash.commit()
+
+    dry = maintenance.run_dry_run(dash)
+    assert dry["proposed_rows"] == 2
+    assert dry["ah"] == 1 and dry["corners"] == 1
+    assert dry["manifest_hash"]
+
+    led = _ledger_conn(tmp_path)
+    applied = maintenance.apply_live_issued(dash, led)
+    assert applied["manifest_hash"] == dry["manifest_hash"]  # DRY_RUN_HASH == APPLY_HASH
+    assert applied["rows_written"] == 2
+    # idempotent re-apply writes nothing new
+    again = maintenance.apply_live_issued(dash, led)
+    assert again["rows_written"] == 0
+    led.close()
+    dash.close()
+
+
+def test_maintenance_apply_rolls_back_on_conflict(tmp_path):
+    from sports_ai.dashboard import model_pick_maintenance as maintenance
+
+    dash = _dashboard_conn(tmp_path)
+    dash.execute(
+        "INSERT INTO dashboard_fixtures VALUES (?,?,?,?,?,?,?,?,?)",
+        ("fx1", "ENG1", "Premier League", "Home", "Away", "2026-09-20T15:00:00+00:00", "PRE_MATCH", None, None),
+    )
+    _add_prediction(dash, prediction_id="p1", fixture_id="fx1", status="READY", generated_at="2026-09-19T10:00:00+00:00", model_as_of="2026-09-18T23:59:59+00:00", version_key="a")
+    dash.commit()
+
+    led = _ledger_conn(tmp_path)
+    # Pre-seed a conflicting AH row (same fixture/market, different line).
+    ledger.record_model_pick(led, _pick(fixture_id="fx1", market="asian_handicap", line=-0.5), initialize_schema=False)
+    led.commit()
+    before = led.execute("select count(*) from football_model_pick_entries").fetchone()[0]
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
+        maintenance.apply_live_issued(dash, led)
+    after = led.execute("select count(*) from football_model_pick_entries").fetchone()[0]
+    assert after == before  # whole apply rolled back, no partial rows
+    led.close()
+    dash.close()
+
+
+def test_maintenance_settle_does_not_touch_paper_db(tmp_path):
+    from sports_ai.dashboard import model_pick_maintenance as maintenance
+
+    dash = _dashboard_conn(tmp_path)
+    dash.execute(
+        "INSERT INTO dashboard_fixtures VALUES (?,?,?,?,?,?,?,?,?)",
+        ("fx1", "ENG1", "Premier League", "Home", "Away", "2026-09-20T15:00:00+00:00", "FINISHED", 3, 1),
+    )
+    dash.commit()
+    led = _ledger_conn(tmp_path)
+    ledger.record_model_pick(led, _pick(market="asian_handicap", line=-0.5, selection="HOME"), initialize_schema=False)
+    led.commit()
+
+    # A separate paper DB must be untouched by settle.
+    paper_path = tmp_path / "paper.sqlite"
+    paper_conn = sqlite3.connect(paper_path)
+    paper_conn.execute("CREATE TABLE paper_trade_entries (paper_trade_id TEXT)")
+    paper_conn.commit()
+    paper_before = paper_conn.execute("select count(*) from paper_trade_entries").fetchone()[0]
+
+    result = maintenance.settle_open(led, dash)
+    assert result["settled"] == 1
+    assert paper_conn.execute("select count(*) from paper_trade_entries").fetchone()[0] == paper_before
+    paper_conn.close()
+    led.close()
+    dash.close()
+
+
+def test_maintenance_module_is_evidence_only():
+    import pathlib
+
+    from sports_ai.dashboard import model_pick_maintenance as maintenance
+
+    src = pathlib.Path(maintenance.__file__).read_text(encoding="utf-8")
+    for forbidden in ("import httpx", "import requests", "five_dollar", "the_odds_api"):
+        assert forbidden not in src
+
+
 def test_daily_totals_count_fixtures_not_prediction_versions():
     fixtures = [{"fixture_id": "fx1", "kickoff_utc": "2026-09-20T15:00:00+00:00"}]
     predictions = [

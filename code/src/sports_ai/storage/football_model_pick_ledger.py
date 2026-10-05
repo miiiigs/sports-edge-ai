@@ -44,6 +44,9 @@ _IMMUTABLE_FIELDS = (
     "policy_version",
     "fixture_id",
     "canonical_fixture_id",
+    "competition_id",
+    "competition_name",
+    "kickoff_utc",
     "market",
     "line",
     "selection",
@@ -153,6 +156,27 @@ def normalize_settlement_state(state: str | None) -> str | None:
     return _STATE_ALIASES.get(str(state), str(state))
 
 
+def _stored_payload(raw: Any) -> Any:
+    try:
+        return json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+def settlement_evidence_key(market: str, settlement_payload: Any) -> tuple:
+    """Normalized sporting-result evidence used to make settlement immutable.
+
+    AH -> (home_goals, away_goals); corners -> (total_corners,).
+    """
+    payload = settlement_payload
+    if isinstance(payload, Mapping) and "result" in payload:
+        payload = payload.get("result")
+    result = payload if isinstance(payload, Mapping) else {}
+    if str(market) == "asian_handicap":
+        return (result.get("home_goals"), result.get("away_goals"))
+    return (result.get("total_corners"),)
+
+
 def record_model_pick(
     conn: sqlite3.Connection,
     pick: Mapping[str, Any],
@@ -236,7 +260,7 @@ def update_settlement(
     """One-way settlement. Identical -> NOOP; different final state -> conflict."""
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     existing = conn.execute(
-        "SELECT trade_state FROM football_model_pick_entries WHERE model_pick_id = ?",
+        "SELECT trade_state, market, settlement_payload_json FROM football_model_pick_entries WHERE model_pick_id = ?",
         (model_pick_id_value,),
     ).fetchone()
     if existing is None:
@@ -244,11 +268,19 @@ def update_settlement(
     current = normalize_settlement_state(existing["trade_state"])
     new_state = normalize_settlement_state(trade_state)
     if current is not None:
-        if current == new_state:
-            return  # NOOP
-        raise sqlite3.IntegrityError(
-            f"MODEL_PICK_SETTLEMENT_CONFLICT: {model_pick_id_value} {current} -> {new_state}"
-        )
+        if current != new_state:
+            raise sqlite3.IntegrityError(
+                f"MODEL_PICK_SETTLEMENT_CONFLICT: {model_pick_id_value} {current} -> {new_state}"
+            )
+        market = str(existing["market"])
+        stored_evidence = settlement_evidence_key(market, _stored_payload(existing["settlement_payload_json"]))
+        new_evidence = settlement_evidence_key(market, settlement_payload)
+        if stored_evidence != new_evidence:
+            raise sqlite3.IntegrityError(
+                f"MODEL_PICK_SETTLEMENT_EVIDENCE_CONFLICT: {model_pick_id_value} "
+                f"stored={stored_evidence} new={new_evidence}"
+            )
+        return  # identical state AND evidence -> NOOP
     conn.execute(
         """
         UPDATE football_model_pick_entries
@@ -322,13 +354,9 @@ def settle_rows(
                 actual_home_goals=0, actual_away_goals=0, actual_total_corners=total,
             )
         normalized = normalize_settlement_state(state)
-        existing_state = normalize_settlement_state(row.get("trade_state"))
-        if existing_state is not None:
-            if existing_state == normalized:
-                continue  # NOOP
-            raise sqlite3.IntegrityError(
-                f"MODEL_PICK_SETTLEMENT_CONFLICT: {row['model_pick_id']} {existing_state} -> {normalized}"
-            )
+        was_open = normalize_settlement_state(row.get("trade_state")) is None
+        # Delegate all conflict/evidence checks (one-way settlement) to
+        # update_settlement so evidence conflicts are detected, not silently noop'd.
         update_settlement(
             conn,
             model_pick_id_value=str(row["model_pick_id"]),
@@ -337,7 +365,8 @@ def settle_rows(
             now=now,
             initialize_schema=False,
         )
-        settled += 1
+        if was_open:
+            settled += 1
     return settled
 
 
