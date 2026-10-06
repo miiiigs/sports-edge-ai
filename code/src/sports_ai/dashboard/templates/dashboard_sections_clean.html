@@ -13,6 +13,31 @@
   </div>
 </section>
 
+{% if payload.model_pick_history is defined and payload.model_pick_history.available %}
+<section class="clean-summary-grid" aria-label="Model picks status" id="model-picks-card" style="margin-bottom:16px;">
+  <article class="clean-stat clean-stat--primary">
+    <span class="clean-stat__label">Model Picks</span>
+    <strong class="clean-stat__value">ACTIVE</strong>
+    <span class="clean-stat__note">{{ payload.model_pick_history.summary.issued }} issued &middot; {{ payload.model_pick_history.summary.settled }} settled</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Asian Handicap</span>
+    <strong class="clean-stat__value">{{ payload.model_pick_history.by_market.asian_handicap.settled }} / {{ payload.model_pick_history.by_market.asian_handicap.open }}</strong>
+    <span class="clean-stat__note">settled / open</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Corners</span>
+    <strong class="clean-stat__value">{{ payload.model_pick_history.by_market.corner_total.settled }} / {{ payload.model_pick_history.by_market.corner_total.open }}</strong>
+    <span class="clean-stat__note">settled / open</span>
+  </article>
+  <article class="clean-stat">
+    <span class="clean-stat__label">Latest issued</span>
+    <strong class="clean-stat__value">{{ payload.model_pick_history.labels.latest_model_pick_issued_day or 'N/A' }}</strong>
+    <span class="clean-stat__note"><a href="/model-performance#model-picks">View History</a></span>
+  </article>
+</section>
+{% endif %}
+
 <section class="clean-summary-grid" aria-label="Football dashboard summary">
   <article class="clean-stat clean-stat--primary">
     <span class="clean-stat__label">Valid Bets</span>

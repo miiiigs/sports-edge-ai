@@ -1,0 +1,122 @@
+{% set mp = payload.model_pick_history if payload.model_pick_history is defined else None %}
+{% set ah = mp.by_market.asian_handicap if mp and mp.available else None %}
+{% set cn = mp.by_market.corner_total if mp and mp.available else None %}
+{% set badge_class = {
+  'FULL_WIN': 'mp-badge--win', 'HALF_WIN': 'mp-badge--win',
+  'PUSH': 'mp-badge--neutral', 'HALF_LOSS': 'mp-badge--loss', 'FULL_LOSS': 'mp-badge--loss',
+  'RESULT_PENDING': 'mp-badge--pending', 'UPCOMING': 'mp-badge--upcoming'
+} %}
+{% macro mp_badge(state) -%}
+<span class="mp-badge {{ badge_class.get(state, 'mp-badge--pending') }}">{{ state.replace('_', ' ') }}</span>
+{%- endmacro %}
+<style>
+  .mp-section{margin:0 0 28px;}
+  .mp-section h2.mp-title{font-size:1.05rem;letter-spacing:.14em;text-transform:uppercase;margin:0 0 4px;}
+  .mp-sub{color:#9aa4b2;margin:0 0 16px;font-size:.9rem;}
+  .mp-explain{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px 14px;color:#c7ced8;font-size:.86rem;margin:0 0 18px;}
+  .mp-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:0 0 18px;}
+  .mp-badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;letter-spacing:.04em;border:1px solid transparent;}
+  .mp-badge--win{background:rgba(31,180,110,.16);color:#5fe0a5;border-color:rgba(31,180,110,.4);}
+  .mp-badge--loss{background:rgba(214,78,78,.14);color:#f0a3a3;border-color:rgba(214,78,78,.35);}
+  .mp-badge--neutral{background:rgba(255,255,255,.06);color:#c7ced8;border-color:rgba(255,255,255,.15);}
+  .mp-badge--pending{background:rgba(255,255,255,.06);color:#c7ced8;border-color:rgba(255,255,255,.18);}
+  .mp-badge--upcoming{background:rgba(90,150,255,.12);color:#9dbcff;border-color:rgba(90,150,255,.35);}
+  .mp-rows{width:100%;border-collapse:collapse;font-size:.85rem;}
+  .mp-rows th,.mp-rows td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);white-space:nowrap;}
+  .mp-ref{color:#9aa4b2;font-size:.78rem;}
+  .mp-scroll{overflow-x:auto;}
+</style>
+<section class="mp-section" id="model-picks" aria-label="Model picks">
+  <h2 class="mp-title">Model Picks</h2>
+  <p class="mp-sub">Model-only predictions, tracked independently from bookmaker prices.{% if mp and mp.available %} <span class="mp-badge mp-badge--win">ACTIVE</span>{% endif %}</p>
+  {% if not mp or not mp.available %}
+    <p class="mp-explain">Model picks are temporarily unavailable.</p>
+  {% else %}
+  <div class="mp-cards">
+    <article class="clean-stat"><span class="clean-stat__label">Total Model Picks</span><strong class="clean-stat__value">{{ mp.summary.issued }}</strong><span class="clean-stat__note">{{ mp.summary.settled }} settled &middot; {{ mp.summary.open }} open</span></article>
+    <article class="clean-stat"><span class="clean-stat__label">Asian Handicap</span><strong class="clean-stat__value">{{ ah.settled }} / {{ ah.open }}</strong><span class="clean-stat__note">settled / open</span></article>
+    <article class="clean-stat"><span class="clean-stat__label">Corners</span><strong class="clean-stat__value">{{ cn.settled }} / {{ cn.open }}</strong><span class="clean-stat__note">settled / open</span></article>
+    <article class="clean-stat"><span class="clean-stat__label">Latest Model Issue</span><strong class="clean-stat__value">{{ mp.labels.latest_model_pick_issued_day or 'N/A' }}</strong><span class="clean-stat__note">latest scheduled {{ mp.labels.latest_model_pick_scheduled_kickoff_day or 'N/A' }}</span></article>
+  </div>
+  <p class="mp-explain">Model Picks measure the Football model itself. Value Bets are shown separately and only exist when genuine bookmaker market evidence and a qualifying price were available.</p>
+
+  {% for key, label in [('asian_handicap', 'Asian Handicap'), ('corner_total', 'Corners')] %}
+    {% set m = mp.by_market[key] %}
+    <div class="mp-cards">
+      <article class="clean-stat clean-stat--primary"><span class="clean-stat__label">{{ label }}</span><strong class="clean-stat__value">{{ m.weighted_success_rate if m.weighted_success_rate is not none else 'N/A' }}</strong><span class="clean-stat__note">Weighted Success</span></article>
+      <article class="clean-stat"><span class="clean-stat__label">{{ label }} Issued</span><strong class="clean-stat__value">{{ m.issued }}</strong><span class="clean-stat__note">{{ m.settled }} settled &middot; {{ m.open }} pending/upcoming</span></article>
+      <article class="clean-stat"><span class="clean-stat__label">{{ label }} Results</span><strong class="clean-stat__value">{{ m.full_wins }}W {{ m.half_wins }}HW {{ m.pushes }}P {{ m.half_losses }}HL {{ m.full_losses }}L</strong><span class="clean-stat__note">FW / HW / P / HL / FL</span></article>
+    </div>
+  {% endfor %}
+  <p class="mp-ref">{{ mp.weighted_success_note }}</p>
+
+  <h3>Recent Model Results</h3>
+  {% if mp.recent_settled %}
+  <div class="mp-scroll"><table class="mp-rows">
+    <thead><tr><th>Kickoff</th><th>Competition</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Model prob</th><th>Fair price</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for r in mp.recent_settled[:20] %}
+      <tr>
+        <td>{{ r.kickoff_utc[:10] if r.kickoff_utc else '' }}</td>
+        <td>{{ r.competition_name or r.competition_id or '' }}</td>
+        <td>{{ r.home_team_name }} vs {{ r.away_team_name }}</td>
+        <td>{{ 'Asian Handicap' if r.market == 'asian_handicap' else 'Corners' }}</td>
+        <td>{{ r.selection }} {{ r.line }}</td>
+        <td>{% if r.model_probability is not none %}{{ "%.1f"|format(r.model_probability|float * 100) }}%{% endif %}</td>
+        <td>{% if r.model_fair_price is not none %}{{ "%.2f"|format(r.model_fair_price|float) }}{% endif %}</td>
+        <td>{{ mp_badge(r.result_state) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="mp-ref">No settled model results yet.</p>{% endif %}
+
+  <h3>Result Pending</h3>
+  <p class="mp-ref">Awaiting verified final sporting result. These are model predictions, never losses.</p>
+  {% if mp.result_pending %}
+  <div class="mp-scroll"><table class="mp-rows">
+    <thead><tr><th>Kickoff</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Model prob</th><th>Fair price</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r in mp.result_pending[:20] %}
+      <tr><td>{{ r.kickoff_utc[:10] if r.kickoff_utc else '' }}</td><td>{{ r.home_team_name }} vs {{ r.away_team_name }}</td>
+      <td>{{ 'Asian Handicap' if r.market == 'asian_handicap' else 'Corners' }}</td><td>{{ r.selection }} {{ r.line }}</td>
+      <td>{% if r.model_probability is not none %}{{ "%.1f"|format(r.model_probability|float * 100) }}%{% endif %}</td>
+      <td>{% if r.model_fair_price is not none %}{{ "%.2f"|format(r.model_fair_price|float) }}{% endif %}</td>
+      <td>{{ mp_badge('RESULT_PENDING') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="mp-ref">No picks awaiting results.</p>{% endif %}
+
+  <h3>Upcoming</h3>
+  {% if mp.upcoming %}
+  <div class="mp-scroll"><table class="mp-rows">
+    <thead><tr><th>Kickoff</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Model prob</th><th>Fair price</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r in mp.upcoming[:20] %}
+      <tr><td>{{ r.kickoff_utc[:10] if r.kickoff_utc else '' }}</td><td>{{ r.home_team_name }} vs {{ r.away_team_name }}</td>
+      <td>{{ 'Asian Handicap' if r.market == 'asian_handicap' else 'Corners' }}</td><td>{{ r.selection }} {{ r.line }}</td>
+      <td>{% if r.model_probability is not none %}{{ "%.1f"|format(r.model_probability|float * 100) }}%{% endif %}</td>
+      <td>{% if r.model_fair_price is not none %}{{ "%.2f"|format(r.model_fair_price|float) }}{% endif %}</td>
+      <td>{{ mp_badge('UPCOMING') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="mp-ref">No upcoming picks.</p>{% endif %}
+
+  <h3>Daily Model History</h3>
+  {% if mp.recent_days %}
+  <div class="mp-scroll"><table class="mp-rows">
+    <thead><tr><th>Date</th><th>Fixtures</th><th>AH issued</th><th>Corners issued</th><th>Settled</th><th>Open</th><th>FW/HW/P/HL/FL</th><th>Weighted Success</th></tr></thead>
+    <tbody>
+    {% for d in mp.recent_days[-21:] %}
+      <tr><td>{{ d.date }}</td><td>{{ d.fixtures_represented }}</td><td>{{ d.ah_issued }}</td><td>{{ d.corner_issued }}</td>
+      <td>{{ d.settled }}</td><td>{{ d.open }}</td>
+      <td>{{ d.full_wins }}/{{ d.half_wins }}/{{ d.pushes }}/{{ d.half_losses }}/{{ d.full_losses }}</td>
+      <td>{{ d.weighted_success_rate if d.weighted_success_rate is not none else 'N/A' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="mp-ref">No model history yet.</p>{% endif %}
+  {% endif %}
+</section>
