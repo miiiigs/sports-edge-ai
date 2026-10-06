@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from .auth import AuthSettings, AuthStore, SESSION_COOKIE_NAME, SESSION_DAYS
 from .client_history import build_client_history_payload
+from .model_pick_history import build_model_pick_history_payload
 from .fixture_provider import FixtureProvider
 from .football_intelligence import build_football_intelligence_payload
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
@@ -154,13 +155,22 @@ def create_app(
             "email": email,
         }
 
+    def _model_pick_db_path():
+        return getattr(resolved_services.config, "model_pick_db_path", None) or (
+            resolved_services.config.operational_data_dir / "football_model_picks.sqlite"
+        )
+
     def _with_client_history(payload: dict) -> dict:
-        """Attach a presentation-only normalized history snapshot without mutating ledger truth."""
+        """Attach presentation-only normalized history + MODEL PICKS without mutating ledger truth."""
         return {
             **payload,
             "client_history": build_client_history_payload(
                 paper_db_path=resolved_services.config.paper_trading_db_path,
                 dashboard_db_path=resolved_services.config.dashboard_db_path,
+                timezone_name=resolved_services.config.display_timezone,
+            ),
+            "model_pick_history": build_model_pick_history_payload(
+                model_pick_db_path=_model_pick_db_path(),
                 timezone_name=resolved_services.config.display_timezone,
             ),
         }
@@ -483,6 +493,16 @@ def create_app(
     @app.get("/api/fixtures/next")
     def api_next_fixtures():
         return JSONResponse(resolved_services.get_next_fixtures_payload())
+
+    @app.get("/api/client/model-picks")
+    def api_client_model_picks():
+        """Read-only Football MODEL PICKS payload for the unified dashboard."""
+        return JSONResponse(
+            build_model_pick_history_payload(
+                model_pick_db_path=_model_pick_db_path(),
+                timezone_name=resolved_services.config.display_timezone,
+            )
+        )
 
     @app.get("/api/fixtures/{fixture_id}")
     def api_fixture_detail(fixture_id: str):
