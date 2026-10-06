@@ -106,6 +106,19 @@ def test_score_is_not_used_for_identity_ambiguous_fails_closed():
     assert len(matches) == 2
 
 
+def test_research_final_requires_valid_full_time_result_code():
+    assert ident.research_final_result(_research_event(result_code="H"))["status"] == ident.RESEARCH_FINAL
+    assert ident.research_final_result(_research_event(result_code=""))["status"] == ident.RESEARCH_FINAL_NOT_FINAL
+    assert ident.research_final_result(_research_event(result_code="HH"))["status"] == ident.RESEARCH_FINAL_NOT_FINAL
+    assert ident.research_final_result(_research_event(home_goals=None, result_code="H"))["status"] == ident.RESEARCH_FINAL_MISSING
+
+
+def test_research_result_code_must_agree_with_score():
+    result = ident.research_final_result(_research_event(home_goals=0, away_goals=0, result_code="H"))
+    assert result["status"] == ident.RESEARCH_RESULT_CONFLICT
+    assert result["implied_result_code"] == "D"
+
+
 def test_validate_score_match_conflict_missing():
     event = _research_event()
     assert ident.validate_score((2, 1), event) == ident.SCORE_MATCH
@@ -149,21 +162,35 @@ def test_manifest_marks_live_stale_with_matching_final_evidence_eligible():
         "ambiguous": 0,
         "unmatched": 0,
         "final_results_proven": 1,
+        "research_result_conflicts": 0,
         "score_agreeing": 1,
         "score_conflicts": 0,
         "eligible_status_repairs": 1,
     }
     assert manifest["rows"][0]["repair_eligible"] == "YES"
+    assert manifest["rows"][0]["classification"] == "IDENTITY_MATCHED"
+    dash.close()
+    led.close()
+
+
+def test_manifest_result_code_conflict_not_eligible():
+    dash, led = _manifest_dbs()
+    manifest = recon.build_manifest(dash, led, [_research_event(home_goals=0, away_goals=0, result_code="H")])
+    assert manifest["summary"]["research_result_conflicts"] == 1
+    assert manifest["summary"]["eligible_status_repairs"] == 0
+    assert manifest["rows"][0]["classification"] == "RESEARCH_RESULT_CONFLICT"
+    assert manifest["rows"][0]["repair_eligible"] == "NO"
     dash.close()
     led.close()
 
 
 def test_manifest_score_conflict_is_not_eligible():
     dash, led = _manifest_dbs()
-    manifest = recon.build_manifest(dash, led, [_research_event(home_goals=0, away_goals=0)])
+    manifest = recon.build_manifest(dash, led, [_research_event(home_goals=0, away_goals=0, result_code="D")])
     assert manifest["summary"]["score_conflicts"] == 1
     assert manifest["summary"]["eligible_status_repairs"] == 0
-    assert manifest["rows"][0]["repair_eligible"] == "NO"
+    assert manifest["rows"][0]["classification"] == "DASHBOARD_SCORE_CONFLICT"
+    assert manifest["rows"][0]["repair_eligible"] == "REPAIR_BLOCKED"
     dash.close()
     led.close()
 

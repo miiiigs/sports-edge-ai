@@ -43,6 +43,53 @@ SCORE_MATCH = "MATCH"
 SCORE_CONFLICT = "CONFLICT"
 SCORE_MISSING = "MISSING"
 
+# football-data.co.uk full-time result codes only (never half-time codes).
+VALID_FULL_TIME_RESULT_CODES = frozenset({"H", "D", "A"})
+RESEARCH_FINAL = "FINAL"
+RESEARCH_FINAL_MISSING = "MISSING"
+RESEARCH_FINAL_NOT_FINAL = "NOT_FINAL"
+RESEARCH_RESULT_CONFLICT = "RESEARCH_RESULT_CONFLICT"
+
+
+def score_implied_result_code(home_goals: Any, away_goals: Any) -> str | None:
+    if home_goals is None or away_goals is None:
+        return None
+    home, away = int(home_goals), int(away_goals)
+    if home > away:
+        return "H"
+    if home < away:
+        return "A"
+    return "D"
+
+
+def research_final_result(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Authoritative FINAL proof for a research event.
+
+    Requires full-time score AND a valid full-time result_code (H/D/A) that
+    AGREES with the score. Score presence alone is never FINAL. Half-time codes
+    are never consulted.
+    """
+    home_goals = event.get("home_goals")
+    away_goals = event.get("away_goals")
+    result_code = str(event.get("result_code") or "").strip().upper()
+    if home_goals is None or away_goals is None:
+        return {"status": RESEARCH_FINAL_MISSING, "reason": "SCORE_MISSING", "result_code": result_code or None}
+    if result_code not in VALID_FULL_TIME_RESULT_CODES:
+        return {
+            "status": RESEARCH_FINAL_NOT_FINAL,
+            "reason": "RESULT_CODE_NOT_FINAL",
+            "result_code": result_code or None,
+        }
+    implied = score_implied_result_code(home_goals, away_goals)
+    if implied != result_code:
+        return {
+            "status": RESEARCH_RESULT_CONFLICT,
+            "reason": RESEARCH_RESULT_CONFLICT,
+            "result_code": result_code,
+            "implied_result_code": implied,
+        }
+    return {"status": RESEARCH_FINAL, "reason": None, "result_code": result_code}
+
 
 def _zone(tz_name: str = RESEARCH_SOURCE_TIMEZONE) -> ZoneInfo:
     try:

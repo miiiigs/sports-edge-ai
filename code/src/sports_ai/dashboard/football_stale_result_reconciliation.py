@@ -27,11 +27,14 @@ from .football_research_identity import (
     IDENTITY_AMBIGUOUS,
     IDENTITY_MATCHED,
     RESEARCH_EVENT_IDENTITY_VERSION,
+    RESEARCH_FINAL,
+    RESEARCH_RESULT_CONFLICT,
     RESEARCH_SOURCE_TIMEZONE,
     SCORE_CONFLICT,
     SCORE_MATCH,
     dashboard_fixture_identity,
     index_research_events,
+    research_final_result,
     resolve_identity,
     validate_score,
 )
@@ -108,7 +111,7 @@ def build_manifest(
 
     rows: list[dict[str, Any]] = []
     matched = ambiguous = unmatched = 0
-    final_proven = score_agreeing = score_conflicts = eligible = 0
+    final_proven = score_agreeing = score_conflicts = result_code_conflicts = eligible = 0
     for item in cohort:
         fixture = item["fixture"]
         dash_identity = dashboard_fixture_identity(fixture)
@@ -116,30 +119,51 @@ def build_manifest(
         event = candidates[0] if state == IDENTITY_MATCHED and candidates else None
         score_validation = None
         repair_eligible = "NO"
+        classification = "IDENTITY_UNMATCHED"
         research_score = None
-        research_final = "UNKNOWN"
+        research_final = None
+        research_result_code = None
         if state == IDENTITY_MATCHED:
             matched += 1
+            final = research_final_result(event)
+            research_final = final["status"]
+            research_result_code = final.get("result_code")
             research_score = [event.get("home_goals"), event.get("away_goals")]
-            research_final = "FINAL" if event.get("home_goals") is not None and event.get("away_goals") is not None else "UNKNOWN"
-            if research_final == "FINAL":
+            if research_final == RESEARCH_FINAL:
                 final_proven += 1
+            if research_final == RESEARCH_RESULT_CONFLICT:
+                result_code_conflicts += 1
             score_validation = validate_score((fixture["home_score"], fixture["away_score"]), event)
             if score_validation == SCORE_MATCH:
                 score_agreeing += 1
             elif score_validation == SCORE_CONFLICT:
                 score_conflicts += 1
-            if (
-                research_final == "FINAL"
-                and score_validation == SCORE_MATCH
-                and str(fixture["status"]).upper() not in FINISHED_STATUSES
-            ):
+            already_final = str(fixture["status"]).upper() in FINISHED_STATUSES
+            if research_final == RESEARCH_RESULT_CONFLICT:
+                classification = "RESEARCH_RESULT_CONFLICT"
+                repair_eligible = "NO"
+            elif research_final != RESEARCH_FINAL:
+                classification = "FINAL_RESEARCH_TRUTH_UNAVAILABLE"
+                repair_eligible = "NO"
+            elif score_validation == SCORE_CONFLICT:
+                classification = "DASHBOARD_SCORE_CONFLICT"
+                repair_eligible = "REPAIR_BLOCKED"
+            elif score_validation != SCORE_MATCH:
+                classification = "SCORE_MISSING"
+                repair_eligible = "NO"
+            elif already_final:
+                classification = "IDENTITY_MATCHED"
+                repair_eligible = "ALREADY_FINAL"
+            else:
+                classification = "IDENTITY_MATCHED"
                 repair_eligible = "YES"
                 eligible += 1
         elif state == IDENTITY_AMBIGUOUS:
             ambiguous += 1
+            classification = "IDENTITY_AMBIGUOUS"
         else:
             unmatched += 1
+            classification = "IDENTITY_UNMATCHED"
 
         rows.append(
             {
@@ -162,7 +186,9 @@ def build_manifest(
                 "canonical_research_away": event.get("canonical_away_team") if event else None,
                 "identity_status": state,
                 "identity_candidate_count": len(candidates),
+                "classification": classification,
                 "research_final_status": research_final,
+                "research_result_code": research_result_code,
                 "research_score": research_score,
                 "score_validation": score_validation,
                 "provider_truth": _provider_truth(dashboard_conn, str(fixture["fixture_id"])),
@@ -180,6 +206,7 @@ def build_manifest(
             "ambiguous": ambiguous,
             "unmatched": unmatched,
             "final_results_proven": final_proven,
+            "research_result_conflicts": result_code_conflicts,
             "score_agreeing": score_agreeing,
             "score_conflicts": score_conflicts,
             "eligible_status_repairs": eligible,
