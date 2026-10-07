@@ -14,7 +14,13 @@ Handicap / Corner Total quote is trustworthy enough to evaluate:
   malformed or team-corner rows (a team-corner market is never converted into a
   match total corners market);
 * explicit quote states (``FRESH_PREMATCH`` / ``STALE_PREMATCH`` / ``IN_PLAY`` /
-  ``INVALID`` / ``MISSING``);
+  ``INVALID`` / ``MISSING``), where ``FRESH_PREMATCH`` always means "within the
+  provider-specific ACTIONABLE freshness threshold" (API-Football default 240
+  minutes). Unknown providers fail closed;
+* a SEPARATE, observational collector-health state
+  (``CURRENT_CYCLE`` / ``CYCLE_DUE`` / ``CYCLE_MISSED``) measured against the
+  ~6h collection cadence (default 360 minutes). It never makes a stale quote
+  eligible and never weakens the actionable gate;
 * a prospective pre-match-only eligibility gate (``quote_captured_at < kickoff``
   and the stricter source-time rule);
 * deterministic fixture identity resolution against the canonical fixture
@@ -29,6 +35,7 @@ line, or persists state.
 from __future__ import annotations
 
 import math
+import os
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -41,7 +48,10 @@ from ..storage.football_canonical_fixture import (
     fetch_canonical_fixture_ids_for_fixture_ids,
     normalize_kickoff_utc,
 )
-from .freshness import resolve_market_max_age_minutes
+from .freshness import (
+    resolve_market_max_age_minutes,
+    resolve_market_max_age_minutes_for_provider,
+)
 
 # --------------------------------------------------------------------------- markets
 MARKET_ASIAN_HANDICAP = "asian_handicap"
@@ -103,19 +113,32 @@ EVIDENCE_IDENTITY_UNRESOLVED = "IDENTITY_UNRESOLVED"
 MARKET_IDENTITY_RESOLVED = "MARKET_IDENTITY_RESOLVED"
 MARKET_IDENTITY_UNRESOLVED = "MARKET_IDENTITY_UNRESOLVED"
 
-# Exact freshness threshold and rationale.
+# --------------------------------------------------------------------------- thresholds
 #
-# The live football collector runs on an approximately six-hour cadence (see the
-# football scheduler), with each cycle refreshing the current-slate odds. A quote
-# is only actionable when it was observed within one full collection cadence of
-# now; older than that and we may be evaluating a price the market has since
-# moved away from. We therefore use 360 minutes (6h) as the default. This is
-# deliberately looser than the API-Football capture-time freshness gate (240m) so
-# that the evidence layer reports STALE only when the collector has genuinely
-# missed at least one full cycle. Overridable via
-# ``SPORTS_AI_FOOTBALL_EVIDENCE_MAX_AGE_MINUTES``.
-EVIDENCE_MAX_AGE_ENV_VAR = "SPORTS_AI_FOOTBALL_EVIDENCE_MAX_AGE_MINUTES"
-DEFAULT_EVIDENCE_MAX_AGE_MINUTES = 360
+# TWO DIFFERENT concepts, deliberately NOT merged:
+#
+# * ACTIONABLE freshness decides whether a quote may justify a pre-match Value
+#   Bet. It is provider-specific and owned by the existing provider freshness
+#   configuration (``resolve_market_max_age_minutes_for_provider``). For
+#   ``api-football`` the default is 240 minutes. A provider with no configured or
+#   default threshold fails closed for eligibility (never silently permissive).
+#
+# * COLLECTOR HEALTH is an observational diagnostic that answers "has the ~6h
+#   collection cadence reported this market recently?". Its default is 360
+#   minutes (6h) and it can NEVER make a quote eligible for betting.
+#
+# ``SPORTS_AI_FOOTBALL_COLLECTOR_HEALTH_MAX_AGE_MINUTES`` configures collector
+# health only. The legacy ``SPORTS_AI_FOOTBALL_EVIDENCE_MAX_AGE_MINUTES`` is still
+# read, but ONLY as a collector-health fallback, so it cannot weaken the safer
+# provider-specific decision gate.
+COLLECTOR_HEALTH_MAX_AGE_ENV_VAR = "SPORTS_AI_FOOTBALL_COLLECTOR_HEALTH_MAX_AGE_MINUTES"
+LEGACY_COLLECTOR_HEALTH_MAX_AGE_ENV_VAR = "SPORTS_AI_FOOTBALL_EVIDENCE_MAX_AGE_MINUTES"
+DEFAULT_COLLECTOR_HEALTH_MAX_AGE_MINUTES = 360
+
+# Collector-health states are observational only and never gate betting.
+COLLECTOR_CURRENT_CYCLE = "CURRENT_CYCLE"
+COLLECTOR_CYCLE_DUE = "CYCLE_DUE"
+COLLECTOR_CYCLE_MISSED = "CYCLE_MISSED"
 
 
 class MarketEvidenceError(RuntimeError):
@@ -143,18 +166,30 @@ class AsianHandicapConvention(str, Enum):
     HOME_HANDICAP = "home_handicap"
 
 
-def resolve_evidence_max_age_minutes() -> int:
-    """Resolve the evidence freshness threshold in minutes.
+def resolve_actionable_max_age_minutes(provider: str | None) -> int | None:
+    """Provider-specific actionable freshness threshold in minutes, or ``None``.
 
-    Unset uses :data:`DEFAULT_EVIDENCE_MAX_AGE_MINUTES`. A non-numeric, zero or
-    negative override fails closed to the default so an invalid configuration can
-    never silently mark stale evidence fresh.
+    Delegates to the existing provider freshness configuration so this lane can
+    never loosen the production safety gate. ``api-football`` defaults to 240
+    minutes (or its configured provider env value). ``None`` means "no approved
+    threshold exists": decision eligibility must fail closed.
     """
-    value = resolve_market_max_age_minutes(
-        EVIDENCE_MAX_AGE_ENV_VAR,
-        default_when_unset=DEFAULT_EVIDENCE_MAX_AGE_MINUTES,
-    )
-    return DEFAULT_EVIDENCE_MAX_AGE_MINUTES if value is None else value
+    return resolve_market_max_age_minutes_for_provider(provider)
+
+
+def resolve_collector_health_max_age_minutes() -> int:
+    """Collector-health diagnostic threshold in minutes. Never gates betting.
+
+    Defaults to 360 minutes (one ~6h collection cadence). Reads
+    ``SPORTS_AI_FOOTBALL_COLLECTOR_HEALTH_MAX_AGE_MINUTES`` first, then the legacy
+    ``SPORTS_AI_FOOTBALL_EVIDENCE_MAX_AGE_MINUTES`` as a fallback. Invalid, zero
+    or negative values fail safe to the 360-minute default.
+    """
+    for env_var in (COLLECTOR_HEALTH_MAX_AGE_ENV_VAR, LEGACY_COLLECTOR_HEALTH_MAX_AGE_ENV_VAR):
+        if os.environ.get(env_var, "").strip():
+            value = resolve_market_max_age_minutes(env_var, default_when_unset=None)
+            return DEFAULT_COLLECTOR_HEALTH_MAX_AGE_MINUTES if value is None else value
+    return DEFAULT_COLLECTOR_HEALTH_MAX_AGE_MINUTES
 
 
 # --------------------------------------------------------------------------- parsing
@@ -370,6 +405,9 @@ class QuoteStateResult:
     reason: str
     age_minutes: float | None = None
     effective_timestamp: str | None = None
+    actionable_max_age_minutes: int | None = None
+    collector_health_state: str | None = None
+    collector_health_max_age_minutes: int | None = None
 
     @property
     def is_fresh_pre_match(self) -> bool:
@@ -381,6 +419,25 @@ class EligibilityResult:
     eligible: bool
     reason: str
     quote_state: str
+    actionable_max_age_minutes: int | None = None
+    collector_health_state: str | None = None
+
+
+def _collector_health_state(age_minutes: float | None, threshold_minutes: int | None) -> str | None:
+    """Observational collector-health state. Never gates betting.
+
+    ``CURRENT_CYCLE``: observation within the most recent scheduled cycle window.
+    ``CYCLE_DUE``: the next cycle is due (observation older than half a cadence
+    but still within one full cadence). ``CYCLE_MISSED``: no observation within a
+    full cadence, i.e. at least one collection cycle was missed.
+    """
+    if age_minutes is None or threshold_minutes is None:
+        return None
+    if age_minutes <= threshold_minutes / 2:
+        return COLLECTOR_CURRENT_CYCLE
+    if age_minutes <= threshold_minutes:
+        return COLLECTOR_CYCLE_DUE
+    return COLLECTOR_CYCLE_MISSED
 
 
 # --------------------------------------------------------------------------- freshness
@@ -390,14 +447,24 @@ def classify_quote_state(
     source_timestamp: Any = None,
     kickoff_utc: Any = None,
     now_utc: Any,
-    max_age_minutes: int,
+    actionable_max_age_minutes: int | None,
+    collector_health_max_age_minutes: int | None = None,
 ) -> QuoteStateResult:
-    """Classify one quote into the explicit evidence freshness states.
+    """Classify one quote for BOTH actionable freshness and collector health.
+
+    ``FRESH_PREMATCH`` means the quote is pre-match AND its age is within the
+    provider-specific ``actionable_max_age_minutes`` used for Value Bet
+    eligibility. ``collector_health_state`` is observational only: a stale
+    actionable quote within the ~6h collector cadence still reports
+    ``CYCLE_DUE``/``CURRENT_CYCLE`` but is never made eligible.
 
     The authoritative age is measured from the provider source timestamp when
     present and from ``captured_at`` otherwise, so a replayed/cached provider
     payload whose old source timestamp is refreshed into a new capture time is
     still correctly classified (never treated as newly observed).
+
+    When ``actionable_max_age_minutes`` is ``None`` no approved actionable
+    threshold exists: the quote fails closed as ``INVALID`` regardless of age.
     """
     captured_dt = _parse_utc(captured_at)
     now_dt = _parse_utc(now_utc)
@@ -410,54 +477,126 @@ def classify_quote_state(
 
     effective_dt = source_dt or captured_dt
     effective_text = (str(source_timestamp) if source_dt is not None else str(captured_at))
+    age_minutes = (now_dt - effective_dt).total_seconds() / 60.0
+    collector_state = _collector_health_state(age_minutes, collector_health_max_age_minutes)
 
     if effective_dt > now_dt:
-        return QuoteStateResult(QUOTE_STATE_INVALID, "quote timestamp is in the future", effective_timestamp=effective_text)
+        return QuoteStateResult(
+            QUOTE_STATE_INVALID,
+            "quote timestamp is in the future",
+            age_minutes,
+            effective_text,
+            actionable_max_age_minutes,
+            collector_state,
+            collector_health_max_age_minutes,
+        )
 
     kickoff_dt = _parse_utc(kickoff_utc) if kickoff_utc not in {None, ""} else None
     if kickoff_utc not in {None, ""} and kickoff_dt is None:
-        return QuoteStateResult(QUOTE_STATE_INVALID, "unparseable kickoff timestamp", effective_timestamp=effective_text)
+        return QuoteStateResult(
+            QUOTE_STATE_INVALID,
+            "unparseable kickoff timestamp",
+            age_minutes,
+            effective_text,
+            actionable_max_age_minutes,
+            collector_state,
+            collector_health_max_age_minutes,
+        )
 
     if kickoff_dt is not None and (captured_dt >= kickoff_dt or effective_dt >= kickoff_dt):
-        age = (now_dt - effective_dt).total_seconds() / 60.0
-        return QuoteStateResult(QUOTE_STATE_IN_PLAY, "observed at/after kickoff", age, effective_text)
+        return QuoteStateResult(
+            QUOTE_STATE_IN_PLAY,
+            "observed at/after kickoff",
+            age_minutes,
+            effective_text,
+            actionable_max_age_minutes,
+            collector_state,
+            collector_health_max_age_minutes,
+        )
 
-    age_minutes = (now_dt - effective_dt).total_seconds() / 60.0
-    if age_minutes <= max_age_minutes:
-        return QuoteStateResult(QUOTE_STATE_FRESH_PREMATCH, "pre-match within threshold", age_minutes, effective_text)
-    return QuoteStateResult(QUOTE_STATE_STALE_PREMATCH, "pre-match beyond threshold", age_minutes, effective_text)
+    if actionable_max_age_minutes is None:
+        return QuoteStateResult(
+            QUOTE_STATE_INVALID,
+            "no actionable freshness threshold configured for provider",
+            age_minutes,
+            effective_text,
+            None,
+            collector_state,
+            collector_health_max_age_minutes,
+        )
+
+    if age_minutes <= actionable_max_age_minutes:
+        return QuoteStateResult(
+            QUOTE_STATE_FRESH_PREMATCH,
+            "pre-match within actionable threshold",
+            age_minutes,
+            effective_text,
+            actionable_max_age_minutes,
+            collector_state,
+            collector_health_max_age_minutes,
+        )
+    return QuoteStateResult(
+        QUOTE_STATE_STALE_PREMATCH,
+        "pre-match beyond actionable threshold",
+        age_minutes,
+        effective_text,
+        actionable_max_age_minutes,
+        collector_state,
+        collector_health_max_age_minutes,
+    )
 
 
 def pre_match_value_eligibility(
     quote: MarketEvidenceQuote,
     *,
     now_utc: Any,
-    max_age_minutes: int,
+    actionable_max_age_minutes: int | None = None,
+    collector_health_max_age_minutes: int | None = None,
 ) -> EligibilityResult:
-    """Prospective Value Bet eligibility: genuine pre-match FRESH evidence only.
+    """Prospective Value Bet eligibility: genuine pre-match actionable evidence.
 
-    Requires a FRESH_PREMATCH quote AND an explicit ``captured_at < kickoff`` AND
-    (when a provider source timestamp exists) ``source_timestamp < kickoff``. A
-    quote captured after kickoff can never justify a pre-match bet.
+    Uses the provider-specific actionable threshold (resolved from the quote's
+    provider when not supplied explicitly), so an unknown provider fails closed.
+    Requires FRESH_PREMATCH AND an explicit ``captured_at < kickoff`` AND (when a
+    provider source timestamp exists) ``source_timestamp < kickoff``. A quote
+    captured after kickoff can never justify a pre-match bet.
     """
+    resolved_actionable = (
+        actionable_max_age_minutes
+        if actionable_max_age_minutes is not None
+        else resolve_actionable_max_age_minutes(quote.provider)
+    )
     state = classify_quote_state(
         captured_at=quote.captured_at,
         source_timestamp=quote.source_timestamp,
         kickoff_utc=quote.kickoff_utc,
         now_utc=now_utc,
-        max_age_minutes=max_age_minutes,
+        actionable_max_age_minutes=resolved_actionable,
+        collector_health_max_age_minutes=collector_health_max_age_minutes,
     )
     if state.state != QUOTE_STATE_FRESH_PREMATCH:
-        return EligibilityResult(False, state.reason, state.state)
+        return EligibilityResult(
+            False,
+            state.reason,
+            state.state,
+            resolved_actionable,
+            state.collector_health_state,
+        )
 
     kickoff_dt = _parse_utc(quote.kickoff_utc)
     captured_dt = _parse_utc(quote.captured_at)
     if kickoff_dt is not None and captured_dt is not None and captured_dt >= kickoff_dt:
-        return EligibilityResult(False, "captured_at at/after kickoff", QUOTE_STATE_IN_PLAY)
+        return EligibilityResult(
+            False, "captured_at at/after kickoff", QUOTE_STATE_IN_PLAY, resolved_actionable, state.collector_health_state
+        )
     source_dt = _parse_utc(quote.source_timestamp) if quote.source_timestamp not in {None, ""} else None
     if kickoff_dt is not None and source_dt is not None and source_dt >= kickoff_dt:
-        return EligibilityResult(False, "source_timestamp at/after kickoff", QUOTE_STATE_IN_PLAY)
-    return EligibilityResult(True, "fresh pre-match evidence", QUOTE_STATE_FRESH_PREMATCH)
+        return EligibilityResult(
+            False, "source_timestamp at/after kickoff", QUOTE_STATE_IN_PLAY, resolved_actionable, state.collector_health_state
+        )
+    return EligibilityResult(
+        True, "fresh pre-match evidence", QUOTE_STATE_FRESH_PREMATCH, resolved_actionable, state.collector_health_state
+    )
 
 
 # --------------------------------------------------------------------------- pairing
@@ -650,6 +789,8 @@ class FixtureMarketEvidenceCoverage:
     asian_handicap_reason: str
     corner_total_state: str
     corner_total_reason: str
+    asian_handicap_collector_health: str | None = None
+    corner_total_collector_health: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -662,18 +803,32 @@ class FixtureMarketEvidenceCoverage:
             "asian_handicap_reason": self.asian_handicap_reason,
             "corner_total_state": self.corner_total_state,
             "corner_total_reason": self.corner_total_reason,
+            "asian_handicap_collector_health": self.asian_handicap_collector_health,
+            "corner_total_collector_health": self.corner_total_collector_health,
         }
 
 
 @dataclass
 class MarketEvidenceCoverageReport:
     generated_at: str
-    max_age_minutes: int
+    collector_health_max_age_minutes: int
     fixtures: list[FixtureMarketEvidenceCoverage] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
         def _count(state: str, market_attr: str) -> int:
             return sum(1 for row in self.fixtures if getattr(row, market_attr) == state)
+
+        def _collector_counts(health_attr: str) -> dict[str, int]:
+            counts = {
+                COLLECTOR_CURRENT_CYCLE: 0,
+                COLLECTOR_CYCLE_DUE: 0,
+                COLLECTOR_CYCLE_MISSED: 0,
+                "UNKNOWN": 0,
+            }
+            for row in self.fixtures:
+                value = getattr(row, health_attr)
+                counts[str(value) if value in counts else "UNKNOWN"] += 1
+            return counts
 
         fixtures = len(self.fixtures)
         ah = {
@@ -713,12 +868,15 @@ class MarketEvidenceCoverageReport:
             "both_markets_coverage_pct": _pct(both, fixtures),
             "identity_unresolved_count": identity_unresolved,
             "missing_by_competition": missing_by_competition,
+            "collector_health_max_age_minutes": self.collector_health_max_age_minutes,
+            "asian_handicap_collector_health": _collector_counts("asian_handicap_collector_health"),
+            "corner_total_collector_health": _collector_counts("corner_total_collector_health"),
         }
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "generated_at": self.generated_at,
-            "max_age_minutes": self.max_age_minutes,
+            "collector_health_max_age_minutes": self.collector_health_max_age_minutes,
             "fixtures": [row.to_dict() for row in self.fixtures],
             "summary": self.summary(),
         }
@@ -744,14 +902,15 @@ def _market_coverage_state(
     rows: Sequence[Mapping[str, Any]],
     kickoff_utc: str | None,
     now_utc: Any,
-    max_age_minutes: int,
+    actionable_max_age_minutes: int | None,
+    collector_health_max_age_minutes: int | None,
     identity_resolved: bool,
-) -> tuple[str, str]:
+) -> tuple[str, str, str | None]:
     if not identity_resolved:
-        return EVIDENCE_IDENTITY_UNRESOLVED, "fixture identity unresolved"
+        return EVIDENCE_IDENTITY_UNRESOLVED, "fixture identity unresolved", None
     market_rows = [row for row in rows if str(row.get("market") or "").lower() == market]
     if not market_rows:
-        return EVIDENCE_MISSING, "no persisted quotes for market"
+        return EVIDENCE_MISSING, "no persisted quotes for market", None
 
     quotes: list[MarketEvidenceQuote] = []
     malformed = 0
@@ -761,25 +920,41 @@ def _market_coverage_state(
         except MalformedMarketRowError:
             malformed += 1
     if not quotes:
-        return EVIDENCE_INVALID, f"all {malformed} rows malformed"
+        return EVIDENCE_INVALID, f"all {malformed} rows malformed", None
 
     fresh: list[MarketEvidenceQuote] = []
     stale = 0
     in_play = 0
+    invalid = 0
+    newest_age: float | None = None
+    newest_collector_state: str | None = None
     for quote in quotes:
+        # Provider-specific actionable threshold: an unknown provider yields
+        # ``None`` and fails closed (INVALID) rather than inheriting 360m.
+        actionable = (
+            actionable_max_age_minutes
+            if actionable_max_age_minutes is not None
+            else resolve_actionable_max_age_minutes(quote.provider)
+        )
         state = classify_quote_state(
             captured_at=quote.captured_at,
             source_timestamp=quote.source_timestamp,
             kickoff_utc=quote.kickoff_utc or kickoff_utc,
             now_utc=now_utc,
-            max_age_minutes=max_age_minutes,
+            actionable_max_age_minutes=actionable,
+            collector_health_max_age_minutes=collector_health_max_age_minutes,
         )
+        if state.age_minutes is not None and (newest_age is None or state.age_minutes < newest_age):
+            newest_age = state.age_minutes
+            newest_collector_state = state.collector_health_state
         if state.state == QUOTE_STATE_FRESH_PREMATCH:
             fresh.append(quote)
         elif state.state == QUOTE_STATE_STALE_PREMATCH:
             stale += 1
         elif state.state == QUOTE_STATE_IN_PLAY:
             in_play += 1
+        else:
+            invalid += 1
 
     if fresh:
         pair_fn = pair_asian_handicap_quotes if market == MARKET_ASIAN_HANDICAP else pair_corner_total_quotes
@@ -788,14 +963,16 @@ def _market_coverage_state(
         except UnpairedMarketEvidenceError:
             pairs = []
         if pairs:
-            return EVIDENCE_AVAILABLE, f"fresh pre-match pair at line {pairs[0].line}"
-        return EVIDENCE_STALE, "fresh quotes unpaired at an explicit line"
+            return EVIDENCE_AVAILABLE, f"fresh pre-match pair at line {pairs[0].line}", newest_collector_state
+        return EVIDENCE_STALE, "fresh quotes unpaired at an explicit line", newest_collector_state
 
     if stale:
-        return EVIDENCE_STALE, f"{stale} pre-match quote(s) beyond threshold"
+        return EVIDENCE_STALE, f"{stale} pre-match quote(s) beyond actionable threshold", newest_collector_state
     if in_play:
-        return EVIDENCE_STALE, "only in-play observations (not usable pre-match)"
-    return EVIDENCE_INVALID, "no usable quotes"
+        return EVIDENCE_STALE, "only in-play observations (not usable pre-match)", newest_collector_state
+    if invalid:
+        return EVIDENCE_INVALID, f"{invalid} quote(s) lack a usable actionable threshold", newest_collector_state
+    return EVIDENCE_INVALID, "no usable quotes", newest_collector_state
 
 
 def build_market_evidence_coverage(
@@ -803,11 +980,22 @@ def build_market_evidence_coverage(
     conn: sqlite3.Connection,
     fixtures: Iterable[Mapping[str, Any]],
     now_utc: Any,
-    max_age_minutes: int | None = None,
+    actionable_max_age_minutes: int | None = None,
+    collector_health_max_age_minutes: int | None = None,
     initialize_schema: bool = False,
 ) -> MarketEvidenceCoverageReport:
-    """Read-only per-fixture AH / corner evidence coverage for the current slate."""
-    resolved_max_age = resolve_evidence_max_age_minutes() if max_age_minutes is None else int(max_age_minutes)
+    """Read-only per-fixture AH / corner evidence coverage for the current slate.
+
+    Actionable freshness uses each quote's provider-specific threshold when
+    ``actionable_max_age_minutes`` is not supplied, so unknown providers fail
+    closed. Collector health uses the ~6h diagnostic threshold and never affects
+    coverage availability.
+    """
+    resolved_collector = (
+        resolve_collector_health_max_age_minutes()
+        if collector_health_max_age_minutes is None
+        else int(collector_health_max_age_minutes)
+    )
     fixture_list = list(fixtures)
     all_lookup_ids: set[str] = set()
     for fixture in fixture_list:
@@ -846,22 +1034,24 @@ def build_market_evidence_coverage(
         else:
             identity_resolved = False
 
-        ah_state, ah_reason = _market_coverage_state(
+        ah_state, ah_reason, ah_collector = _market_coverage_state(
             fixture_id=fixture_id,
             market=MARKET_ASIAN_HANDICAP,
             rows=rows,
             kickoff_utc=None if fixture.get("kickoff_utc") is None else str(fixture.get("kickoff_utc")),
             now_utc=now_utc,
-            max_age_minutes=resolved_max_age,
+            actionable_max_age_minutes=actionable_max_age_minutes,
+            collector_health_max_age_minutes=resolved_collector,
             identity_resolved=identity_resolved,
         )
-        corner_state, corner_reason = _market_coverage_state(
+        corner_state, corner_reason, corner_collector = _market_coverage_state(
             fixture_id=fixture_id,
             market=MARKET_CORNER_TOTAL,
             rows=rows,
             kickoff_utc=None if fixture.get("kickoff_utc") is None else str(fixture.get("kickoff_utc")),
             now_utc=now_utc,
-            max_age_minutes=resolved_max_age,
+            actionable_max_age_minutes=actionable_max_age_minutes,
+            collector_health_max_age_minutes=resolved_collector,
             identity_resolved=identity_resolved,
         )
         report_fixtures.append(
@@ -875,12 +1065,14 @@ def build_market_evidence_coverage(
                 asian_handicap_reason=ah_reason,
                 corner_total_state=corner_state,
                 corner_total_reason=corner_reason,
+                asian_handicap_collector_health=ah_collector,
+                corner_total_collector_health=corner_collector,
             )
         )
 
     return MarketEvidenceCoverageReport(
         generated_at=_iso(now_utc),
-        max_age_minutes=resolved_max_age,
+        collector_health_max_age_minutes=resolved_collector,
         fixtures=report_fixtures,
     )
 

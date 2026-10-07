@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,11 @@ FRESH_SOURCE = "2026-10-07T11:30:00+00:00"
 STALE_SOURCE = "2026-10-06T00:00:00+00:00"
 
 
+def _ago(minutes: int) -> str:
+    base = datetime.fromisoformat(NOW).astimezone(timezone.utc)
+    return (base - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+
 def _quote(
     *,
     market: str,
@@ -37,10 +43,11 @@ def _quote(
     kickoff_utc: str = KICKOFF,
     fixture_id: str = "canon_fixture_1",
     bookmaker: str = "Bet 365",
+    provider: str = "api-football",
 ) -> me.MarketEvidenceQuote:
     return me.MarketEvidenceQuote(
         canonical_fixture_id=fixture_id,
-        provider="api-football",
+        provider=provider,
         provider_fixture_id="12345",
         bookmaker=bookmaker,
         market=market,
@@ -154,10 +161,12 @@ def test_fresh_quote_is_fresh_prematch():
         source_timestamp=FRESH_SOURCE,
         kickoff_utc=KICKOFF,
         now_utc=NOW,
-        max_age_minutes=360,
+        actionable_max_age_minutes=240,
+        collector_health_max_age_minutes=360,
     )
     assert result.state == me.QUOTE_STATE_FRESH_PREMATCH
     assert result.age_minutes == pytest.approx(30.0)
+    assert result.actionable_max_age_minutes == 240
 
 
 def test_stale_quote_is_stale_prematch():
@@ -166,9 +175,66 @@ def test_stale_quote_is_stale_prematch():
         source_timestamp=STALE_SOURCE,
         kickoff_utc=KICKOFF,
         now_utc=NOW,
-        max_age_minutes=360,
+        actionable_max_age_minutes=240,
     )
     assert result.state == me.QUOTE_STATE_STALE_PREMATCH
+
+
+@pytest.mark.parametrize(
+    ("age_minutes", "expected"),
+    [
+        (239, me.QUOTE_STATE_FRESH_PREMATCH),
+        (240, me.QUOTE_STATE_FRESH_PREMATCH),
+        (241, me.QUOTE_STATE_STALE_PREMATCH),
+    ],
+)
+def test_api_football_actionable_threshold_boundary(monkeypatch, age_minutes, expected):
+    monkeypatch.delenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", raising=False)
+    monkeypatch.delenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", raising=False)
+    threshold = me.resolve_actionable_max_age_minutes("api-football")
+    assert threshold == 240
+    result = me.classify_quote_state(
+        captured_at=_ago(age_minutes),
+        source_timestamp=_ago(age_minutes),
+        kickoff_utc=KICKOFF,
+        now_utc=NOW,
+        actionable_max_age_minutes=threshold,
+    )
+    assert result.state == expected
+
+
+def test_300m_quote_stale_for_value_but_not_collector_cycle_missed():
+    quote = _quote(
+        market="asian_handicap",
+        selection="HOME",
+        line=-0.5,
+        captured_at=_ago(300),
+        source_timestamp=_ago(300),
+    )
+    state = me.classify_quote_state(
+        captured_at=quote.captured_at,
+        source_timestamp=quote.source_timestamp,
+        kickoff_utc=KICKOFF,
+        now_utc=NOW,
+        actionable_max_age_minutes=240,
+        collector_health_max_age_minutes=360,
+    )
+    assert state.state == me.QUOTE_STATE_STALE_PREMATCH
+    assert state.collector_health_state in {me.COLLECTOR_CURRENT_CYCLE, me.COLLECTOR_CYCLE_DUE}
+    assert not me.pre_match_value_eligibility(quote, now_utc=NOW).eligible
+
+
+def test_over_360m_quote_stale_and_collector_cycle_missed():
+    result = me.classify_quote_state(
+        captured_at=_ago(361),
+        source_timestamp=_ago(361),
+        kickoff_utc=KICKOFF,
+        now_utc=NOW,
+        actionable_max_age_minutes=240,
+        collector_health_max_age_minutes=360,
+    )
+    assert result.state == me.QUOTE_STATE_STALE_PREMATCH
+    assert result.collector_health_state == me.COLLECTOR_CYCLE_MISSED
 
 
 def test_in_play_quote_rejected_for_pre_match_value():
@@ -179,7 +245,7 @@ def test_in_play_quote_rejected_for_pre_match_value():
         captured_at="2026-10-07T15:30:00+00:00",
         source_timestamp="2026-10-07T15:30:00+00:00",
     )
-    eligibility = me.pre_match_value_eligibility(quote, now_utc="2026-10-07T15:31:00+00:00", max_age_minutes=360)
+    eligibility = me.pre_match_value_eligibility(quote, now_utc="2026-10-07T15:31:00+00:00")
     assert not eligibility.eligible
     assert eligibility.quote_state == me.QUOTE_STATE_IN_PLAY
 
@@ -192,14 +258,33 @@ def test_captured_after_kickoff_rejected_even_with_fresh_source():
         captured_at="2026-10-07T15:10:00+00:00",
         source_timestamp="2026-10-07T14:55:00+00:00",
     )
-    eligibility = me.pre_match_value_eligibility(quote, now_utc="2026-10-07T15:11:00+00:00", max_age_minutes=360)
+    eligibility = me.pre_match_value_eligibility(quote, now_utc="2026-10-07T15:11:00+00:00")
     assert not eligibility.eligible
 
 
 def test_fresh_prematch_quote_is_eligible():
     quote = _quote(market="asian_handicap", selection="HOME", line=-0.5)
-    eligibility = me.pre_match_value_eligibility(quote, now_utc=NOW, max_age_minutes=360)
+    eligibility = me.pre_match_value_eligibility(quote, now_utc=NOW)
     assert eligibility.eligible
+
+
+def test_source_timestamp_authoritative_over_capture():
+    quote = _quote(
+        market="asian_handicap",
+        selection="HOME",
+        line=-0.5,
+        captured_at=NOW,  # capture looks fresh
+        source_timestamp=_ago(300),  # authoritative source is stale
+    )
+    state = me.classify_quote_state(
+        captured_at=quote.captured_at,
+        source_timestamp=quote.source_timestamp,
+        kickoff_utc=KICKOFF,
+        now_utc=NOW,
+        actionable_max_age_minutes=240,
+    )
+    assert state.state == me.QUOTE_STATE_STALE_PREMATCH
+    assert state.age_minutes == pytest.approx(300.0)
 
 
 def test_restart_replay_of_old_source_is_not_fresh():
@@ -217,10 +302,10 @@ def test_restart_replay_of_old_source_is_not_fresh():
         source_timestamp=replay.source_timestamp,
         kickoff_utc=replay.kickoff_utc,
         now_utc=NOW,
-        max_age_minutes=360,
+        actionable_max_age_minutes=240,
     )
     assert state.state == me.QUOTE_STATE_STALE_PREMATCH
-    assert not me.pre_match_value_eligibility(replay, now_utc=NOW, max_age_minutes=360).eligible
+    assert not me.pre_match_value_eligibility(replay, now_utc=NOW).eligible
 
 
 def test_future_source_timestamp_is_invalid():
@@ -229,9 +314,60 @@ def test_future_source_timestamp_is_invalid():
         source_timestamp="2026-10-08T00:00:00+00:00",
         kickoff_utc=KICKOFF,
         now_utc=NOW,
-        max_age_minutes=360,
+        actionable_max_age_minutes=240,
     )
     assert result.state == me.QUOTE_STATE_INVALID
+
+
+# ------------------------------------------- provider-specific actionable freshness
+def test_provider_specific_configured_threshold_respected(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", "120")
+    assert me.resolve_actionable_max_age_minutes("api-football") == 120
+    quote = _quote(market="asian_handicap", selection="HOME", line=-0.5, source_timestamp=_ago(180), captured_at=_ago(180))
+    eligibility = me.pre_match_value_eligibility(quote, now_utc=NOW)
+    assert not eligibility.eligible
+    assert eligibility.actionable_max_age_minutes == 120
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "abc"])
+def test_invalid_actionable_threshold_fails_closed(monkeypatch, bad):
+    monkeypatch.setenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", bad)
+    assert me.resolve_actionable_max_age_minutes("api-football") is None
+    quote = _quote(market="asian_handicap", selection="HOME", line=-0.5, source_timestamp=_ago(5), captured_at=_ago(5))
+    eligibility = me.pre_match_value_eligibility(quote, now_utc=NOW)
+    assert not eligibility.eligible
+    assert eligibility.quote_state == me.QUOTE_STATE_INVALID
+
+
+def test_unknown_provider_does_not_receive_permissive_threshold(monkeypatch):
+    monkeypatch.delenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", raising=False)
+    assert me.resolve_actionable_max_age_minutes("the-odds-api") is None
+    assert me.resolve_actionable_max_age_minutes("the-odds-api") != 360
+    quote = _quote(market="asian_handicap", selection="HOME", line=-0.5, provider="the-odds-api")
+    eligibility = me.pre_match_value_eligibility(quote, now_utc=NOW)
+    assert not eligibility.eligible
+    assert eligibility.quote_state == me.QUOTE_STATE_INVALID
+
+
+def test_collector_health_threshold_is_separate_from_decision(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_FOOTBALL_COLLECTOR_HEALTH_MAX_AGE_MINUTES", "120")
+    assert me.resolve_collector_health_max_age_minutes() == 120
+    monkeypatch.delenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", raising=False)
+    assert me.resolve_actionable_max_age_minutes("api-football") == 240
+
+
+def test_legacy_evidence_env_var_only_controls_collector_health(monkeypatch):
+    monkeypatch.delenv("SPORTS_AI_FOOTBALL_COLLECTOR_HEALTH_MAX_AGE_MINUTES", raising=False)
+    monkeypatch.setenv("SPORTS_AI_FOOTBALL_EVIDENCE_MAX_AGE_MINUTES", "999")
+    monkeypatch.delenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", raising=False)
+    assert me.resolve_collector_health_max_age_minutes() == 999
+    # Even a huge legacy "evidence" value cannot loosen the 240m decision gate.
+    assert me.resolve_actionable_max_age_minutes("api-football") == 240
+
+
+def test_invalid_collector_health_env_falls_back_to_cadence_default(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_FOOTBALL_COLLECTOR_HEALTH_MAX_AGE_MINUTES", "0")
+    assert me.resolve_collector_health_max_age_minutes() == 360
 
 
 # --------------------------------------------------------------------------- identity
@@ -387,7 +523,7 @@ def test_coverage_report_accuracy():
         {"fixture_id": "fB", "competition_id": "ESP1", "kickoff_utc": KICKOFF},
     ]
     report = me.build_market_evidence_coverage(
-        conn=conn, fixtures=fixtures, now_utc=NOW, max_age_minutes=360
+        conn=conn, fixtures=fixtures, now_utc=NOW, actionable_max_age_minutes=240
     )
     summary = report.summary()
     assert summary["fixtures"] == 2
@@ -405,7 +541,7 @@ def test_coverage_flags_identity_unresolved():
         conn=conn,
         fixtures=[{"fixture_id": "", "competition_id": "ENG1", "kickoff_utc": KICKOFF}],
         now_utc=NOW,
-        max_age_minutes=360,
+        actionable_max_age_minutes=240,
     )
     row = report.fixtures[0]
     assert row.asian_handicap_state == me.EVIDENCE_IDENTITY_UNRESOLVED
@@ -429,7 +565,7 @@ def test_coverage_reports_in_play_only_as_stale_not_available():
         conn=conn,
         fixtures=[{"fixture_id": "fLive", "competition_id": "ENG1", "kickoff_utc": KICKOFF}],
         now_utc="2026-10-07T16:05:00+00:00",
-        max_age_minutes=360,
+        actionable_max_age_minutes=240,
     )
     assert report.fixtures[0].asian_handicap_state == me.EVIDENCE_STALE
 
@@ -475,7 +611,7 @@ def test_evidence_layer_does_not_mutate_paper_or_model_state():
         conn=conn,
         fixtures=[{"fixture_id": "fA", "competition_id": "ENG1", "kickoff_utc": KICKOFF}],
         now_utc=NOW,
-        max_age_minutes=360,
+        actionable_max_age_minutes=240,
     )
     audit = me.audit_provider_request_accounting(conn)
     assert audit["historical_endpoint_used"] is False
@@ -483,8 +619,8 @@ def test_evidence_layer_does_not_mutate_paper_or_model_state():
     assert conn.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0] == before_snapshots
 
 
-def test_evidence_max_age_default_is_one_collection_cadence():
-    assert me.resolve_evidence_max_age_minutes() == 360
+def test_collector_health_default_is_one_collection_cadence():
+    assert me.resolve_collector_health_max_age_minutes() == 360
 
 
 def test_documented_provider_limits_are_unchanged():
@@ -540,9 +676,28 @@ def test_run_diagnostics_is_read_only_and_consumes_zero_provider_requests(tmp_pa
     assert report["read_only"] is True
     assert report["provider_requests_consumed"] == 0
     assert report["coverage"]["summary"]["asian_handicap"]["available"] == 1
+    assert report["actionable_freshness_minutes_by_provider"]["api-football"] == 240
+    assert report["collector_health_max_age_minutes"] == 360
 
     paper_check = pt.connect(paper_path)
     after = paper_check.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0]
     paper_check.close()
     assert after == before
+
+
+def test_evidence_modules_make_no_provider_or_ledger_calls():
+    from sports_ai.diagnostics import football_live_market_evidence as diagnostics
+
+    for module in (me, diagnostics):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        for forbidden in (
+            "import httpx",
+            "import requests",
+            "import urllib",
+            "from urllib",
+            "football_model_pick_ledger",
+            "record_paper_trade_entry",
+            "record_candidate_observation",
+        ):
+            assert forbidden not in source
 

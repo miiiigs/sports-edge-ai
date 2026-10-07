@@ -33,6 +33,8 @@ from ..market_data.market_evidence import (
     audit_provider_request_accounting,
     build_market_evidence_coverage,
     documented_provider_limits,
+    resolve_actionable_max_age_minutes,
+    resolve_collector_health_max_age_minutes,
 )
 
 
@@ -98,7 +100,7 @@ def run_diagnostics(
         else:
             coverage = {
                 "generated_at": resolved_now,
-                "max_age_minutes": None,
+                "collector_health_max_age_minutes": None,
                 "fixtures": [],
                 "summary": {
                     "fixtures": len(fixtures),
@@ -130,6 +132,12 @@ def run_diagnostics(
         "coverage": coverage,
         "provider_request_accounting": budget_audit,
         "provider_safety_limits": documented_provider_limits(),
+        # Decision freshness is provider-specific; collector health is separate.
+        "actionable_freshness_minutes_by_provider": {
+            "api-football": resolve_actionable_max_age_minutes("api-football"),
+            "5dollar-football-api": resolve_actionable_max_age_minutes("5dollar-football-api"),
+        },
+        "collector_health_max_age_minutes": resolve_collector_health_max_age_minutes(),
     }
 
 
