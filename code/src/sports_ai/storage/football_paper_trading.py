@@ -54,7 +54,9 @@ SCHEMA_STATEMENTS = (
         competition_id TEXT,
         competition_name TEXT,
         kickoff_utc TEXT,
-        freshness_state TEXT
+        freshness_state TEXT,
+        first_observed_at TEXT,
+        last_observed_at TEXT
     )
     """,
     """
@@ -194,6 +196,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "competition_name": "TEXT",
             "kickoff_utc": "TEXT",
             "freshness_state": "TEXT",
+            "first_observed_at": "TEXT",
+            "last_observed_at": "TEXT",
         },
     )
     _ensure_columns(
@@ -308,6 +312,8 @@ class StoredMarketSnapshot:
     competition_name: str | None = None
     kickoff_utc: str | None = None
     freshness_state: str | None = None
+    first_observed_at: str | None = None
+    last_observed_at: str | None = None
 
     def __post_init__(self) -> None:
         if self.odds <= 1.0:
@@ -474,6 +480,19 @@ def find_identical_market_snapshot(
     return None if row is None else int(row["snapshot_id"])
 
 
+def _resolve_observation_window(snapshot: StoredMarketSnapshot) -> tuple[str, str]:
+    """Resolve the append-only observation window for a snapshot.
+
+    ``captured_at`` is the time this process observed the quote. ``first_observed_at``
+    is immutable once written. ``last_observed_at`` advances when the identical
+    price state is observed again, so re-observation is recorded WITHOUT rewriting
+    the authoritative source timestamp or capture time.
+    """
+    first = snapshot.first_observed_at or snapshot.captured_at
+    last = snapshot.last_observed_at or snapshot.captured_at
+    return first, last
+
+
 def record_market_snapshot(
     conn: sqlite3.Connection,
     snapshot: StoredMarketSnapshot,
@@ -483,7 +502,9 @@ def record_market_snapshot(
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
     existing = find_identical_market_snapshot(conn, snapshot, initialize_schema=False)
     if existing is not None:
+        _advance_last_observed_at(conn, existing, snapshot)
         return existing
+    first_observed_at, last_observed_at = _resolve_observation_window(snapshot)
     with conn:
         result = conn.execute(
             """
@@ -491,8 +512,8 @@ def record_market_snapshot(
                 fixture_id, provider, bookmaker, market, selection, line, odds,
                 provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
                 provider_fixture_id, home_team_name, away_team_name, competition_id, competition_name,
-                kickoff_utc, freshness_state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                kickoff_utc, freshness_state, first_observed_at, last_observed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot.fixture_id,
@@ -514,9 +535,62 @@ def record_market_snapshot(
                 snapshot.competition_name,
                 snapshot.kickoff_utc,
                 snapshot.freshness_state,
+                first_observed_at,
+                last_observed_at,
             ),
         )
     return int(result.lastrowid)
+
+
+def _advance_last_observed_at(conn: sqlite3.Connection, snapshot_id: int, snapshot: StoredMarketSnapshot) -> None:
+    """Advance ``last_observed_at`` for a re-observed identical price state.
+
+    Restart/cache-replay safety: an identical price state is only ever deduplicated
+    against the SAME provider update timestamp, so re-observation cannot backdate
+    or forward-date the authoritative source. The stored ``captured_at`` and
+    ``first_observed_at`` are never rewritten; freshness is always computed from
+    the preserved ``provider_timestamp``/``captured_at``, never from
+    ``last_observed_at``.
+    """
+    observed_at = snapshot.last_observed_at or snapshot.captured_at
+    if not observed_at:
+        return
+    row = conn.execute(
+        "SELECT last_observed_at FROM market_snapshots WHERE snapshot_id = ?",
+        (int(snapshot_id),),
+    ).fetchone()
+    current = None if row is None else row["last_observed_at"]
+    if current is not None and _is_same_or_later(current, observed_at):
+        return
+    with conn:
+        conn.execute(
+            "UPDATE market_snapshots SET last_observed_at = ? WHERE snapshot_id = ?",
+            (observed_at, int(snapshot_id)),
+        )
+
+
+def _is_same_or_later(current: Any, candidate: Any) -> bool:
+    """True when ``current`` is at/after ``candidate`` (format-tolerant)."""
+
+    def _parse(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    current_dt = _parse(current)
+    candidate_dt = _parse(candidate)
+    if current_dt is not None and candidate_dt is not None:
+        return current_dt >= candidate_dt
+    return str(current) >= str(candidate)
 
 
 def fetch_market_snapshots(
@@ -530,7 +604,7 @@ def fetch_market_snapshots(
         SELECT snapshot_id, fixture_id, provider, bookmaker, market, selection, line, odds,
                provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
                provider_fixture_id, home_team_name, away_team_name, competition_id, competition_name,
-               kickoff_utc, freshness_state
+               kickoff_utc, freshness_state, first_observed_at, last_observed_at
         FROM market_snapshots
     """
     params: list[Any] = []
