@@ -18,12 +18,18 @@ from zoneinfo import ZoneInfo
 
 from ..football_market_focus import configured_live_market_focus
 from ..market_data.api_football import ApiFootballOddsProvider
+from ..market_data.market_evidence import (
+    classify_quote_state,
+    resolve_actionable_max_age_minutes,
+    resolve_collector_health_max_age_minutes,
+)
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from ..market_data.providers import NotConfiguredMarketProvider
 from ..market_data.the_odds_api import TheOddsApiProvider
 from ..storage import (
     football_canonical_fixture,
     football_edge_desk,
+    football_model_pick_ledger,
     football_paper_trading,
     football_portfolio_selection,
     football_prospective_cohort,
@@ -55,6 +61,15 @@ from .models import (
 )
 from .prediction_service import PredictionContext, attach_edge_desk_shadow_bundle, build_prediction_for_fixture
 from .provider_budget import QUOTA_EXHAUSTED, ProviderRequestBudget
+from .market_collection_policy import (
+    COLLECTION_MARKETS,
+    MARKET_COLLECTION_ONLY_ENV_VAR,
+    MARKET_COLLECTOR_MAX_FIXTURES_ENV_VAR,
+    CollectionCandidate,
+    latest_evidence_by_fixture,
+    resolve_collection_only_max_fixtures,
+    select_collection_fixtures,
+)
 from .portfolio_selection import (
     PORTFOLIO_LEGACY_PRE_POLICY,
     PORTFOLIO_POLICY_ID_V1,
@@ -88,6 +103,21 @@ DEFAULT_API_FOOTBALL_QUOTA_RESET_HOUR_UTC_ENV_VAR = "SPORTS_AI_API_FOOTBALL_QUOT
 DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR = "SPORTS_AI_API_FOOTBALL_OPERATIONAL_DAILY_CAP"
 DEFAULT_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM_ENV_VAR = "SPORTS_AI_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM"
 DEFAULT_RUNTIME_ROLE_ENV_VAR = "SPORTS_AI_RUNTIME_ROLE"
+
+# Explicit current-odds market-provider selection. When unset the historical
+# default (The Odds API if configured) is preserved. When set, selection is
+# strict: an explicitly selected provider that is not configured never falls
+# through to another paid provider.
+DEFAULT_CURRENT_MARKET_PROVIDER_ENV_VAR = "SPORTS_AI_CURRENT_MARKET_PROVIDER"
+CURRENT_MARKET_PROVIDER_API_FOOTBALL = "api-football"
+CURRENT_MARKET_PROVIDER_THE_ODDS_API = "the-odds-api"
+CURRENT_MARKET_PROVIDER_OFF = "off"
+CURRENT_MARKET_PROVIDER_CHOICES = (
+    CURRENT_MARKET_PROVIDER_API_FOOTBALL,
+    CURRENT_MARKET_PROVIDER_THE_ODDS_API,
+    CURRENT_MARKET_PROVIDER_OFF,
+)
+CURRENT_MARKET_PROVIDER_INVALID = "invalid-current-market-provider"
 
 PAID_PROVIDER_DISABLED_STATE = "PAID_PROVIDER_CALLS_DISABLED"
 RUNTIME_ROLE_COMBINED = "combined"
@@ -204,17 +234,58 @@ def _default_fixture_provider() -> FixtureProvider:
     return primary
 
 
+def resolve_current_market_provider_name() -> str:
+    """Resolve the explicitly configured current-odds market provider.
+
+    Returns one of :data:`CURRENT_MARKET_PROVIDER_CHOICES`, ``""`` when the
+    selector is unset (preserving the historical default), or
+    :data:`CURRENT_MARKET_PROVIDER_INVALID` for an unrecognized value. Invalid
+    values fail closed (no paid provider is selected); they never fall through
+    to another provider.
+    """
+    raw = os.environ.get(DEFAULT_CURRENT_MARKET_PROVIDER_ENV_VAR, "").strip().lower()
+    if not raw:
+        return ""
+    if raw in CURRENT_MARKET_PROVIDER_CHOICES:
+        return raw
+    return CURRENT_MARKET_PROVIDER_INVALID
+
+
+def _not_configured_label(config: DashboardConfig) -> str:
+    return "no-odds-provider-key" if config.current_odds_connected else "waiting-for-approved-odds-provider"
+
+
 def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
-    provider = TheOddsApiProvider(
+    selection = resolve_current_market_provider_name()
+
+    if selection == CURRENT_MARKET_PROVIDER_OFF:
+        return NotConfiguredMarketProvider(provider_label="off")
+    if selection == CURRENT_MARKET_PROVIDER_INVALID:
+        # Fail closed: an invalid selector must never activate a paid provider.
+        return NotConfiguredMarketProvider(provider_label=CURRENT_MARKET_PROVIDER_INVALID)
+
+    if selection == CURRENT_MARKET_PROVIDER_API_FOOTBALL:
+        provider = ApiFootballOddsProvider()
+        if provider.configured():
+            return provider
+        # Strict selection: never fall through to The Odds API.
+        return NotConfiguredMarketProvider(provider_label="api-football-not-configured")
+
+    odds_api = TheOddsApiProvider(
         persisted_snapshot_reader=football_paper_trading.persisted_snapshot_reader(
             config.paper_trading_db_path
         )
     )
-    if provider.configured():
-        return provider
-    return NotConfiguredMarketProvider(
-        provider_label="no-odds-provider-key" if config.current_odds_connected else "waiting-for-approved-odds-provider"
-    )
+    if selection == CURRENT_MARKET_PROVIDER_THE_ODDS_API:
+        if odds_api.configured():
+            return odds_api
+        return NotConfiguredMarketProvider(provider_label=_not_configured_label(config))
+
+    # Unset selector: historical default (The Odds API if configured).
+    if odds_api.configured():
+        return odds_api
+    return NotConfiguredMarketProvider(provider_label=_not_configured_label(config))
+
 
 
 def _default_statistics_provider() -> ApiFootballFixtureProvider:
@@ -495,6 +566,12 @@ class DashboardConfig:
     enable_scheduler: bool = True
     current_odds_connected: bool = False
     enable_odds_sync: bool = False
+    # Collection-only mode: when enabled (requires enable_odds_sync) the market
+    # sync persists current snapshots but NEVER runs value evaluation, paper
+    # entry creation, portfolio sync, corner-result sync or settlement updates.
+    market_collection_only: bool = False
+    # 0 = unbounded (legacy). Collection-only mode clamps to a small safe bound.
+    market_collector_max_fixtures_per_cycle: int = 0
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
     startup_sync_timeout_seconds: int = 15
@@ -531,6 +608,8 @@ class DashboardConfig:
             enable_scheduler=_env_bool(DEFAULT_ENABLE_AUTOMATED_SYNC_ENV_VAR, True),
             current_odds_connected=_env_bool(DEFAULT_CURRENT_ODDS_CONNECTED_ENV_VAR, False),
             enable_odds_sync=_env_bool(DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR, False),
+            market_collection_only=_env_bool(MARKET_COLLECTION_ONLY_ENV_VAR, False),
+            market_collector_max_fixtures_per_cycle=_env_int(MARKET_COLLECTOR_MAX_FIXTURES_ENV_VAR, 0),
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
             startup_sync_timeout_seconds=_env_int(DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR, 15),
@@ -626,6 +705,9 @@ class DashboardServices:
         self._market_runtime_state: dict[str, Any] = {
             "state": "NOT_CONFIGURED" if not self.market_provider.configured() else "CONNECTED",
             "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
+            "market_collection_mode": "COLLECTION_ONLY" if self.config.market_collection_only else "FULL",
+            "value_evaluation": "DISABLED" if self.config.market_collection_only else "ENABLED",
+            "collection_observations": [],
             "last_sync_at": None,
             "last_successful_snapshot_at": None,
             "last_error": None,
@@ -1143,11 +1225,13 @@ class DashboardServices:
     def _odds_feed_runtime_requirements(self) -> dict[str, Any]:
         reference_bookmakers = os.environ.get("SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS", "").strip() or "pinnacle"
         current_provider = self.market_provider.provider_name()
+        selector = resolve_current_market_provider_name() or "default(the-odds-api)"
         if current_provider == "api-football":
             provider_probe = ApiFootballOddsProvider()
             freshness = os.environ.get("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", "").strip() or "240"
             return {
                 "implementation_ready": "YES",
+                "configured_provider_selector": selector,
                 "provider_key_configured": "YES" if provider_probe.configured() else "NO",
                 "approval_enabled": "YES" if self.config.current_odds_connected else "NO",
                 "automatic_sync_enabled": "YES" if self.config.enable_odds_sync else "NO",
@@ -1181,6 +1265,7 @@ class DashboardServices:
         freshness = os.environ.get("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "").strip() or "unset"
         return {
             "implementation_ready": "YES",
+            "configured_provider_selector": selector,
             "provider_key_configured": "YES" if provider_probe.configured() else "NO",
             "approval_enabled": "YES" if self.config.current_odds_connected else "NO",
             "automatic_sync_enabled": "YES" if self.config.enable_odds_sync else "NO",
@@ -4127,13 +4212,20 @@ class DashboardServices:
         last_sync_at: str,
         dashboard_conn: Any | None = None,
     ) -> None:
+        collection_only = bool(self.config.market_collection_only)
         payload = {
             "state": (
-                "READY"
-                if evaluations and any((value.get("decision_rows") or []) for value in evaluations.values())
-                else market_state["state"]
+                "COLLECTION_ONLY"
+                if collection_only
+                else (
+                    "READY"
+                    if evaluations and any((value.get("decision_rows") or []) for value in evaluations.values())
+                    else market_state["state"]
+                )
             ),
             "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
+            "market_collection_mode": "COLLECTION_ONLY" if collection_only else "FULL",
+            "value_evaluation": "DISABLED" if collection_only else "ENABLED",
             "last_sync_at": last_sync_at,
             "last_successful_snapshot_at": last_successful_snapshot_at,
             "last_error": market_state.get("last_error") or market_state.get("reason"),
@@ -4303,6 +4395,9 @@ class DashboardServices:
             for row in self._future_fixture_rows(rows_with_predictions)
             if self._prediction_eligibility_status(row.get("prediction")) == "PREDICTION_READY"
         ]
+        if self.config.market_collection_only:
+            self._run_collection_only_market_cycle(future_rows, dashboard_conn=dashboard_conn)
+            return
         begin_market_sync_window = getattr(self.market_provider, "begin_sync_window", None)
         if callable(begin_market_sync_window):
             begin_market_sync_window()
@@ -4558,6 +4653,266 @@ class DashboardServices:
             last_sync_at=utc_now_iso(),
             dashboard_conn=dashboard_conn,
         )
+
+    # ------------------------------------------------- collection-only market mode
+    def _run_collection_only_market_cycle(
+        self,
+        future_rows: list[dict[str, Any]],
+        *,
+        dashboard_conn: Any | None,
+    ) -> None:
+        """Fetch + persist current market snapshots ONLY.
+
+        This path never calls value evaluation, paper-entry creation, portfolio
+        sync, corner-result sync or settlement/update processing. It exists so
+        recurring API-Football collection can run without enabling betting.
+        """
+        now_utc = datetime.now(timezone.utc)
+        last_sync_at = utc_now_iso()
+        market_state = self._market_provider_state()
+        snapshot_count = 0
+        matched_count = 0
+        unresolved_fixture_count = 0
+        markets_covered: set[str] = set()
+        freshness_values: set[str] = set()
+        last_successful_snapshot_at: str | None = None
+        observations: list[dict[str, Any]] = []
+        selected_count = 0
+
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+            if self._read_requires_schema_init():
+                football_paper_trading.ensure_schema(conn)
+            selected = self._select_collection_only_fixtures(future_rows, conn)
+            selected_count = len(selected)
+            for row in selected:
+                fixture_id = str(row.get("fixture_id") or "")
+                try:
+                    snapshots = list(
+                        self.market_provider.get_market_snapshot(fixture_id, fixture_context=row)
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    reason = str(exc)
+                    if "MARKET_FIXTURE_UNRESOLVED" in reason:
+                        unresolved_fixture_count += 1
+                    observations.append(
+                        {
+                            "fixture_id": fixture_id,
+                            "provider_fixture_id": None
+                            if row.get("provider_fixture_id") is None
+                            else str(row["provider_fixture_id"]),
+                            "request_state": self._collection_request_state(),
+                            "state": "IDENTITY_UNRESOLVED"
+                            if "MARKET_FIXTURE_UNRESOLVED" in reason
+                            else "PROVIDER_ERROR",
+                            "reason": reason[:200],
+                        }
+                    )
+                    continue
+                if not snapshots:
+                    observations.append(
+                        {
+                            "fixture_id": fixture_id,
+                            "provider_fixture_id": None
+                            if row.get("provider_fixture_id") is None
+                            else str(row["provider_fixture_id"]),
+                            "request_state": self._collection_request_state(),
+                            "state": "MARKET_NOT_AVAILABLE",
+                        }
+                    )
+                    continue
+
+                matched_count += 1
+                last_successful_snapshot_at = max(snapshot.captured_at for snapshot in snapshots)
+                ah_rows = 0
+                corner_rows = 0
+                for snapshot in snapshots:
+                    football_paper_trading.record_market_snapshot(
+                        conn,
+                        football_paper_trading.StoredMarketSnapshot(
+                            fixture_id=str(snapshot.fixture_id),
+                            provider=str(snapshot.provider),
+                            bookmaker=str(snapshot.bookmaker),
+                            market=str(snapshot.market),
+                            selection=str(snapshot.selection),
+                            odds=float(snapshot.decimal_odds),
+                            ingestion_version=str(snapshot.ingestion_version),
+                            line=None if snapshot.line is None else float(snapshot.line),
+                            provider_market_id=snapshot.provider_market_id,
+                            provider_timestamp=snapshot.source_timestamp,
+                            captured_at=str(snapshot.captured_at),
+                            is_pre_match=bool(snapshot.is_pre_match),
+                            provider_fixture_id=snapshot.provider_fixture_id,
+                            home_team_name=snapshot.home_team_name,
+                            away_team_name=snapshot.away_team_name,
+                            competition_id=snapshot.competition_id,
+                            competition_name=snapshot.competition_name,
+                            kickoff_utc=snapshot.kickoff_utc,
+                            freshness_state=snapshot.freshness_state,
+                        ),
+                        initialize_schema=self._read_requires_schema_init(),
+                    )
+                    snapshot_count += 1
+                    markets_covered.add(str(snapshot.market))
+                    freshness_values.add(str(snapshot.freshness_state or "UNKNOWN"))
+                    if snapshot.market == "asian_handicap":
+                        ah_rows += 1
+                    elif snapshot.market == "corner_total":
+                        corner_rows += 1
+                observations.append(
+                    self._collection_observation(
+                        row,
+                        snapshots,
+                        now_utc=now_utc,
+                        ah_rows=ah_rows,
+                        corner_rows=corner_rows,
+                        request_state=self._collection_request_state(),
+                    )
+                )
+
+        stale_market_count = sum(
+            1
+            for observation in observations
+            if str(observation.get("actionable_freshness") or "") in {"STALE_PREMATCH", "IN_PLAY"}
+        )
+        self._market_runtime_state["collection_observations"] = observations[-20:]
+        self._persist_market_runtime_checkpoint(
+            market_state=market_state,
+            evaluations={},
+            snapshot_count=snapshot_count,
+            matched_count=matched_count,
+            candidate_count=0,
+            passed_safeguards=0,
+            unresolved_fixture_count=unresolved_fixture_count,
+            stale_market_count=stale_market_count,
+            markets_covered=markets_covered,
+            freshness_values=freshness_values,
+            fixtures_considered=selected_count,
+            paper_entry_count=0,
+            settlement_queue_count=0,
+            last_successful_snapshot_at=last_successful_snapshot_at,
+            last_sync_at=last_sync_at,
+            dashboard_conn=dashboard_conn,
+        )
+
+    def _select_collection_only_fixtures(
+        self,
+        future_rows: list[dict[str, Any]],
+        conn: Any,
+    ) -> list[dict[str, Any]]:
+        max_fixtures = resolve_collection_only_max_fixtures(self.config.market_collector_max_fixtures_per_cycle)
+        live_issued_fixture_ids = self._live_issued_collection_fixture_ids()
+        candidate_ids = [str(row.get("fixture_id") or "") for row in future_rows]
+        evidence = self._latest_collection_evidence(conn, candidate_ids)
+        candidates = [
+            CollectionCandidate(
+                fixture_id=str(row.get("fixture_id") or ""),
+                provider_fixture_id=str(row.get("provider_fixture_id") or ""),
+                kickoff_utc=str(row.get("kickoff_utc") or ""),
+                has_live_issued_pick=str(row.get("fixture_id") or "") in live_issued_fixture_ids,
+                latest_source_evidence_at=evidence.get(str(row.get("fixture_id") or "")),
+            )
+            for row in future_rows
+        ]
+        selected = select_collection_fixtures(candidates, max_fixtures=max_fixtures)
+        by_fixture_id = {str(row.get("fixture_id") or ""): row for row in future_rows}
+        return [by_fixture_id[candidate.fixture_id] for candidate in selected if candidate.fixture_id in by_fixture_id]
+
+    def _live_issued_collection_fixture_ids(self) -> set[str]:
+        model_pick_db_path = getattr(self.config, "model_pick_db_path", None)
+        if not model_pick_db_path:
+            return set()
+        path = Path(model_pick_db_path)
+        if not path.exists():
+            return set()
+        try:
+            conn = football_model_pick_ledger.connect(path)
+            try:
+                rows = football_model_pick_ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return set()
+        return {
+            str(row.get("fixture_id") or "")
+            for row in rows
+            if str(row.get("record_origin") or "") == football_model_pick_ledger.RECORD_ORIGIN_LIVE_ISSUED
+            and str(row.get("market") or "") in COLLECTION_MARKETS
+        }
+
+    @staticmethod
+    def _latest_collection_evidence(conn: Any, fixture_ids: list[str]) -> dict[str, str | None]:
+        ids = sorted({str(fixture_id) for fixture_id in fixture_ids if fixture_id})
+        if not ids:
+            return {}
+        latest: dict[str, str | None] = {}
+        chunk_size = 900
+        for start in range(0, len(ids), chunk_size):
+            part = ids[start : start + chunk_size]
+            placeholders = ",".join("?" for _ in part)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT fixture_id, market, provider_timestamp, captured_at
+                    FROM market_snapshots
+                    WHERE market IN ('asian_handicap', 'corner_total')
+                      AND fixture_id IN ({placeholders})
+                    """,
+                    part,
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return latest
+            latest.update(latest_evidence_by_fixture([dict(row) for row in rows]))
+        return latest
+
+    def _collection_request_state(self) -> str:
+        try:
+            diagnostics = self.market_provider.diagnostics()
+        except Exception:  # noqa: BLE001
+            return "UNKNOWN"
+        queries = diagnostics.get("queries") if isinstance(diagnostics, dict) else None
+        if not queries:
+            return "UNKNOWN"
+        return str(queries[-1].get("status") or "UNKNOWN")
+
+    def _collection_observation(
+        self,
+        row: dict[str, Any],
+        snapshots: list[Any],
+        *,
+        now_utc: datetime,
+        ah_rows: int,
+        corner_rows: int,
+        request_state: str,
+    ) -> dict[str, Any]:
+        source_timestamp = max(
+            (snapshot.source_timestamp for snapshot in snapshots if snapshot.source_timestamp),
+            default=None,
+        )
+        captured_at = max((snapshot.captured_at for snapshot in snapshots), default=None)
+        provider_name = str(next((snapshot.provider for snapshot in snapshots), "api-football"))
+        state = classify_quote_state(
+            captured_at=captured_at,
+            source_timestamp=source_timestamp,
+            kickoff_utc=None if row.get("kickoff_utc") is None else str(row["kickoff_utc"]),
+            now_utc=now_utc,
+            actionable_max_age_minutes=resolve_actionable_max_age_minutes(provider_name),
+            collector_health_max_age_minutes=resolve_collector_health_max_age_minutes(),
+        )
+        return {
+            "fixture_id": str(row.get("fixture_id") or ""),
+            "provider_fixture_id": None
+            if row.get("provider_fixture_id") is None
+            else str(row["provider_fixture_id"]),
+            "request_state": request_state,
+            "provider_source_timestamp": source_timestamp,
+            "captured_at": captured_at,
+            "source_age_minutes": None if state.age_minutes is None else round(state.age_minutes, 2),
+            "asian_handicap_rows": ah_rows,
+            "corner_total_rows": corner_rows,
+            "actionable_freshness": state.state,
+            "collector_health": state.collector_health_state,
+            "state": "COLLECTED",
+        }
 
     def ensure_prediction(self, conn: Any, fixture: NormalizedFixture) -> dict[str, Any]:
         if self.snapshot is None:
