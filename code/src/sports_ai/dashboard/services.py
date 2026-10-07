@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ..experiments.football_day12_safeguards import XG_APPLICABLE_COMPETITIONS
 from ..football_market_focus import configured_live_market_focus
 from ..market_data.api_football import ApiFootballOddsProvider
 from ..market_data.market_evidence import (
@@ -36,15 +37,30 @@ from ..storage import (
 )
 from . import storage
 from .current_market import build_fixture_market_evaluation
-from .day12_rolling_xg import DEFAULT_XG_MIN_WINDOW_MATCHES, build_fixture_xg_rows, missing_xg_inspection
+from .day12_rolling_xg import (
+    DEFAULT_XG_MIN_WINDOW_MATCHES,
+    build_fixture_xg_rows,
+    missing_xg_inspection,
+)
 from .fixture_provider import (
     API_FOOTBALL_PROVIDER,
     ApiFootballFixtureProvider,
-    AuthoritativeFixtureStatistics,
-    FootballDataOrgFixtureProvider,
     FixtureProvider,
     FixtureProviderError,
     FixtureProviderNotConfiguredError,
+    FootballDataOrgFixtureProvider,
+)
+from .market_collection_policy import (
+    COLLECTION_MARKETS,
+    MARKET_COLLECTION_INTERVAL_ENV_VAR,
+    MARKET_COLLECTION_ONLY_ENV_VAR,
+    MARKET_COLLECTION_SCHEDULER_ENV_VAR,
+    MARKET_COLLECTOR_MAX_FIXTURES_ENV_VAR,
+    CollectionCandidate,
+    latest_observation_by_fixture,
+    resolve_collection_only_max_fixtures,
+    resolve_market_collection_interval_seconds,
+    select_collection_fixtures,
 )
 from .models import (
     FIXTURE_LIVE_STATUSES,
@@ -55,20 +71,8 @@ from .models import (
     PREDICTION_STATUS_FAILED,
     PREDICTION_STATUS_READY,
     NormalizedFixture,
-    normalize_text_key,
     parse_iso_datetime,
     utc_now_iso,
-)
-from .prediction_service import PredictionContext, attach_edge_desk_shadow_bundle, build_prediction_for_fixture
-from .provider_budget import QUOTA_EXHAUSTED, ProviderRequestBudget
-from .market_collection_policy import (
-    COLLECTION_MARKETS,
-    MARKET_COLLECTION_ONLY_ENV_VAR,
-    MARKET_COLLECTOR_MAX_FIXTURES_ENV_VAR,
-    CollectionCandidate,
-    latest_evidence_by_fixture,
-    resolve_collection_only_max_fixtures,
-    select_collection_fixtures,
 )
 from .portfolio_selection import (
     PORTFOLIO_LEGACY_PRE_POLICY,
@@ -82,9 +86,21 @@ from .portfolio_selection import (
     PortfolioPolicy,
     select_fixture_portfolio,
 )
-from .runtime_paths import ensure_operational_data_dir, resolve_dashboard_operational_paths
-from .snapshot_service import CurrentFootballModelSnapshot, CurrentSnapshotError, build_current_football_model_snapshot
-from ..experiments.football_day12_safeguards import XG_APPLICABLE_COMPETITIONS
+from .prediction_service import (
+    PredictionContext,
+    attach_edge_desk_shadow_bundle,
+    build_prediction_for_fixture,
+)
+from .provider_budget import QUOTA_EXHAUSTED, ProviderRequestBudget
+from .runtime_paths import (
+    ensure_operational_data_dir,
+    resolve_dashboard_operational_paths,
+)
+from .snapshot_service import (
+    CurrentFootballModelSnapshot,
+    CurrentSnapshotError,
+    build_current_football_model_snapshot,
+)
 
 DEFAULT_UPCOMING_HORIZON_DAYS = 5
 DEFAULT_ENABLE_AUTOMATED_SYNC_ENV_VAR = "SPORTS_AI_ENABLE_AUTOMATED_SYNC"
@@ -572,6 +588,10 @@ class DashboardConfig:
     market_collection_only: bool = False
     # 0 = unbounded (legacy). Collection-only mode clamps to a small safe bound.
     market_collector_max_fixtures_per_cycle: int = 0
+    # Dedicated recurring market-collection scheduler. Independent of the global
+    # automated fixture/prediction scheduler (enable_scheduler).
+    enable_market_collection_scheduler: bool = False
+    market_collection_interval_seconds: int = 600
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
     startup_sync_timeout_seconds: int = 15
@@ -587,7 +607,7 @@ class DashboardConfig:
     runtime_role: str = RUNTIME_ROLE_COMBINED
 
     @classmethod
-    def default(cls) -> "DashboardConfig":
+    def default(cls) -> DashboardConfig:
         repo_root = Path(__file__).resolve().parents[4]
         operational_paths = resolve_dashboard_operational_paths(repo_root)
         return cls(
@@ -610,6 +630,10 @@ class DashboardConfig:
             enable_odds_sync=_env_bool(DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR, False),
             market_collection_only=_env_bool(MARKET_COLLECTION_ONLY_ENV_VAR, False),
             market_collector_max_fixtures_per_cycle=_env_int(MARKET_COLLECTOR_MAX_FIXTURES_ENV_VAR, 0),
+            enable_market_collection_scheduler=_env_bool(MARKET_COLLECTION_SCHEDULER_ENV_VAR, False),
+            market_collection_interval_seconds=resolve_market_collection_interval_seconds(
+                _env_int(MARKET_COLLECTION_INTERVAL_ENV_VAR, 0)
+            ),
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
             startup_sync_timeout_seconds=_env_int(DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR, 15),
@@ -705,9 +729,25 @@ class DashboardServices:
         self._market_runtime_state: dict[str, Any] = {
             "state": "NOT_CONFIGURED" if not self.market_provider.configured() else "CONNECTED",
             "automatic_odds_sync": "ENABLED" if self.config.enable_odds_sync else "DISABLED",
-            "market_collection_mode": "COLLECTION_ONLY" if self.config.market_collection_only else "FULL",
-            "value_evaluation": "DISABLED" if self.config.market_collection_only else "ENABLED",
+            "market_collection_mode": "COLLECTION_ONLY"
+            if (self.config.market_collection_only or self.config.enable_market_collection_scheduler)
+            else "FULL",
+            "value_evaluation": "DISABLED"
+            if (self.config.market_collection_only or self.config.enable_market_collection_scheduler)
+            else "ENABLED",
             "collection_observations": [],
+            "market_collection_scheduler_enabled": (
+                self.config.enable_market_collection_scheduler
+                and self.market_provider.provider_name() == "api-football"
+            ),
+            "market_collection_interval_seconds": self.config.market_collection_interval_seconds,
+            "market_collection_last_cycle_at": None,
+            "market_collection_last_success_at": None,
+            "market_collection_last_error": None,
+            "market_collection_cycles_completed": 0,
+            "market_collection_selected_last_cycle": [],
+            "market_collection_requests_last_cycle": 0,
+            "market_collection_snapshots_last_cycle": 0,
             "last_sync_at": None,
             "last_successful_snapshot_at": None,
             "last_error": None,
@@ -4212,7 +4252,9 @@ class DashboardServices:
         last_sync_at: str,
         dashboard_conn: Any | None = None,
     ) -> None:
-        collection_only = bool(self.config.market_collection_only)
+        collection_only = bool(
+            self.config.market_collection_only or self.config.enable_market_collection_scheduler
+        )
         payload = {
             "state": (
                 "COLLECTION_ONLY"
@@ -4395,7 +4437,7 @@ class DashboardServices:
             for row in self._future_fixture_rows(rows_with_predictions)
             if self._prediction_eligibility_status(row.get("prediction")) == "PREDICTION_READY"
         ]
-        if self.config.market_collection_only:
+        if self.config.market_collection_only or self.config.enable_market_collection_scheduler:
             self._run_collection_only_market_cycle(future_rows, dashboard_conn=dashboard_conn)
             return
         begin_market_sync_window = getattr(self.market_provider, "begin_sync_window", None)
@@ -4660,7 +4702,7 @@ class DashboardServices:
         future_rows: list[dict[str, Any]],
         *,
         dashboard_conn: Any | None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Fetch + persist current market snapshots ONLY.
 
         This path never calls value evaluation, paper-entry creation, portfolio
@@ -4678,12 +4720,14 @@ class DashboardServices:
         last_successful_snapshot_at: str | None = None
         observations: list[dict[str, Any]] = []
         selected_count = 0
+        selected_fixture_ids: list[str] = []
 
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             if self._read_requires_schema_init():
                 football_paper_trading.ensure_schema(conn)
             selected = self._select_collection_only_fixtures(future_rows, conn)
             selected_count = len(selected)
+            selected_fixture_ids = [str(row.get("fixture_id") or "") for row in selected]
             for row in selected:
                 fixture_id = str(row.get("fixture_id") or "")
                 try:
@@ -4793,6 +4837,99 @@ class DashboardServices:
             last_sync_at=last_sync_at,
             dashboard_conn=dashboard_conn,
         )
+        return {
+            "state": "COLLECTION_ONLY",
+            "selected_fixture_ids": selected_fixture_ids,
+            "snapshot_count": snapshot_count,
+            "matched_count": matched_count,
+            "unresolved_fixture_count": unresolved_fixture_count,
+            "stale_market_count": stale_market_count,
+            "last_successful_snapshot_at": last_successful_snapshot_at,
+            "observations": observations,
+        }
+
+    # ------------------------------------------- dedicated recurring collection
+    def market_collection_scheduler_active(self) -> bool:
+        """True only when the dedicated scheduler flag is on and provider is API-Football."""
+        return bool(
+            self.config.enable_market_collection_scheduler
+            and self.market_provider.provider_name() == "api-football"
+        )
+
+    def _persist_market_runtime_state_only(self, dashboard_conn: Any | None) -> None:
+        if dashboard_conn is None:
+            return
+        storage.put_runtime_state(
+            dashboard_conn,
+            state_key="market_runtime_state",
+            state_value=self._market_runtime_state,
+            updated_at=utc_now_iso(),
+            initialize_schema=self._read_requires_schema_init(),
+        )
+
+    def run_market_collection_only_cycle(self) -> dict[str, Any]:
+        """One dedicated, persisted-inputs-only collection cycle.
+
+        Reads persisted fixtures/predictions/Model Picks and market snapshots; it
+        never performs fixture synchronization, prediction generation, research
+        refresh, evaluation, paper entries, portfolio, settlement or historical
+        calls. The only provider request is the API-Football current odds call
+        inside the already-proven collection-only path.
+        """
+        started_at = utc_now_iso()
+        if self.market_provider.provider_name() != "api-football":
+            self._market_runtime_state.update(
+                {
+                    "market_collection_scheduler_enabled": False,
+                    "market_collection_last_error": "PROVIDER_NOT_API_FOOTBALL",
+                }
+            )
+            with storage.connect(self.config.dashboard_db_path) as dash_conn:
+                self._persist_market_runtime_state_only(dash_conn)
+            return {"state": "PROVIDER_NOT_API_FOOTBALL", "selected_fixture_ids": []}
+
+        metrics_before = self._provider_budget.metrics()
+        error: str | None = None
+        summary: dict[str, Any] = {"state": "COLLECTION_ONLY", "selected_fixture_ids": [], "snapshot_count": 0}
+        try:
+            rows_with_predictions = self._all_fixtures_with_predictions()
+            future_rows = [
+                row
+                for row in self._future_fixture_rows(rows_with_predictions)
+                if self._prediction_eligibility_status(row.get("prediction")) == "PREDICTION_READY"
+            ]
+            with storage.connect(self.config.dashboard_db_path) as dash_conn:
+                storage.initialize_database(dash_conn)
+                summary = self._run_collection_only_market_cycle(future_rows, dashboard_conn=dash_conn)
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+        metrics_after = self._provider_budget.metrics()
+        requests_this_cycle = max(
+            0, int(metrics_after.get("http_requests", 0)) - int(metrics_before.get("http_requests", 0))
+        )
+        cache_hits_this_cycle = max(
+            0, int(metrics_after.get("requests_cached", 0)) - int(metrics_before.get("requests_cached", 0))
+        )
+        completed = int(self._market_runtime_state.get("market_collection_cycles_completed") or 0) + 1
+        self._market_runtime_state.update(
+            {
+                "market_collection_scheduler_enabled": True,
+                "market_collection_interval_seconds": self.config.market_collection_interval_seconds,
+                "market_collection_last_cycle_at": started_at,
+                "market_collection_last_success_at": None if error else utc_now_iso(),
+                "market_collection_last_error": error,
+                "market_collection_cycles_completed": completed,
+                "market_collection_selected_last_cycle": list(summary.get("selected_fixture_ids") or []),
+                "market_collection_requests_last_cycle": requests_this_cycle,
+                "market_collection_cache_hits_last_cycle": cache_hits_this_cycle,
+                "market_collection_snapshots_last_cycle": int(summary.get("snapshot_count") or 0),
+            }
+        )
+        with storage.connect(self.config.dashboard_db_path) as dash_conn:
+            self._persist_market_runtime_state_only(dash_conn)
+        if error:
+            logger.warning("dedicated market collection cycle error: %s", error)
+        return summary
 
     def _select_collection_only_fixtures(
         self,
@@ -4802,14 +4939,14 @@ class DashboardServices:
         max_fixtures = resolve_collection_only_max_fixtures(self.config.market_collector_max_fixtures_per_cycle)
         live_issued_fixture_ids = self._live_issued_collection_fixture_ids()
         candidate_ids = [str(row.get("fixture_id") or "") for row in future_rows]
-        evidence = self._latest_collection_evidence(conn, candidate_ids)
+        observation = self._latest_collection_observation(conn, candidate_ids)
         candidates = [
             CollectionCandidate(
                 fixture_id=str(row.get("fixture_id") or ""),
                 provider_fixture_id=str(row.get("provider_fixture_id") or ""),
                 kickoff_utc=str(row.get("kickoff_utc") or ""),
                 has_live_issued_pick=str(row.get("fixture_id") or "") in live_issued_fixture_ids,
-                latest_source_evidence_at=evidence.get(str(row.get("fixture_id") or "")),
+                last_observed_at=observation.get(str(row.get("fixture_id") or "")),
             )
             for row in future_rows
         ]
@@ -4840,7 +4977,7 @@ class DashboardServices:
         }
 
     @staticmethod
-    def _latest_collection_evidence(conn: Any, fixture_ids: list[str]) -> dict[str, str | None]:
+    def _latest_collection_observation(conn: Any, fixture_ids: list[str]) -> dict[str, str | None]:
         ids = sorted({str(fixture_id) for fixture_id in fixture_ids if fixture_id})
         if not ids:
             return {}
@@ -4852,7 +4989,7 @@ class DashboardServices:
             try:
                 rows = conn.execute(
                     f"""
-                    SELECT fixture_id, market, provider_timestamp, captured_at
+                    SELECT fixture_id, market, last_observed_at, captured_at
                     FROM market_snapshots
                     WHERE market IN ('asian_handicap', 'corner_total')
                       AND fixture_id IN ({placeholders})
@@ -4861,7 +4998,7 @@ class DashboardServices:
                 ).fetchall()
             except sqlite3.OperationalError:
                 return latest
-            latest.update(latest_evidence_by_fixture([dict(row) for row in rows]))
+            latest.update(latest_observation_by_fixture([dict(row) for row in rows]))
         return latest
 
     def _collection_request_state(self) -> str:
@@ -5163,18 +5300,12 @@ class DashboardServices:
                 bucket == "live"
                 and status in FIXTURE_LIVE_STATUSES
                 and self._is_fresh_live_fixture(row, now_utc=now_utc)
-            ):
-                filtered.append(row)
-            elif bucket == "today" and local_kickoff_date == today_local and status not in FIXTURE_LIVE_STATUSES:
-                filtered.append(row)
-            elif (
+            ) or bucket == "today" and local_kickoff_date == today_local and status not in FIXTURE_LIVE_STATUSES or (
                 bucket == "upcoming"
                 and kickoff > now_utc
                 and local_kickoff_date > today_local
                 and status in FIXTURE_PREMATCH_STATUSES
-            ):
-                filtered.append(row)
-            elif bucket == "finished" and status == FIXTURE_STATUS_FINISHED:
+            ) or bucket == "finished" and status == FIXTURE_STATUS_FINISHED:
                 filtered.append(row)
         return filtered
 
@@ -7188,6 +7319,32 @@ class DashboardServices:
             "last_fixture_sync_at": self._provider_state["last_sync_at"],
             "market_sync_state": self._market_runtime_state["state"],
             "last_market_sync_at": self._market_runtime_state["last_sync_at"],
+            "market_collection_scheduler_enabled": bool(
+                self._market_runtime_state.get("market_collection_scheduler_enabled")
+            ),
+            "market_collection_interval_seconds": self._market_runtime_state.get(
+                "market_collection_interval_seconds"
+            ),
+            "market_collection_last_cycle_at": self._market_runtime_state.get(
+                "market_collection_last_cycle_at"
+            ),
+            "market_collection_last_success_at": self._market_runtime_state.get(
+                "market_collection_last_success_at"
+            ),
+            "market_collection_last_error": self._market_runtime_state.get("market_collection_last_error"),
+            "market_collection_cycles_completed": int(
+                self._market_runtime_state.get("market_collection_cycles_completed") or 0
+            ),
+            "market_collection_selected_last_cycle": list(
+                self._market_runtime_state.get("market_collection_selected_last_cycle") or []
+            ),
+            "market_collection_requests_last_cycle": int(
+                self._market_runtime_state.get("market_collection_requests_last_cycle") or 0
+            ),
+            "market_collection_snapshots_last_cycle": int(
+                self._market_runtime_state.get("market_collection_snapshots_last_cycle") or 0
+            ),
+            "value_evaluation": self._market_runtime_state.get("value_evaluation", "ENABLED"),
             "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
             "provider_budget_quota_state": self._provider_budget.quota_state(),
             "settlement_queue_count": int(self._market_runtime_state.get("settlement_queue_count") or 0),

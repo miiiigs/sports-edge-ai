@@ -40,7 +40,7 @@ def _candidate(fid, kickoff, *, pick=True, evidence=None):
         provider_fixture_id=fid.split(":")[-1],
         kickoff_utc=kickoff,
         has_live_issued_pick=pick,
-        latest_source_evidence_at=evidence,
+        last_observed_at=evidence,
     )
 
 
