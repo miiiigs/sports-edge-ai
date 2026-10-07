@@ -89,6 +89,21 @@ DEFAULT_API_FOOTBALL_OPERATIONAL_DAILY_CAP_ENV_VAR = "SPORTS_AI_API_FOOTBALL_OPE
 DEFAULT_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM_ENV_VAR = "SPORTS_AI_FOOTBALL_PORTFOLIO_SELECTION_V1_EFFECTIVE_FROM"
 DEFAULT_RUNTIME_ROLE_ENV_VAR = "SPORTS_AI_RUNTIME_ROLE"
 
+# Explicit current-odds market-provider selection. When unset the historical
+# default (The Odds API if configured) is preserved. When set, selection is
+# strict: an explicitly selected provider that is not configured never falls
+# through to another paid provider.
+DEFAULT_CURRENT_MARKET_PROVIDER_ENV_VAR = "SPORTS_AI_CURRENT_MARKET_PROVIDER"
+CURRENT_MARKET_PROVIDER_API_FOOTBALL = "api-football"
+CURRENT_MARKET_PROVIDER_THE_ODDS_API = "the-odds-api"
+CURRENT_MARKET_PROVIDER_OFF = "off"
+CURRENT_MARKET_PROVIDER_CHOICES = (
+    CURRENT_MARKET_PROVIDER_API_FOOTBALL,
+    CURRENT_MARKET_PROVIDER_THE_ODDS_API,
+    CURRENT_MARKET_PROVIDER_OFF,
+)
+CURRENT_MARKET_PROVIDER_INVALID = "invalid-current-market-provider"
+
 PAID_PROVIDER_DISABLED_STATE = "PAID_PROVIDER_CALLS_DISABLED"
 RUNTIME_ROLE_COMBINED = "combined"
 RUNTIME_ROLE_WEB = "web"
@@ -204,17 +219,58 @@ def _default_fixture_provider() -> FixtureProvider:
     return primary
 
 
+def resolve_current_market_provider_name() -> str:
+    """Resolve the explicitly configured current-odds market provider.
+
+    Returns one of :data:`CURRENT_MARKET_PROVIDER_CHOICES`, ``""`` when the
+    selector is unset (preserving the historical default), or
+    :data:`CURRENT_MARKET_PROVIDER_INVALID` for an unrecognized value. Invalid
+    values fail closed (no paid provider is selected); they never fall through
+    to another provider.
+    """
+    raw = os.environ.get(DEFAULT_CURRENT_MARKET_PROVIDER_ENV_VAR, "").strip().lower()
+    if not raw:
+        return ""
+    if raw in CURRENT_MARKET_PROVIDER_CHOICES:
+        return raw
+    return CURRENT_MARKET_PROVIDER_INVALID
+
+
+def _not_configured_label(config: DashboardConfig) -> str:
+    return "no-odds-provider-key" if config.current_odds_connected else "waiting-for-approved-odds-provider"
+
+
 def _default_market_provider(config: DashboardConfig) -> CurrentMarketProvider:
-    provider = TheOddsApiProvider(
+    selection = resolve_current_market_provider_name()
+
+    if selection == CURRENT_MARKET_PROVIDER_OFF:
+        return NotConfiguredMarketProvider(provider_label="off")
+    if selection == CURRENT_MARKET_PROVIDER_INVALID:
+        # Fail closed: an invalid selector must never activate a paid provider.
+        return NotConfiguredMarketProvider(provider_label=CURRENT_MARKET_PROVIDER_INVALID)
+
+    if selection == CURRENT_MARKET_PROVIDER_API_FOOTBALL:
+        provider = ApiFootballOddsProvider()
+        if provider.configured():
+            return provider
+        # Strict selection: never fall through to The Odds API.
+        return NotConfiguredMarketProvider(provider_label="api-football-not-configured")
+
+    odds_api = TheOddsApiProvider(
         persisted_snapshot_reader=football_paper_trading.persisted_snapshot_reader(
             config.paper_trading_db_path
         )
     )
-    if provider.configured():
-        return provider
-    return NotConfiguredMarketProvider(
-        provider_label="no-odds-provider-key" if config.current_odds_connected else "waiting-for-approved-odds-provider"
-    )
+    if selection == CURRENT_MARKET_PROVIDER_THE_ODDS_API:
+        if odds_api.configured():
+            return odds_api
+        return NotConfiguredMarketProvider(provider_label=_not_configured_label(config))
+
+    # Unset selector: historical default (The Odds API if configured).
+    if odds_api.configured():
+        return odds_api
+    return NotConfiguredMarketProvider(provider_label=_not_configured_label(config))
+
 
 
 def _default_statistics_provider() -> ApiFootballFixtureProvider:
@@ -1143,11 +1199,13 @@ class DashboardServices:
     def _odds_feed_runtime_requirements(self) -> dict[str, Any]:
         reference_bookmakers = os.environ.get("SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS", "").strip() or "pinnacle"
         current_provider = self.market_provider.provider_name()
+        selector = resolve_current_market_provider_name() or "default(the-odds-api)"
         if current_provider == "api-football":
             provider_probe = ApiFootballOddsProvider()
             freshness = os.environ.get("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", "").strip() or "240"
             return {
                 "implementation_ready": "YES",
+                "configured_provider_selector": selector,
                 "provider_key_configured": "YES" if provider_probe.configured() else "NO",
                 "approval_enabled": "YES" if self.config.current_odds_connected else "NO",
                 "automatic_sync_enabled": "YES" if self.config.enable_odds_sync else "NO",
@@ -1181,6 +1239,7 @@ class DashboardServices:
         freshness = os.environ.get("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "").strip() or "unset"
         return {
             "implementation_ready": "YES",
+            "configured_provider_selector": selector,
             "provider_key_configured": "YES" if provider_probe.configured() else "NO",
             "approval_enabled": "YES" if self.config.current_odds_connected else "NO",
             "automatic_sync_enabled": "YES" if self.config.enable_odds_sync else "NO",
