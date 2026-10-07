@@ -227,6 +227,7 @@ def test_missing_identity_raises_without_mapping_fanout(monkeypatch):
 
 
 def test_bookmaker_filter_is_deterministic(monkeypatch):
+    monkeypatch.setenv("SPORTS_AI_API_FOOTBALL_TOKEN", "test-token")
     monkeypatch.setenv("SPORTS_AI_MARKET_REFERENCE_BOOKMAKERS", "pinnacle, betfair , bet365")
     provider = ApiFootballOddsProvider()
     payload = {
