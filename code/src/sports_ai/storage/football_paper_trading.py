@@ -96,6 +96,8 @@ SCHEMA_STATEMENTS = (
         quarter_kelly_fraction REAL,
         suggested_stake_fraction REAL,
         entry_signature TEXT NOT NULL UNIQUE,
+        model_pick_id TEXT,
+        value_pipeline_version TEXT,
         created_at TEXT NOT NULL
     )
     """,
@@ -214,10 +216,22 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "full_kelly_fraction": "REAL",
             "quarter_kelly_fraction": "REAL",
             "suggested_stake_fraction": "REAL",
+            "model_pick_id": "TEXT",
+            "value_pipeline_version": "TEXT",
         },
     )
     _backfill_paper_trade_business_keys(conn)
     _ensure_paper_trade_business_key_uniqueness(conn)
+    # Frozen-model-pick value lineage: at most one new Value position per frozen
+    # Model Pick (partial unique index; legacy rows keep NULL and are unaffected).
+    with conn:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_trade_entries_model_pick_id
+            ON paper_trade_entries(model_pick_id)
+            WHERE model_pick_id IS NOT NULL
+            """
+        )
 
 
 def _ensure_schema_if_requested(conn: sqlite3.Connection, *, initialize_schema: bool) -> None:
@@ -355,6 +369,8 @@ class PaperTradeEntry:
     full_kelly_fraction: float | None = None
     quarter_kelly_fraction: float | None = None
     suggested_stake_fraction: float | None = None
+    model_pick_id: str | None = None
+    value_pipeline_version: str | None = None
     paper_trade_id: str = field(init=False)
     business_key_signature: str = field(init=False)
     entry_signature: str = field(init=False)
@@ -746,8 +762,8 @@ def record_paper_trade_entry(
                 closing_odds, closing_captured_at, closing_snapshot_id, closing_margin, clv_pct,
                 business_key_signature, canonical_business_key_signature, staking_rule_version, staking_probability,
                 staking_decimal_price, full_kelly_fraction, quarter_kelly_fraction,
-                suggested_stake_fraction, entry_signature, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                suggested_stake_fraction, entry_signature, model_pick_id, value_pipeline_version, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry.paper_trade_id,
@@ -787,6 +803,8 @@ def record_paper_trade_entry(
                 entry.quarter_kelly_fraction,
                 entry.suggested_stake_fraction,
                 entry.entry_signature,
+                entry.model_pick_id,
+                entry.value_pipeline_version,
                 entry.created_at,
             ),
         )

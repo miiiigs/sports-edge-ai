@@ -95,6 +95,17 @@ from .model_pick_settlement import (
     is_open_pick,
     resolve_settlement_interval_seconds,
 )
+from .frozen_value_evaluation import (
+    SUPPORTED_VALUE_MARKETS,
+    VALUE_INTERVAL_ENV_VAR,
+    VALUE_PIPELINE_VERSION,
+    VALUE_SCHEDULER_ENV_VAR,
+    VALUE_BET,
+    EvaluationResult,
+    evaluate_frozen_pick,
+    resolve_value_evaluation_interval_seconds,
+    value_action_hash,
+)
 from .models import (
     FIXTURE_LIVE_STATUSES,
     FIXTURE_PREMATCH_STATUSES,
@@ -633,6 +644,9 @@ class DashboardConfig:
     # Dedicated DB-only Model Pick settlement scheduler (consumes verified truth).
     enable_model_pick_settlement_scheduler: bool = False
     model_pick_settlement_interval_seconds: int = 600
+    # Dedicated DB-only forward Value Bet evaluation scheduler (frozen Model Picks).
+    enable_value_bet_evaluation_scheduler: bool = False
+    value_bet_evaluation_interval_seconds: int = 600
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
     startup_sync_timeout_seconds: int = 15
@@ -683,6 +697,10 @@ class DashboardConfig:
             enable_model_pick_settlement_scheduler=_env_bool(SETTLEMENT_SCHEDULER_ENV_VAR, False),
             model_pick_settlement_interval_seconds=resolve_settlement_interval_seconds(
                 _env_int(SETTLEMENT_INTERVAL_ENV_VAR, 0)
+            ),
+            enable_value_bet_evaluation_scheduler=_env_bool(VALUE_SCHEDULER_ENV_VAR, False),
+            value_bet_evaluation_interval_seconds=resolve_value_evaluation_interval_seconds(
+                _env_int(VALUE_INTERVAL_ENV_VAR, 0)
             ),
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
@@ -844,6 +862,17 @@ class DashboardServices:
             "model_pick_settlement_applied_last_cycle": 0,
             "model_pick_settlement_conflicts_last_cycle": 0,
         }
+        self._value_evaluation_runtime_state: dict[str, Any] = {
+            "value_evaluation_scheduler_enabled": self.config.enable_value_bet_evaluation_scheduler,
+            "value_evaluation_interval_seconds": self.config.value_bet_evaluation_interval_seconds,
+            "value_evaluation_last_cycle_at": None,
+            "value_evaluation_last_success_at": None,
+            "value_evaluation_last_error": None,
+            "value_evaluation_cycles_completed": 0,
+            "value_evaluation_evaluated_last_cycle": 0,
+            "value_evaluation_value_bets_last_cycle": 0,
+            "value_evaluation_action_hash_last_cycle": None,
+        }
         self._one_shot_sync_state: dict[str, Any] = {
             "configured": False,
             "token_id": None,
@@ -984,6 +1013,9 @@ class DashboardServices:
         model_pick_settlement_state = storage.get_runtime_state(
             conn, "model_pick_settlement_state", initialize_schema=False
         )
+        value_evaluation_state = storage.get_runtime_state(
+            conn, "value_evaluation_state", initialize_schema=False
+        )
         storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state", initialize_schema=False)
         one_shot_sync_state = storage.get_runtime_state(conn, "one_shot_sync_state", initialize_schema=False)
         if isinstance(provider_state, dict):
@@ -1016,6 +1048,8 @@ class DashboardServices:
                 self._corner_sync_attempts.update({str(k): str(v) for k, v in corner_attempts.items()})
         if isinstance(model_pick_settlement_state, dict):
             self._model_pick_settlement_runtime_state.update(model_pick_settlement_state)
+        if isinstance(value_evaluation_state, dict):
+            self._value_evaluation_runtime_state.update(value_evaluation_state)
         if isinstance(storage_runtime_state, dict):
             self._storage_runtime_state.update(storage_runtime_state)
         if isinstance(one_shot_sync_state, dict):
@@ -5620,6 +5654,152 @@ class DashboardServices:
             "error": error,
         }
 
+    # ------------------------------------------- dedicated value evaluation
+    def value_bet_evaluation_scheduler_active(self) -> bool:
+        return bool(self.config.enable_value_bet_evaluation_scheduler)
+
+    def _read_value_candidate_picks(self) -> list[dict[str, Any]]:
+        model_pick_db_path = getattr(self.config, "model_pick_db_path", None)
+        if not model_pick_db_path:
+            return []
+        path = Path(model_pick_db_path)
+        if not path.exists():
+            return []
+        try:
+            conn = football_model_pick_ledger.connect(path)
+            try:
+                rows = football_model_pick_ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return []
+        return [
+            row
+            for row in rows
+            if str(row.get("record_origin") or "") == football_model_pick_ledger.RECORD_ORIGIN_LIVE_ISSUED
+            and str(row.get("market") or "") in SUPPORTED_VALUE_MARKETS
+        ]
+
+    def _existing_value_positions(self) -> list[dict[str, Any]]:
+        positions: list[dict[str, Any]] = []
+        try:
+            with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
+                rows = conn.execute(
+                    "SELECT fixture_id, market, selection, line, model_pick_id FROM paper_trade_entries"
+                ).fetchall()
+            positions = [dict(row) for row in rows]
+        except sqlite3.Error:
+            return []
+        return positions
+
+    def run_value_bet_evaluation_dry_run(self) -> dict[str, Any]:
+        """Read-only frozen-pick Value evaluation. Zero writes, zero provider calls."""
+        returned = self._evaluate_frozen_value(record_state=False)
+        returned["dry_run"] = True
+        returned["writes"] = 0
+        return returned
+
+    def _evaluate_frozen_value(self, *, record_state: bool) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        picks = self._read_value_candidate_picks()
+        existing = self._existing_value_positions()
+        existing_index: dict[tuple[str, str, str], list[float | None]] = {}
+        for row in existing:
+            existing_index.setdefault(
+                (str(row["fixture_id"]), str(row["market"]), str(row["selection"])), []
+            ).append(None if row.get("line") is None else float(row["line"]))
+
+        results: list[EvaluationResult] = []
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            fixtures = {
+                str(row["fixture_id"]): row
+                for row in storage.fetch_all_fixtures(conn, initialize_schema=self._read_requires_schema_init())
+            }
+            snapshots_by_fixture: dict[str, list[dict[str, Any]]] = {}
+            for row in conn.execute(
+                "SELECT snapshot_id, fixture_id, provider, provider_fixture_id, market, selection, line, odds, "
+                "bookmaker, provider_timestamp, captured_at, is_pre_match, freshness_state "
+                "FROM market_snapshots WHERE market IN ('asian_handicap','corner_total')"
+            ).fetchall():
+                snapshots_by_fixture.setdefault(str(row["fixture_id"]), []).append(dict(row))
+
+        for pick in picks:
+            fixture_id = str(pick.get("fixture_id"))
+            fixture = fixtures.get(fixture_id)
+            if fixture is None:
+                results.append(evaluate_frozen_pick(pick=pick, fixture=None, market_rows=[], now_utc=now))
+                continue
+            kickoff = parse_iso_datetime(str(fixture["kickoff_utc"])) if fixture.get("kickoff_utc") else None
+            if kickoff is None or kickoff <= now:
+                results.append(evaluate_frozen_pick(pick=pick, fixture=fixture, market_rows=[], now_utc=now))
+                continue
+            key = (fixture_id, str(pick.get("market")), str(pick.get("selection")))
+            line = None if pick.get("line") is None else float(pick["line"])
+            has_existing = any(existing_line is not None and abs(existing_line - line) <= 1e-12 for existing_line in existing_index.get(key, []))
+            lineage_ok = any(
+                (None if row.get("line") is None else float(row["line"])) == line and str(row.get("model_pick_id") or "") == str(pick.get("model_pick_id"))
+                for row in existing
+                if str(row["fixture_id"]) == fixture_id and str(row["market"]) == str(pick.get("market")) and str(row["selection"]) == str(pick.get("selection"))
+            ) if has_existing else True
+            results.append(
+                evaluate_frozen_pick(
+                    pick=pick,
+                    fixture=fixture,
+                    market_rows=snapshots_by_fixture.get(fixture_id, []),
+                    now_utc=now,
+                    existing_position=has_existing,
+                    existing_position_lineage_ok=lineage_ok,
+                )
+            )
+
+        eligible = [row for row in results if row.state == VALUE_BET]
+        payload = {
+            "pipeline_version": VALUE_PIPELINE_VERSION,
+            "evaluated": [row.to_dict() for row in results],
+            "eligible": [row.to_dict() for row in eligible],
+            "counts": self._value_state_counts(results),
+            "eligible_by_market": {
+                market: sum(1 for row in eligible if row.market == market) for market in SUPPORTED_VALUE_MARKETS
+            },
+            "action_hash": value_action_hash(results),
+            "writes": 0,
+        }
+        if record_state:
+            completed = int(self._value_evaluation_runtime_state.get("value_evaluation_cycles_completed") or 0) + 1
+            self._value_evaluation_runtime_state.update(
+                {
+                    "value_evaluation_scheduler_enabled": self.value_bet_evaluation_scheduler_active(),
+                    "value_evaluation_interval_seconds": self.config.value_bet_evaluation_interval_seconds,
+                    "value_evaluation_last_cycle_at": utc_now_iso(),
+                    "value_evaluation_last_success_at": utc_now_iso(),
+                    "value_evaluation_last_error": None,
+                    "value_evaluation_cycles_completed": completed,
+                    "value_evaluation_evaluated_last_cycle": len(results),
+                    "value_evaluation_value_bets_last_cycle": len(eligible),
+                    "value_evaluation_action_hash_last_cycle": value_action_hash(results),
+                }
+            )
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                storage.put_runtime_state(
+                    conn,
+                    state_key="value_evaluation_state",
+                    state_value=self._value_evaluation_runtime_state,
+                    updated_at=utc_now_iso(),
+                    initialize_schema=self._read_requires_schema_init(),
+                )
+        return payload
+
+    @staticmethod
+    def _value_state_counts(results: list[EvaluationResult]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in results:
+            counts[row.state] = counts.get(row.state, 0) + 1
+        return counts
+
+    def run_value_bet_evaluation_cycle(self) -> dict[str, Any]:
+        """Scheduler cycle: evaluate only. Issuance stays disabled in this lane."""
+        return self._evaluate_frozen_value(record_state=True)
+
     def ensure_prediction(self, conn: Any, fixture: NormalizedFixture) -> dict[str, Any]:
         if self.snapshot is None:
             payload = attach_edge_desk_shadow_bundle(
@@ -7959,6 +8139,25 @@ class DashboardServices:
             ),
             "model_pick_settlement_conflicts_last_cycle": int(
                 self._model_pick_settlement_runtime_state.get("model_pick_settlement_conflicts_last_cycle") or 0
+            ),
+            "value_evaluation_scheduler_enabled": bool(
+                self._value_evaluation_runtime_state.get("value_evaluation_scheduler_enabled")
+            ),
+            "value_evaluation_interval_seconds": self._value_evaluation_runtime_state.get(
+                "value_evaluation_interval_seconds"
+            ),
+            "value_evaluation_last_cycle_at": self._value_evaluation_runtime_state.get(
+                "value_evaluation_last_cycle_at"
+            ),
+            "value_evaluation_last_success_at": self._value_evaluation_runtime_state.get(
+                "value_evaluation_last_success_at"
+            ),
+            "value_evaluation_last_error": self._value_evaluation_runtime_state.get("value_evaluation_last_error"),
+            "value_evaluation_cycles_completed": int(
+                self._value_evaluation_runtime_state.get("value_evaluation_cycles_completed") or 0
+            ),
+            "value_evaluation_value_bets_last_cycle": int(
+                self._value_evaluation_runtime_state.get("value_evaluation_value_bets_last_cycle") or 0
             ),
             "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
             "provider_budget_quota_state": self._provider_budget.quota_state(),
