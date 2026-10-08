@@ -174,10 +174,34 @@ def within_result_lookback(*, kickoff_utc: Any, status: str, now_utc: datetime) 
 
 
 def needs_result_sync(*, status: str, home_score: Any, away_score: Any) -> bool:
-    """True unless already terminal (finished-verified, cancelled, abandoned)."""
+    """FOOTBALL RESULT track: True unless verified terminal / cancelled / abandoned.
+
+    This governs provider status/score polling only. Corner truth is a separate
+    track (see :func:`needs_corner_truth_sync`).
+    """
     if status in {STATE_CANCELLED, STATE_ABANDONED}:
         return False
     return not is_finished_verified(status=status, home_score=home_score, away_score=away_score)
+
+
+def needs_corner_truth_sync(
+    *,
+    has_corner_pick: bool,
+    status: str,
+    home_score: Any,
+    away_score: Any,
+    corner_result_present: bool,
+) -> bool:
+    """CORNER TRUTH track: only a FINISHED_VERIFIED fixture with a corner pick.
+
+    Non-final states (PRE_MATCH/LIVE/HALFTIME/POSTPONED/UNKNOWN) and non-corner
+    fixtures are never eligible, so in-progress statistics can never be persisted
+    as final corner truth.
+    """
+    if not has_corner_pick or corner_result_present:
+        return False
+    return is_finished_verified(status=status, home_score=home_score, away_score=away_score)
+
 
 
 # --------------------------------------------------------------------------- selection
@@ -229,6 +253,84 @@ def select_result_sync_fixtures(
         )
     ]
     return sorted(eligible, key=_sort_key)[: max(0, int(max_fixtures))]
+
+
+@dataclass(frozen=True)
+class CornerFixtureCandidate:
+    fixture_id: str
+    provider_fixture_id: str
+    kickoff_utc: str
+    status: str
+    home_score: int | None
+    away_score: int | None
+    has_corner_pick: bool
+    corner_result_present: bool
+    last_corner_sync_attempt_at: str | None = None
+
+
+def _corner_sort_key(candidate: CornerFixtureCandidate) -> tuple[str, float, str]:
+    kickoff = _parse_kickoff(candidate.kickoff_utc)
+    recency = -kickoff.timestamp() if kickoff is not None else 0.0  # nearest recent first
+    return (
+        candidate.last_corner_sync_attempt_at or "",
+        recency,
+        candidate.fixture_id,
+    )
+
+
+def select_corner_sync_fixtures(
+    candidates: Sequence[CornerFixtureCandidate],
+    *,
+    max_fixtures: int,
+) -> list[CornerFixtureCandidate]:
+    eligible = [
+        candidate
+        for candidate in candidates
+        if str(candidate.provider_fixture_id or "").strip()
+        and needs_corner_truth_sync(
+            has_corner_pick=candidate.has_corner_pick,
+            status=candidate.status,
+            home_score=candidate.home_score,
+            away_score=candidate.away_score,
+            corner_result_present=candidate.corner_result_present,
+        )
+    ]
+    return sorted(eligible, key=_corner_sort_key)[: max(0, int(max_fixtures))]
+
+
+def plan_result_sync_slots(
+    *,
+    status_candidates: Sequence[ResultFixtureCandidate],
+    corner_candidates: Sequence[CornerFixtureCandidate],
+    max_fixtures: int,
+) -> tuple[list[ResultFixtureCandidate], list[CornerFixtureCandidate]]:
+    """Fair, deterministic slot allocation across the two independent tracks.
+
+    - both queues non-empty: roughly half the slots each (e.g. 1 status + 1 corner
+      when ``max_fixtures == 2``), with unused slots back-filled from the other
+      queue so neither track starves;
+    - a single non-empty queue may use all slots.
+    """
+    limit = max(0, int(max_fixtures))
+    status_pool = list(status_candidates)
+    corner_pool = list(corner_candidates)
+    if not status_pool:
+        return [], corner_pool[:limit]
+    if not corner_pool:
+        return status_pool[:limit], []
+    status_slots = (limit + 1) // 2
+    corner_slots = limit - status_slots
+    status_selected = status_pool[:status_slots]
+    corner_selected = corner_pool[:corner_slots]
+    remaining = limit - len(status_selected) - len(corner_selected)
+    if remaining > 0:
+        extra_status = status_pool[len(status_selected) : len(status_selected) + remaining]
+        status_selected = status_selected + extra_status
+        remaining -= len(extra_status)
+    if remaining > 0:
+        corner_selected = corner_selected + corner_pool[len(corner_selected) : len(corner_selected) + remaining]
+    return status_selected[:limit], corner_selected[:limit]
+
 
 
 # --------------------------------------------------------------------------- merging

@@ -70,14 +70,19 @@ from .result_sync import (
     STATE_CANCELLED,
     STATE_FINISHED,
     STATE_UNKNOWN,
+    CornerFixtureCandidate,
     ResultFixtureCandidate,
     canonical_status_for_fixture,
     is_finished_verified,
     merge_corner_truth,
     merge_fixture_truth,
+    needs_corner_truth_sync,
+    needs_result_sync,
     normalize_dashboard_status,
+    plan_result_sync_slots,
     resolve_result_sync_interval_seconds,
     resolve_result_sync_max_fixtures,
+    select_corner_sync_fixtures,
     select_result_sync_fixtures,
     within_result_lookback,
 )
@@ -794,6 +799,7 @@ class DashboardServices:
             "evaluations": {},
         }
         self._result_sync_attempts: dict[str, str] = {}
+        self._corner_sync_attempts: dict[str, str] = {}
         self._result_sync_runtime_state: dict[str, Any] = {
             "result_sync_scheduler_enabled": (
                 self.config.enable_result_sync_scheduler
@@ -805,8 +811,10 @@ class DashboardServices:
             "result_sync_last_error": None,
             "result_sync_cycles_completed": 0,
             "result_sync_selected_last_cycle": [],
+            "result_sync_corner_selected_last_cycle": [],
             "result_sync_requests_last_cycle": 0,
             "result_sync_attempts": {},
+            "result_sync_corner_attempts": {},
         }
         self._one_shot_sync_state: dict[str, Any] = {
             "configured": False,
@@ -972,6 +980,9 @@ class DashboardServices:
             attempts = result_sync_state.get("result_sync_attempts")
             if isinstance(attempts, dict):
                 self._result_sync_attempts.update({str(k): str(v) for k, v in attempts.items()})
+            corner_attempts = result_sync_state.get("result_sync_corner_attempts")
+            if isinstance(corner_attempts, dict):
+                self._corner_sync_attempts.update({str(k): str(v) for k, v in corner_attempts.items()})
         if isinstance(storage_runtime_state, dict):
             self._storage_runtime_state.update(storage_runtime_state)
         if isinstance(one_shot_sync_state, dict):
@@ -5133,6 +5144,7 @@ class DashboardServices:
 
     def _persist_result_sync_state(self, conn: Any) -> None:
         self._result_sync_runtime_state["result_sync_attempts"] = dict(self._result_sync_attempts)
+        self._result_sync_runtime_state["result_sync_corner_attempts"] = dict(self._corner_sync_attempts)
         storage.put_runtime_state(
             conn,
             state_key="result_sync_state",
@@ -5155,19 +5167,80 @@ class DashboardServices:
             "kickoff_utc": fixture.kickoff_utc,
         }
 
+    @staticmethod
+    def _fixture_context_from_row(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "fixture_id": str(row.get("fixture_id") or ""),
+            "provider": row.get("provider"),
+            "provider_fixture_id": row.get("provider_fixture_id"),
+            "competition_id": row.get("competition_id"),
+            "division_code": row.get("division_code"),
+            "season": row.get("season"),
+            "home_team_name": row.get("home_team_name"),
+            "away_team_name": row.get("away_team_name"),
+            "kickoff_utc": row.get("kickoff_utc"),
+        }
+
+    def _attempt_corner_truth(
+        self,
+        conn: Any,
+        *,
+        fixture_id: str,
+        context: dict[str, Any],
+    ) -> tuple[str, str | None]:
+        """Fetch + persist authoritative corner truth. Caller guarantees FINISHED_VERIFIED."""
+        self._corner_sync_attempts[fixture_id] = utc_now_iso()
+        existing_result = storage.fetch_fixture_result(
+            conn, fixture_id, initialize_schema=self._read_requires_schema_init()
+        )
+        try:
+            corners = self.statistics_provider.get_authoritative_corner_statistics(dict(context))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("corner sync skipped for %s: %s", fixture_id, exc)
+            return "ERROR", f"{type(exc).__name__}"
+        if corners is None:
+            return "NO_DATA", None
+        decision = merge_corner_truth(
+            existing_home_corners=(existing_result or {}).get("home_corners"),
+            existing_away_corners=(existing_result or {}).get("away_corners"),
+            incoming_home_corners=corners.home_corners,
+            incoming_away_corners=corners.away_corners,
+        )
+        if decision.action == "APPLY":
+            storage.upsert_fixture_result(
+                conn,
+                fixture_id=fixture_id,
+                statistics_provider=corners.provider,
+                statistics_provider_fixture_id=corners.provider_fixture_id,
+                home_corners=corners.home_corners,
+                away_corners=corners.away_corners,
+                total_corners=corners.total_corners,
+                source_timestamp=corners.source_timestamp,
+                captured_at=corners.captured_at,
+                initialize_schema=self._read_requires_schema_init(),
+            )
+            return "APPLIED", None
+        return decision.action, None
+
     def run_current_result_sync_cycle(self) -> dict[str, Any]:
         """One dedicated current-result sync cycle (sporting truth only).
 
-        Refreshes provider status/score for bounded current/recent past-kickoff
-        LIVE_ISSUED Model Pick fixtures via exact ``/fixtures?id=`` and persists
-        authoritative corner statistics for corner picks. It never touches the
-        paper ledger, never settles, never creates Value Bets and never refreshes
-        market odds.
+        Two independent tracks:
+
+        * FOOTBALL RESULT — exact ``/fixtures?id=`` for bounded current/recent
+          past-kickoff LIVE_ISSUED Model Pick fixtures that are not yet verified
+          terminal;
+        * CORNER TRUTH — exact ``/fixtures/statistics`` ONLY for FINISHED_VERIFIED
+          fixtures with a corner_total Model Pick and no corner truth yet.
+
+        Non-final fixtures never request or persist corner statistics. The path
+        never touches the paper ledger, never settles, never creates Value Bets
+        and never refreshes market odds.
         """
         started_at = utc_now_iso()
         now = datetime.now(timezone.utc)
         if not self.result_sync_scheduler_active():
-            return {"state": "DISABLED", "selected": [], "results_updated": 0, "corners_updated": 0}
+            return {"state": "DISABLED", "selected": [], "corner_selected": [], "results_updated": 0, "corners_updated": 0}
         metrics_before = self._provider_budget.metrics()
         error: str | None = None
         results_updated = 0
@@ -5176,14 +5249,24 @@ class DashboardServices:
         corner_conflicts = 0
         provider_errors = 0
         identity_unresolved = 0
-        selected_ids: list[str] = []
+        status_selected_ids: list[str] = []
+        corner_selected_ids: list[str] = []
         try:
             rows_with_predictions = self._all_fixtures_with_predictions()
             live_markets = self._live_issued_pick_fixture_markets()
-            candidates: list[ResultFixtureCandidate] = []
+            row_by_id = {str(row.get("fixture_id") or ""): row for row in rows_with_predictions}
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                storage.initialize_database(conn)
+                existing_results = {
+                    str(r["fixture_id"]): r
+                    for r in storage.fetch_fixture_results(conn, initialize_schema=False)
+                }
+            status_candidates: list[ResultFixtureCandidate] = []
+            corner_candidates: list[CornerFixtureCandidate] = []
             for row in rows_with_predictions:
                 fixture_id = str(row.get("fixture_id") or "")
-                if fixture_id not in live_markets:
+                markets = live_markets.get(fixture_id)
+                if not markets:
                     continue
                 status = canonical_status_for_fixture(
                     normalized_status=row.get("status"),
@@ -5191,35 +5274,63 @@ class DashboardServices:
                 )
                 if not within_result_lookback(kickoff_utc=row.get("kickoff_utc"), status=status, now_utc=now):
                     continue
-                candidates.append(
-                    ResultFixtureCandidate(
-                        fixture_id=fixture_id,
-                        provider_fixture_id=str(row.get("provider_fixture_id") or ""),
-                        kickoff_utc=str(row.get("kickoff_utc") or ""),
-                        status=status,
-                        home_score=row.get("home_score"),
-                        away_score=row.get("away_score"),
-                        has_live_issued_pick=True,
-                        last_result_sync_attempt_at=self._result_sync_attempts.get(fixture_id),
+                home_score = row.get("home_score")
+                away_score = row.get("away_score")
+                if needs_result_sync(status=status, home_score=home_score, away_score=away_score):
+                    status_candidates.append(
+                        ResultFixtureCandidate(
+                            fixture_id=fixture_id,
+                            provider_fixture_id=str(row.get("provider_fixture_id") or ""),
+                            kickoff_utc=str(row.get("kickoff_utc") or ""),
+                            status=status,
+                            home_score=home_score,
+                            away_score=away_score,
+                            has_live_issued_pick=True,
+                            last_result_sync_attempt_at=self._result_sync_attempts.get(fixture_id),
+                        )
                     )
+                result_row = existing_results.get(fixture_id) or {}
+                corner_present = (
+                    result_row.get("home_corners") is not None and result_row.get("away_corners") is not None
                 )
+                if needs_corner_truth_sync(
+                    has_corner_pick="corner_total" in markets,
+                    status=status,
+                    home_score=home_score,
+                    away_score=away_score,
+                    corner_result_present=corner_present,
+                ):
+                    corner_candidates.append(
+                        CornerFixtureCandidate(
+                            fixture_id=fixture_id,
+                            provider_fixture_id=str(row.get("provider_fixture_id") or ""),
+                            kickoff_utc=str(row.get("kickoff_utc") or ""),
+                            status=status,
+                            home_score=home_score,
+                            away_score=away_score,
+                            has_corner_pick=True,
+                            corner_result_present=corner_present,
+                            last_corner_sync_attempt_at=self._corner_sync_attempts.get(fixture_id),
+                        )
+                    )
             max_fixtures = resolve_result_sync_max_fixtures(self.config.result_sync_max_fixtures_per_cycle)
-            selected = select_result_sync_fixtures(candidates, max_fixtures=max_fixtures)
-            selected_ids = [candidate.fixture_id for candidate in selected]
+            status_selected, corner_selected = plan_result_sync_slots(
+                status_candidates=select_result_sync_fixtures(status_candidates, max_fixtures=max_fixtures),
+                corner_candidates=select_corner_sync_fixtures(corner_candidates, max_fixtures=max_fixtures),
+                max_fixtures=max_fixtures,
+            )
+            status_selected_ids = [candidate.fixture_id for candidate in status_selected]
+            corner_selected_ids = [candidate.fixture_id for candidate in corner_selected]
             with storage.connect(self.config.dashboard_db_path) as conn:
                 storage.initialize_database(conn)
-                for candidate in selected:
+                for candidate in status_selected:
                     fixture_id = candidate.fixture_id
                     self._result_sync_attempts[fixture_id] = utc_now_iso()
                     try:
                         fetched = self.fixture_provider.get_fixture(fixture_id)
-                    except FixtureProviderError as exc:
-                        provider_errors += 1
-                        logger.warning("result sync provider error for %s: %s", fixture_id, exc)
-                        continue
                     except Exception as exc:  # noqa: BLE001
                         provider_errors += 1
-                        logger.warning("result sync unexpected error for %s: %s", fixture_id, exc)
+                        logger.warning("result sync provider error for %s: %s", fixture_id, exc)
                         continue
                     if fetched is None:
                         identity_unresolved += 1
@@ -5252,41 +5363,42 @@ class DashboardServices:
                         conflicts += 1
                         logger.warning("result sync conflict for %s: %s", fixture_id, decision.reason)
 
-                    if "corner_total" in live_markets.get(fixture_id, set()):
+                    # Same-cycle corner eligibility: only after FINISHED_VERIFIED is proven.
+                    if is_finished_verified(
+                        status=incoming_status,
+                        home_score=fetched.home_score,
+                        away_score=fetched.away_score,
+                    ) and "corner_total" in live_markets.get(fixture_id, set()):
                         existing_result = storage.fetch_fixture_result(
                             conn, fixture_id, initialize_schema=self._read_requires_schema_init()
                         )
-                        try:
-                            corners = self.statistics_provider.get_authoritative_corner_statistics(
-                                self._fixture_context_from_normalized(fetched)
+                        already = (existing_result or {}).get("home_corners") is not None and (
+                            existing_result or {}
+                        ).get("away_corners") is not None
+                        if not already:
+                            action, _ = self._attempt_corner_truth(
+                                conn,
+                                fixture_id=fixture_id,
+                                context=self._fixture_context_from_normalized(fetched),
                             )
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("corner sync skipped for %s: %s", fixture_id, exc)
-                            corners = None
-                        if corners is not None:
-                            corner_decision = merge_corner_truth(
-                                existing_home_corners=(existing_result or {}).get("home_corners"),
-                                existing_away_corners=(existing_result or {}).get("away_corners"),
-                                incoming_home_corners=corners.home_corners,
-                                incoming_away_corners=corners.away_corners,
-                            )
-                            if corner_decision.action == "APPLY":
-                                storage.upsert_fixture_result(
-                                    conn,
-                                    fixture_id=fixture_id,
-                                    statistics_provider=corners.provider,
-                                    statistics_provider_fixture_id=corners.provider_fixture_id,
-                                    home_corners=corners.home_corners,
-                                    away_corners=corners.away_corners,
-                                    total_corners=corners.total_corners,
-                                    source_timestamp=corners.source_timestamp,
-                                    captured_at=corners.captured_at,
-                                    initialize_schema=self._read_requires_schema_init(),
-                                )
+                            if action == "APPLIED":
                                 corners_updated += 1
-                            elif corner_decision.action == "CONFLICT":
+                            elif action == "CONFLICT":
                                 corner_conflicts += 1
-                                logger.warning("corner truth conflict for %s: %s", fixture_id, corner_decision.reason)
+                            elif action == "ERROR":
+                                provider_errors += 1
+
+                # Corner-only track: already FINISHED_VERIFIED; statistics only (no status re-fetch).
+                for candidate in corner_selected:
+                    fixture_id = candidate.fixture_id
+                    context = self._fixture_context_from_row(row_by_id.get(fixture_id) or {})
+                    action, _ = self._attempt_corner_truth(conn, fixture_id=fixture_id, context=context)
+                    if action == "APPLIED":
+                        corners_updated += 1
+                    elif action == "CONFLICT":
+                        corner_conflicts += 1
+                    elif action == "ERROR":
+                        provider_errors += 1
                 self._persist_result_sync_state(conn)
         except Exception as exc:  # noqa: BLE001
             error = f"{type(exc).__name__}: {exc}"
@@ -5303,7 +5415,8 @@ class DashboardServices:
                 "result_sync_last_success_at": None if error else utc_now_iso(),
                 "result_sync_last_error": error,
                 "result_sync_cycles_completed": completed,
-                "result_sync_selected_last_cycle": list(selected_ids),
+                "result_sync_selected_last_cycle": list(status_selected_ids),
+                "result_sync_corner_selected_last_cycle": list(corner_selected_ids),
                 "result_sync_requests_last_cycle": requests_this_cycle,
                 "result_sync_last_results_updated": results_updated,
                 "result_sync_last_corners_updated": corners_updated,
@@ -5315,7 +5428,8 @@ class DashboardServices:
             logger.warning("dedicated result sync cycle error: %s", error)
         return {
             "state": "RESULT_SYNC",
-            "selected": selected_ids,
+            "selected": status_selected_ids,
+            "corner_selected": corner_selected_ids,
             "results_updated": results_updated,
             "corners_updated": corners_updated,
             "conflicts": conflicts,

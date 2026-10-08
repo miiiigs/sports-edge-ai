@@ -354,28 +354,6 @@ def test_result_sync_persists_status_score_and_corners(tmp_path, monkeypatch):
     assert services._result_sync_runtime_state["result_sync_last_error"] is None
 
 
-def test_result_sync_blocks_conflicting_corner_truth(tmp_path, monkeypatch):
-    config = _config(tmp_path)
-    fid = "api-football:222"
-    kickoff = _past_kickoff(2)
-    existing = _normalized(fid, status="LIVE", home_score=1, away_score=0, kickoff=kickoff)
-    fetched = _normalized(fid, status="LIVE", home_score=1, away_score=0, kickoff=kickoff)
-    _seed_fixture(config, existing)
-    _seed_pick(config.model_pick_db_path, fid, market="corner_total")
-    with storage.connect(config.dashboard_db_path) as conn:
-        storage.upsert_fixture_result(conn, fixture_id=fid, statistics_provider="api-football", statistics_provider_fixture_id="222", home_corners=5, away_corners=4, total_corners=9, source_timestamp=None, captured_at="2026-10-08T10:00:00+00:00", initialize_schema=False)
-    services = DashboardServices(config, fixture_provider=FakeFixtureProvider({fid: fetched}), market_provider=NotConfiguredMarketProvider(), statistics_provider=FakeStatsProvider({fid: (6, 4)}))
-    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for([existing]))
-
-    result = services.run_current_result_sync_cycle()
-
-    assert result["corner_conflicts"] == 1
-    assert result["corners_updated"] == 0
-    with storage.connect(config.dashboard_db_path) as conn:
-        corner = storage.fetch_fixture_result(conn, fid, initialize_schema=False)
-        assert (corner["home_corners"], corner["away_corners"]) == (5, 4)  # unchanged
-
-
 def test_result_sync_skips_finished_verified(tmp_path, monkeypatch):
     config = _config(tmp_path)
     fid = "api-football:333"
@@ -389,6 +367,162 @@ def test_result_sync_skips_finished_verified(tmp_path, monkeypatch):
     result = services.run_current_result_sync_cycle()
     assert result["selected"] == []
     assert provider.calls == 0
+
+
+# ------------------------------------------------ corner-truth safety (non-final)
+@pytest.mark.parametrize(
+    "status",
+    ["PRE_MATCH", "LIVE", "HALFTIME", "POSTPONED", "CANCELLED", "ABANDONED", "MADE_UP"],
+)
+def test_non_final_fixtures_never_request_or_persist_corners(tmp_path, monkeypatch, status):
+    config = _config(tmp_path)
+    fid = f"api-football:{status}"
+    kickoff = _past_kickoff(1)
+    fixture = _normalized(fid, status=status, home_score=(1 if status in {"LIVE", "HALFTIME"} else None), away_score=(0 if status in {"LIVE", "HALFTIME"} else None), kickoff=kickoff)
+    _seed_fixture(config, fixture)
+    _seed_pick(config.model_pick_db_path, fid, market="corner_total")
+    stats = FakeStatsProvider({fid: (4, 3)})
+    provider = FakeFixtureProvider({})  # status sync may or may not run; corners must not
+    services = DashboardServices(config, fixture_provider=provider, market_provider=NotConfiguredMarketProvider(), statistics_provider=stats)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for([fixture]))
+    services.run_current_result_sync_cycle()
+    assert stats.calls == 0  # never request /fixtures/statistics for a non-final fixture
+    with storage.connect(config.dashboard_db_path) as conn:
+        assert storage.fetch_fixture_result(conn, fid, initialize_schema=False) is None
+
+
+def test_finished_corner_only_uses_statistics_not_status(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    fid = "api-football:555"
+    kickoff = _past_kickoff(2)
+    finished = _normalized(fid, status="FINISHED", home_score=2, away_score=1, kickoff=kickoff)
+    _seed_fixture(config, finished)
+    _seed_pick(config.model_pick_db_path, fid, market="corner_total")
+    provider = FakeFixtureProvider({fid: finished})
+    stats = FakeStatsProvider({fid: (8, 5)})
+    services = DashboardServices(config, fixture_provider=provider, market_provider=NotConfiguredMarketProvider(), statistics_provider=stats)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for([finished]))
+    result = services.run_current_result_sync_cycle()
+    assert result["corner_selected"] == [fid]
+    assert result["corners_updated"] == 1
+    assert provider.calls == 0  # already verified final: no /fixtures?id= re-fetch
+    assert stats.calls == 1
+    with storage.connect(config.dashboard_db_path) as conn:
+        corner = storage.fetch_fixture_result(conn, fid, initialize_schema=False)
+        assert corner["total_corners"] == 13
+
+
+def test_finished_with_corners_present_makes_no_statistics_request(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    fid = "api-football:556"
+    kickoff = _past_kickoff(2)
+    finished = _normalized(fid, status="FINISHED", home_score=1, away_score=1, kickoff=kickoff)
+    _seed_fixture(config, finished)
+    _seed_pick(config.model_pick_db_path, fid, market="corner_total")
+    with storage.connect(config.dashboard_db_path) as conn:
+        storage.upsert_fixture_result(conn, fixture_id=fid, statistics_provider="api-football", statistics_provider_fixture_id="556", home_corners=6, away_corners=6, total_corners=12, source_timestamp=None, captured_at="2026-10-08T10:00:00+00:00", initialize_schema=False)
+    provider = FakeFixtureProvider({fid: finished})
+    stats = FakeStatsProvider({fid: (9, 9)})
+    services = DashboardServices(config, fixture_provider=provider, market_provider=NotConfiguredMarketProvider(), statistics_provider=stats)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for([finished]))
+    services.run_current_result_sync_cycle()
+    assert provider.calls == 0
+    assert stats.calls == 0  # terminal stop: nothing left to do
+
+
+def test_ah_only_finished_does_not_request_corners(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    fid = "api-football:557"
+    kickoff = _past_kickoff(2)
+    finished = _normalized(fid, status="FINISHED", home_score=3, away_score=0, kickoff=kickoff)
+    _seed_fixture(config, finished)
+    _seed_pick(config.model_pick_db_path, fid, market="asian_handicap")
+    provider = FakeFixtureProvider({fid: finished})
+    stats = FakeStatsProvider({fid: (5, 5)})
+    services = DashboardServices(config, fixture_provider=provider, market_provider=NotConfiguredMarketProvider(), statistics_provider=stats)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for([finished]))
+    services.run_current_result_sync_cycle()
+    assert stats.calls == 0
+
+
+def test_live_to_finished_persists_corners_same_cycle(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    fid = "api-football:558"
+    kickoff = _past_kickoff(1)
+    live = _normalized(fid, status="HALFTIME", home_score=1, away_score=0, kickoff=kickoff)
+    finished = _normalized(fid, status="FINISHED", home_score=3, away_score=1, kickoff=kickoff)
+    _seed_fixture(config, live)
+    _seed_pick(config.model_pick_db_path, fid, market="corner_total")
+    stats = FakeStatsProvider({fid: (9, 4)})
+    services = DashboardServices(config, fixture_provider=FakeFixtureProvider({fid: finished}), market_provider=NotConfiguredMarketProvider(), statistics_provider=stats)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for([live]))
+    result = services.run_current_result_sync_cycle()
+    assert result["results_updated"] == 1
+    assert result["corners_updated"] == 1
+    assert stats.calls == 1
+    with storage.connect(config.dashboard_db_path) as conn:
+        row = storage.fetch_fixture(conn, fid, initialize_schema=False)
+        assert row["status"] == "FINISHED"
+        assert storage.fetch_fixture_result(conn, fid, initialize_schema=False)["total_corners"] == 13
+
+
+def test_plan_result_sync_slots_fairness():
+    status_c = [_cand("s1", rs.STATE_LIVE), _cand("s2", rs.STATE_LIVE)]
+    corner_c = [_cand_corner("c1"), _cand_corner("c2")]
+    status_sel, corner_sel = rs.plan_result_sync_slots(status_candidates=status_c, corner_candidates=corner_c, max_fixtures=2)
+    assert [c.fixture_id for c in status_sel] == ["s1"]
+    assert [c.fixture_id for c in corner_sel] == ["c1"]
+    # only one queue -> use both slots
+    status_only, corner_none = rs.plan_result_sync_slots(status_candidates=status_c, corner_candidates=[], max_fixtures=2)
+    assert [c.fixture_id for c in status_only] == ["s1", "s2"]
+    assert corner_none == []
+
+
+def _cand_corner(fid, *, attempt=None, kickoff=None):
+    return rs.CornerFixtureCandidate(
+        fixture_id=fid,
+        provider_fixture_id=fid,
+        kickoff_utc=kickoff or "2026-10-08T10:00:00+00:00",
+        status=rs.STATE_FINISHED,
+        home_score=1,
+        away_score=0,
+        has_corner_pick=True,
+        corner_result_present=False,
+        last_corner_sync_attempt_at=attempt,
+    )
+
+
+def test_corner_selection_requires_final_and_rotation():
+    now = "2026-10-08T10:00:00+00:00"
+    eligible = [
+        _cand_corner("a", attempt="2026-10-08T09:00:00+00:00"),
+        _cand_corner("b", attempt=None),
+        rs.CornerFixtureCandidate("c", "c", now, rs.STATE_LIVE, 1, 0, True, False, None),
+        rs.CornerFixtureCandidate("d", "d", now, rs.STATE_FINISHED, 1, 0, True, True, None),
+    ]
+    selected = rs.select_corner_sync_fixtures(eligible, max_fixtures=5)
+    assert [c.fixture_id for c in selected] == ["b", "a"]  # never-attempted first, oldest attempt, non-final/present excluded
+
+
+def test_both_queues_served_in_one_cycle(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    live_id = "api-football:601"
+    corner_id = "api-football:602"
+    kickoff = _past_kickoff(1)
+    live = _normalized(live_id, status="LIVE", home_score=1, away_score=0, kickoff=kickoff)
+    finished = _normalized(corner_id, status="FINISHED", home_score=2, away_score=2, kickoff=_past_kickoff(2))
+    _seed_fixture(config, live)
+    _seed_fixture(config, finished)
+    _seed_pick(config.model_pick_db_path, live_id, market="asian_handicap")
+    _seed_pick(config.model_pick_db_path, corner_id, market="corner_total")
+    provider = FakeFixtureProvider({live_id: _normalized(live_id, status="FINISHED", home_score=2, away_score=0, kickoff=kickoff)})
+    stats = FakeStatsProvider({corner_id: (7, 2)})
+    services = DashboardServices(config, fixture_provider=provider, market_provider=NotConfiguredMarketProvider(), statistics_provider=stats)
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for([live, finished]))
+    result = services.run_current_result_sync_cycle()
+    assert live_id in result["selected"]
+    assert corner_id in result["corner_selected"]
+    assert provider.calls == 1 and stats.calls == 1
 
 
 # --------------------------------------------------------------------------- loop
