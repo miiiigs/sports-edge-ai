@@ -111,6 +111,32 @@ async def _run_market_collection_runtime(services: DashboardServices, stop_event
             return
 
 
+async def _run_result_sync_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Isolated, recurring current-result (sporting truth) loop. No-op when disabled.
+
+    Independent of the global scheduler and the market collector. Runs
+    sequentially and only refreshes provider status/score and authoritative
+    corner truth for bounded current/recent fixtures: no fixture sync,
+    prediction generation, evaluation, paper entries, portfolio or settlement.
+    """
+    if not services.result_sync_scheduler_active():
+        logger.info("result sync scheduler: state=disabled")
+        return
+    interval = max(1, int(services.config.result_sync_interval_seconds))
+    logger.info("result sync scheduler started: interval_seconds=%s", interval)
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(services.run_current_result_sync_cycle)
+        except Exception:
+            logger.exception("result sync cycle failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+        else:
+            return
+
+
 async def run_worker() -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -138,6 +164,9 @@ async def run_worker() -> int:
     market_collection_task = asyncio.create_task(
         _run_market_collection_runtime(services, stop_event)
     )
+    result_sync_task = asyncio.create_task(
+        _run_result_sync_runtime(services, stop_event)
+    )
 
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
@@ -148,7 +177,8 @@ async def run_worker() -> int:
     finally:
         shadow_task.cancel()
         market_collection_task.cancel()
-        for task in (shadow_task, market_collection_task):
+        result_sync_task.cancel()
+        for task in (shadow_task, market_collection_task, result_sync_task):
             try:
                 await task
             except asyncio.CancelledError:

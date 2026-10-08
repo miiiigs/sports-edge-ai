@@ -10,7 +10,7 @@ import logging
 import os
 import sqlite3
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -61,6 +61,25 @@ from .market_collection_policy import (
     resolve_collection_only_max_fixtures,
     resolve_market_collection_interval_seconds,
     select_collection_fixtures,
+)
+from .result_sync import (
+    RESULT_SYNC_INTERVAL_ENV_VAR,
+    RESULT_SYNC_MAX_FIXTURES_ENV_VAR,
+    RESULT_SYNC_SCHEDULER_ENV_VAR,
+    STATE_ABANDONED,
+    STATE_CANCELLED,
+    STATE_FINISHED,
+    STATE_UNKNOWN,
+    ResultFixtureCandidate,
+    canonical_status_for_fixture,
+    is_finished_verified,
+    merge_corner_truth,
+    merge_fixture_truth,
+    normalize_dashboard_status,
+    resolve_result_sync_interval_seconds,
+    resolve_result_sync_max_fixtures,
+    select_result_sync_fixtures,
+    within_result_lookback,
 )
 from .models import (
     FIXTURE_LIVE_STATUSES,
@@ -592,6 +611,11 @@ class DashboardConfig:
     # automated fixture/prediction scheduler (enable_scheduler).
     enable_market_collection_scheduler: bool = False
     market_collection_interval_seconds: int = 600
+    # Dedicated current-result (sporting truth) sync scheduler. Independent of the
+    # global automated scheduler and the market collector.
+    enable_result_sync_scheduler: bool = False
+    result_sync_interval_seconds: int = 600
+    result_sync_max_fixtures_per_cycle: int = 0
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
     startup_sync_timeout_seconds: int = 15
@@ -634,6 +658,11 @@ class DashboardConfig:
             market_collection_interval_seconds=resolve_market_collection_interval_seconds(
                 _env_int(MARKET_COLLECTION_INTERVAL_ENV_VAR, 0)
             ),
+            enable_result_sync_scheduler=_env_bool(RESULT_SYNC_SCHEDULER_ENV_VAR, False),
+            result_sync_interval_seconds=resolve_result_sync_interval_seconds(
+                _env_int(RESULT_SYNC_INTERVAL_ENV_VAR, 0)
+            ),
+            result_sync_max_fixtures_per_cycle=_env_int(RESULT_SYNC_MAX_FIXTURES_ENV_VAR, 0),
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
             startup_sync_timeout_seconds=_env_int(DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR, 15),
@@ -763,6 +792,21 @@ class DashboardServices:
             "settlement_queue_count": 0,
             "decision_count": 0,
             "evaluations": {},
+        }
+        self._result_sync_attempts: dict[str, str] = {}
+        self._result_sync_runtime_state: dict[str, Any] = {
+            "result_sync_scheduler_enabled": (
+                self.config.enable_result_sync_scheduler
+                and self.fixture_provider.provider_name() == "api-football"
+            ),
+            "result_sync_interval_seconds": self.config.result_sync_interval_seconds,
+            "result_sync_last_cycle_at": None,
+            "result_sync_last_success_at": None,
+            "result_sync_last_error": None,
+            "result_sync_cycles_completed": 0,
+            "result_sync_selected_last_cycle": [],
+            "result_sync_requests_last_cycle": 0,
+            "result_sync_attempts": {},
         }
         self._one_shot_sync_state: dict[str, Any] = {
             "configured": False,
@@ -900,6 +944,7 @@ class DashboardServices:
         provider_state = storage.get_runtime_state(conn, "provider_state", initialize_schema=False)
         prediction_state = storage.get_runtime_state(conn, "prediction_state", initialize_schema=False)
         market_runtime_state = storage.get_runtime_state(conn, "market_runtime_state", initialize_schema=False)
+        result_sync_state = storage.get_runtime_state(conn, "result_sync_state", initialize_schema=False)
         storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state", initialize_schema=False)
         one_shot_sync_state = storage.get_runtime_state(conn, "one_shot_sync_state", initialize_schema=False)
         if isinstance(provider_state, dict):
@@ -922,6 +967,11 @@ class DashboardServices:
             self._prediction_state.update(prediction_state)
         if isinstance(market_runtime_state, dict):
             self._market_runtime_state.update(market_runtime_state)
+        if isinstance(result_sync_state, dict):
+            self._result_sync_runtime_state.update(result_sync_state)
+            attempts = result_sync_state.get("result_sync_attempts")
+            if isinstance(attempts, dict):
+                self._result_sync_attempts.update({str(k): str(v) for k, v in attempts.items()})
         if isinstance(storage_runtime_state, dict):
             self._storage_runtime_state.update(storage_runtime_state)
         if isinstance(one_shot_sync_state, dict):
@@ -5051,6 +5101,231 @@ class DashboardServices:
             "state": "COLLECTED",
         }
 
+    # --------------------------------------------------- dedicated result sync
+    def result_sync_scheduler_active(self) -> bool:
+        """True only when the dedicated result-sync flag is on and provider is API-Football."""
+        return bool(
+            self.config.enable_result_sync_scheduler
+            and self.fixture_provider.provider_name() == "api-football"
+        )
+
+    def _live_issued_pick_fixture_markets(self) -> dict[str, set[str]]:
+        model_pick_db_path = getattr(self.config, "model_pick_db_path", None)
+        if not model_pick_db_path:
+            return {}
+        path = Path(model_pick_db_path)
+        if not path.exists():
+            return {}
+        try:
+            conn = football_model_pick_ledger.connect(path)
+            try:
+                rows = football_model_pick_ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return {}
+        out: dict[str, set[str]] = {}
+        for row in rows:
+            if str(row.get("record_origin") or "") != football_model_pick_ledger.RECORD_ORIGIN_LIVE_ISSUED:
+                continue
+            out.setdefault(str(row.get("fixture_id") or ""), set()).add(str(row.get("market") or ""))
+        return out
+
+    def _persist_result_sync_state(self, conn: Any) -> None:
+        self._result_sync_runtime_state["result_sync_attempts"] = dict(self._result_sync_attempts)
+        storage.put_runtime_state(
+            conn,
+            state_key="result_sync_state",
+            state_value=self._result_sync_runtime_state,
+            updated_at=utc_now_iso(),
+            initialize_schema=self._read_requires_schema_init(),
+        )
+
+    @staticmethod
+    def _fixture_context_from_normalized(fixture: NormalizedFixture) -> dict[str, Any]:
+        return {
+            "fixture_id": fixture.fixture_id,
+            "provider": fixture.provider,
+            "provider_fixture_id": fixture.provider_fixture_id,
+            "competition_id": fixture.competition_id,
+            "division_code": fixture.division_code,
+            "season": fixture.season,
+            "home_team_name": fixture.home_team_name,
+            "away_team_name": fixture.away_team_name,
+            "kickoff_utc": fixture.kickoff_utc,
+        }
+
+    def run_current_result_sync_cycle(self) -> dict[str, Any]:
+        """One dedicated current-result sync cycle (sporting truth only).
+
+        Refreshes provider status/score for bounded current/recent past-kickoff
+        LIVE_ISSUED Model Pick fixtures via exact ``/fixtures?id=`` and persists
+        authoritative corner statistics for corner picks. It never touches the
+        paper ledger, never settles, never creates Value Bets and never refreshes
+        market odds.
+        """
+        started_at = utc_now_iso()
+        now = datetime.now(timezone.utc)
+        if not self.result_sync_scheduler_active():
+            return {"state": "DISABLED", "selected": [], "results_updated": 0, "corners_updated": 0}
+        metrics_before = self._provider_budget.metrics()
+        error: str | None = None
+        results_updated = 0
+        corners_updated = 0
+        conflicts = 0
+        corner_conflicts = 0
+        provider_errors = 0
+        identity_unresolved = 0
+        selected_ids: list[str] = []
+        try:
+            rows_with_predictions = self._all_fixtures_with_predictions()
+            live_markets = self._live_issued_pick_fixture_markets()
+            candidates: list[ResultFixtureCandidate] = []
+            for row in rows_with_predictions:
+                fixture_id = str(row.get("fixture_id") or "")
+                if fixture_id not in live_markets:
+                    continue
+                status = canonical_status_for_fixture(
+                    normalized_status=row.get("status"),
+                    provider_payload=row.get("provider_payload"),
+                )
+                if not within_result_lookback(kickoff_utc=row.get("kickoff_utc"), status=status, now_utc=now):
+                    continue
+                candidates.append(
+                    ResultFixtureCandidate(
+                        fixture_id=fixture_id,
+                        provider_fixture_id=str(row.get("provider_fixture_id") or ""),
+                        kickoff_utc=str(row.get("kickoff_utc") or ""),
+                        status=status,
+                        home_score=row.get("home_score"),
+                        away_score=row.get("away_score"),
+                        has_live_issued_pick=True,
+                        last_result_sync_attempt_at=self._result_sync_attempts.get(fixture_id),
+                    )
+                )
+            max_fixtures = resolve_result_sync_max_fixtures(self.config.result_sync_max_fixtures_per_cycle)
+            selected = select_result_sync_fixtures(candidates, max_fixtures=max_fixtures)
+            selected_ids = [candidate.fixture_id for candidate in selected]
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                storage.initialize_database(conn)
+                for candidate in selected:
+                    fixture_id = candidate.fixture_id
+                    self._result_sync_attempts[fixture_id] = utc_now_iso()
+                    try:
+                        fetched = self.fixture_provider.get_fixture(fixture_id)
+                    except FixtureProviderError as exc:
+                        provider_errors += 1
+                        logger.warning("result sync provider error for %s: %s", fixture_id, exc)
+                        continue
+                    except Exception as exc:  # noqa: BLE001
+                        provider_errors += 1
+                        logger.warning("result sync unexpected error for %s: %s", fixture_id, exc)
+                        continue
+                    if fetched is None:
+                        identity_unresolved += 1
+                        continue
+                    incoming_status = canonical_status_for_fixture(
+                        normalized_status=fetched.status,
+                        provider_payload=fetched.provider_payload,
+                    )
+                    existing = storage.fetch_fixture(
+                        conn, fixture_id, initialize_schema=self._read_requires_schema_init()
+                    ) or {}
+                    decision = merge_fixture_truth(
+                        existing_status=normalize_dashboard_status(existing.get("status")),
+                        existing_home_score=existing.get("home_score"),
+                        existing_away_score=existing.get("away_score"),
+                        incoming_status=incoming_status,
+                        incoming_home_score=fetched.home_score,
+                        incoming_away_score=fetched.away_score,
+                    )
+                    if decision.action == "APPLY":
+                        incoming_fixture = fetched if incoming_status == fetched.status else replace(fetched, status=incoming_status)
+                        storage.upsert_fixtures(
+                            conn,
+                            [incoming_fixture],
+                            updated_at=utc_now_iso(),
+                            initialize_schema=self._read_requires_schema_init(),
+                        )
+                        results_updated += 1
+                    elif decision.action == "CONFLICT":
+                        conflicts += 1
+                        logger.warning("result sync conflict for %s: %s", fixture_id, decision.reason)
+
+                    if "corner_total" in live_markets.get(fixture_id, set()):
+                        existing_result = storage.fetch_fixture_result(
+                            conn, fixture_id, initialize_schema=self._read_requires_schema_init()
+                        )
+                        try:
+                            corners = self.statistics_provider.get_authoritative_corner_statistics(
+                                self._fixture_context_from_normalized(fetched)
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("corner sync skipped for %s: %s", fixture_id, exc)
+                            corners = None
+                        if corners is not None:
+                            corner_decision = merge_corner_truth(
+                                existing_home_corners=(existing_result or {}).get("home_corners"),
+                                existing_away_corners=(existing_result or {}).get("away_corners"),
+                                incoming_home_corners=corners.home_corners,
+                                incoming_away_corners=corners.away_corners,
+                            )
+                            if corner_decision.action == "APPLY":
+                                storage.upsert_fixture_result(
+                                    conn,
+                                    fixture_id=fixture_id,
+                                    statistics_provider=corners.provider,
+                                    statistics_provider_fixture_id=corners.provider_fixture_id,
+                                    home_corners=corners.home_corners,
+                                    away_corners=corners.away_corners,
+                                    total_corners=corners.total_corners,
+                                    source_timestamp=corners.source_timestamp,
+                                    captured_at=corners.captured_at,
+                                    initialize_schema=self._read_requires_schema_init(),
+                                )
+                                corners_updated += 1
+                            elif corner_decision.action == "CONFLICT":
+                                corner_conflicts += 1
+                                logger.warning("corner truth conflict for %s: %s", fixture_id, corner_decision.reason)
+                self._persist_result_sync_state(conn)
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+        metrics_after = self._provider_budget.metrics()
+        requests_this_cycle = max(
+            0, int(metrics_after.get("http_requests", 0)) - int(metrics_before.get("http_requests", 0))
+        )
+        completed = int(self._result_sync_runtime_state.get("result_sync_cycles_completed") or 0) + 1
+        self._result_sync_runtime_state.update(
+            {
+                "result_sync_scheduler_enabled": True,
+                "result_sync_interval_seconds": self.config.result_sync_interval_seconds,
+                "result_sync_last_cycle_at": started_at,
+                "result_sync_last_success_at": None if error else utc_now_iso(),
+                "result_sync_last_error": error,
+                "result_sync_cycles_completed": completed,
+                "result_sync_selected_last_cycle": list(selected_ids),
+                "result_sync_requests_last_cycle": requests_this_cycle,
+                "result_sync_last_results_updated": results_updated,
+                "result_sync_last_corners_updated": corners_updated,
+            }
+        )
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            self._persist_result_sync_state(conn)
+        if error:
+            logger.warning("dedicated result sync cycle error: %s", error)
+        return {
+            "state": "RESULT_SYNC",
+            "selected": selected_ids,
+            "results_updated": results_updated,
+            "corners_updated": corners_updated,
+            "conflicts": conflicts,
+            "corner_conflicts": corner_conflicts,
+            "provider_errors": provider_errors,
+            "identity_unresolved": identity_unresolved,
+            "requests": requests_this_cycle,
+            "error": error,
+        }
+
     def ensure_prediction(self, conn: Any, fixture: NormalizedFixture) -> dict[str, Any]:
         if self.snapshot is None:
             payload = attach_edge_desk_shadow_bundle(
@@ -7345,6 +7620,22 @@ class DashboardServices:
                 self._market_runtime_state.get("market_collection_snapshots_last_cycle") or 0
             ),
             "value_evaluation": self._market_runtime_state.get("value_evaluation", "ENABLED"),
+            "result_sync_scheduler_enabled": bool(
+                self._result_sync_runtime_state.get("result_sync_scheduler_enabled")
+            ),
+            "result_sync_interval_seconds": self._result_sync_runtime_state.get("result_sync_interval_seconds"),
+            "result_sync_last_cycle_at": self._result_sync_runtime_state.get("result_sync_last_cycle_at"),
+            "result_sync_last_success_at": self._result_sync_runtime_state.get("result_sync_last_success_at"),
+            "result_sync_last_error": self._result_sync_runtime_state.get("result_sync_last_error"),
+            "result_sync_cycles_completed": int(
+                self._result_sync_runtime_state.get("result_sync_cycles_completed") or 0
+            ),
+            "result_sync_selected_last_cycle": list(
+                self._result_sync_runtime_state.get("result_sync_selected_last_cycle") or []
+            ),
+            "result_sync_requests_last_cycle": int(
+                self._result_sync_runtime_state.get("result_sync_requests_last_cycle") or 0
+            ),
             "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
             "provider_budget_quota_state": self._provider_budget.quota_state(),
             "settlement_queue_count": int(self._market_runtime_state.get("settlement_queue_count") or 0),
