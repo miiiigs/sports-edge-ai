@@ -85,6 +85,32 @@ async def _run_shadow_runtime(runtime: FiveDollarShadowRuntime, stop_event: asyn
             return
 
 
+async def _run_market_collection_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Isolated, recurring collection-only market loop. No-op when disabled.
+
+    Independent of the global automated scheduler (SPORTS_AI_ENABLE_AUTOMATED_SYNC).
+    Runs sequentially (never overlapping) and only invokes the collection-only
+    market path: no fixture sync, prediction generation, research refresh,
+    evaluation, paper entries, portfolio, corner-result sync or settlement.
+    """
+    if not services.market_collection_scheduler_active():
+        logger.info("market collection scheduler: state=disabled")
+        return
+    interval = max(1, int(services.config.market_collection_interval_seconds))
+    logger.info("market collection scheduler started: interval_seconds=%s", interval)
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(services.run_market_collection_only_cycle)
+        except Exception:
+            logger.exception("market collection cycle failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+        else:
+            return
+
+
 async def run_worker() -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -109,6 +135,9 @@ async def run_worker() -> int:
     if shadow_runtime.enabled():
         shadow_runtime.attach_connection(services.config.paper_trading_db_path)
     shadow_task = asyncio.create_task(_run_shadow_runtime(shadow_runtime, stop_event))
+    market_collection_task = asyncio.create_task(
+        _run_market_collection_runtime(services, stop_event)
+    )
 
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
@@ -118,10 +147,12 @@ async def run_worker() -> int:
         await stop_event.wait()
     finally:
         shadow_task.cancel()
-        try:
-            await shadow_task
-        except asyncio.CancelledError:
-            pass
+        market_collection_task.cancel()
+        for task in (shadow_task, market_collection_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         shadow_runtime.close()
         await services.shutdown()
     logger.info("scheduler worker stopped")
