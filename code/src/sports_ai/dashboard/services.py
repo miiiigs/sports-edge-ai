@@ -86,6 +86,15 @@ from .result_sync import (
     select_result_sync_fixtures,
     within_result_lookback,
 )
+from .model_pick_settlement import (
+    CONFLICT_SETTLEMENT_EVIDENCE,
+    CONFLICT_SETTLEMENT_STATE,
+    SETTLEMENT_INTERVAL_ENV_VAR,
+    SETTLEMENT_SCHEDULER_ENV_VAR,
+    build_settlement_plan,
+    is_open_pick,
+    resolve_settlement_interval_seconds,
+)
 from .models import (
     FIXTURE_LIVE_STATUSES,
     FIXTURE_PREMATCH_STATUSES,
@@ -621,6 +630,9 @@ class DashboardConfig:
     enable_result_sync_scheduler: bool = False
     result_sync_interval_seconds: int = 600
     result_sync_max_fixtures_per_cycle: int = 0
+    # Dedicated DB-only Model Pick settlement scheduler (consumes verified truth).
+    enable_model_pick_settlement_scheduler: bool = False
+    model_pick_settlement_interval_seconds: int = 600
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
     startup_sync_timeout_seconds: int = 15
@@ -668,6 +680,10 @@ class DashboardConfig:
                 _env_int(RESULT_SYNC_INTERVAL_ENV_VAR, 0)
             ),
             result_sync_max_fixtures_per_cycle=_env_int(RESULT_SYNC_MAX_FIXTURES_ENV_VAR, 0),
+            enable_model_pick_settlement_scheduler=_env_bool(SETTLEMENT_SCHEDULER_ENV_VAR, False),
+            model_pick_settlement_interval_seconds=resolve_settlement_interval_seconds(
+                _env_int(SETTLEMENT_INTERVAL_ENV_VAR, 0)
+            ),
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
             startup_sync_timeout_seconds=_env_int(DEFAULT_STARTUP_SYNC_TIMEOUT_ENV_VAR, 15),
@@ -816,6 +832,18 @@ class DashboardServices:
             "result_sync_attempts": {},
             "result_sync_corner_attempts": {},
         }
+        self._model_pick_settlement_runtime_state: dict[str, Any] = {
+            "model_pick_settlement_scheduler_enabled": self.config.enable_model_pick_settlement_scheduler,
+            "model_pick_settlement_interval_seconds": self.config.model_pick_settlement_interval_seconds,
+            "model_pick_settlement_last_cycle_at": None,
+            "model_pick_settlement_last_success_at": None,
+            "model_pick_settlement_last_error": None,
+            "model_pick_settlement_cycles_completed": 0,
+            "model_pick_settlement_examined_last_cycle": 0,
+            "model_pick_settlement_eligible_last_cycle": 0,
+            "model_pick_settlement_applied_last_cycle": 0,
+            "model_pick_settlement_conflicts_last_cycle": 0,
+        }
         self._one_shot_sync_state: dict[str, Any] = {
             "configured": False,
             "token_id": None,
@@ -953,6 +981,9 @@ class DashboardServices:
         prediction_state = storage.get_runtime_state(conn, "prediction_state", initialize_schema=False)
         market_runtime_state = storage.get_runtime_state(conn, "market_runtime_state", initialize_schema=False)
         result_sync_state = storage.get_runtime_state(conn, "result_sync_state", initialize_schema=False)
+        model_pick_settlement_state = storage.get_runtime_state(
+            conn, "model_pick_settlement_state", initialize_schema=False
+        )
         storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state", initialize_schema=False)
         one_shot_sync_state = storage.get_runtime_state(conn, "one_shot_sync_state", initialize_schema=False)
         if isinstance(provider_state, dict):
@@ -983,6 +1014,8 @@ class DashboardServices:
             corner_attempts = result_sync_state.get("result_sync_corner_attempts")
             if isinstance(corner_attempts, dict):
                 self._corner_sync_attempts.update({str(k): str(v) for k, v in corner_attempts.items()})
+        if isinstance(model_pick_settlement_state, dict):
+            self._model_pick_settlement_runtime_state.update(model_pick_settlement_state)
         if isinstance(storage_runtime_state, dict):
             self._storage_runtime_state.update(storage_runtime_state)
         if isinstance(one_shot_sync_state, dict):
@@ -5440,6 +5473,153 @@ class DashboardServices:
             "error": error,
         }
 
+    # ------------------------------------------- dedicated model pick settlement
+    def model_pick_settlement_scheduler_active(self) -> bool:
+        return bool(self.config.enable_model_pick_settlement_scheduler)
+
+    def _read_open_live_issued_picks(self) -> list[dict[str, Any]]:
+        model_pick_db_path = getattr(self.config, "model_pick_db_path", None)
+        if not model_pick_db_path:
+            return []
+        path = Path(model_pick_db_path)
+        if not path.exists():
+            return []
+        try:
+            conn = football_model_pick_ledger.connect(path)
+            try:
+                rows = football_model_pick_ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return []
+        return [
+            row
+            for row in rows
+            if str(row.get("record_origin") or "") == football_model_pick_ledger.RECORD_ORIGIN_LIVE_ISSUED
+            and is_open_pick(row)
+        ]
+
+    def _read_settlement_truth(self) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            fixtures = {
+                str(row["fixture_id"]): row
+                for row in storage.fetch_all_fixtures(conn, initialize_schema=self._read_requires_schema_init())
+            }
+            results = {
+                str(row["fixture_id"]): row
+                for row in storage.fetch_fixture_results(
+                    conn, initialize_schema=self._read_requires_schema_init()
+                )
+            }
+        return fixtures, results
+
+    def model_pick_settlement_dry_run(self) -> dict[str, Any]:
+        """Read-only settlement plan. Zero writes."""
+        now = datetime.now(timezone.utc)
+        picks = self._read_open_live_issued_picks()
+        fixtures, results = self._read_settlement_truth()
+        plan = build_settlement_plan(open_picks=picks, fixtures=fixtures, results=results, now_utc=now)
+        payload = plan.to_dict()
+        payload["dry_run"] = True
+        payload["writes"] = 0
+        return payload
+
+    def _persist_model_pick_settlement_state(self, conn: Any) -> None:
+        storage.put_runtime_state(
+            conn,
+            state_key="model_pick_settlement_state",
+            state_value=self._model_pick_settlement_runtime_state,
+            updated_at=utc_now_iso(),
+            initialize_schema=self._read_requires_schema_init(),
+        )
+
+    def run_model_pick_settlement_cycle(self) -> dict[str, Any]:
+        """Settle open LIVE_ISSUED Model Picks from already-persisted verified truth.
+
+        DB-only: zero provider requests, zero paper-ledger writes, zero Value Bets.
+        Settles via the existing ``football_model_pick_ledger`` engine. Conflicts
+        are isolated per pick (never swallowed) so one bad row cannot block others.
+        """
+        started_at = utc_now_iso()
+        if not self.model_pick_settlement_scheduler_active():
+            return {"state": "DISABLED", "applied": 0}
+        now = datetime.now(timezone.utc)
+        error: str | None = None
+        applied = 0
+        state_conflicts = 0
+        evidence_conflicts = 0
+        applied_states: dict[str, int] = {}
+        plan = None
+        try:
+            picks = self._read_open_live_issued_picks()
+            fixtures, results = self._read_settlement_truth()
+            plan = build_settlement_plan(open_picks=picks, fixtures=fixtures, results=results, now_utc=now)
+            if plan.actions:
+                ledger_conn = football_model_pick_ledger.connect(self.config.model_pick_db_path)
+                try:
+                    for action in plan.actions:
+                        try:
+                            with ledger_conn:
+                                football_model_pick_ledger.update_settlement(
+                                    ledger_conn,
+                                    model_pick_id_value=action.model_pick_id,
+                                    trade_state=action.trade_state,
+                                    settlement_payload=action.settlement_payload,
+                                    now=started_at,
+                                    initialize_schema=False,
+                                )
+                            applied += 1
+                            applied_states[action.trade_state] = applied_states.get(action.trade_state, 0) + 1
+                        except sqlite3.IntegrityError as exc:
+                            message = str(exc)
+                            if CONFLICT_SETTLEMENT_EVIDENCE in message:
+                                evidence_conflicts += 1
+                            else:
+                                state_conflicts += 1
+                            logger.warning(
+                                "model pick settlement conflict for %s: %s", action.model_pick_id, message
+                            )
+                finally:
+                    ledger_conn.close()
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+        completed = int(
+            self._model_pick_settlement_runtime_state.get("model_pick_settlement_cycles_completed") or 0
+        ) + 1
+        conflicts_last = (0 if plan is None else len(plan.conflicts)) + state_conflicts + evidence_conflicts
+        self._model_pick_settlement_runtime_state.update(
+            {
+                "model_pick_settlement_scheduler_enabled": self.model_pick_settlement_scheduler_active(),
+                "model_pick_settlement_interval_seconds": self.config.model_pick_settlement_interval_seconds,
+                "model_pick_settlement_last_cycle_at": started_at,
+                "model_pick_settlement_last_success_at": None if error else utc_now_iso(),
+                "model_pick_settlement_last_error": error,
+                "model_pick_settlement_cycles_completed": completed,
+                "model_pick_settlement_examined_last_cycle": 0 if plan is None else plan.examined,
+                "model_pick_settlement_eligible_last_cycle": 0 if plan is None else len(plan.actions),
+                "model_pick_settlement_applied_last_cycle": applied,
+                "model_pick_settlement_conflicts_last_cycle": conflicts_last,
+                "model_pick_settlement_applied_states_last_cycle": applied_states,
+                "model_pick_settlement_action_hash_last_cycle": None if plan is None else plan.action_hash,
+            }
+        )
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            self._persist_model_pick_settlement_state(conn)
+        if error:
+            logger.warning("model pick settlement cycle error: %s", error)
+        return {
+            "state": "MODEL_PICK_SETTLEMENT",
+            "examined": 0 if plan is None else plan.examined,
+            "eligible": 0 if plan is None else len(plan.actions),
+            "applied": applied,
+            "applied_states": applied_states,
+            "state_conflicts": state_conflicts,
+            "evidence_conflicts": evidence_conflicts,
+            "plan_conflicts": 0 if plan is None else len(plan.conflicts),
+            "action_hash": None if plan is None else plan.action_hash,
+            "error": error,
+        }
+
     def ensure_prediction(self, conn: Any, fixture: NormalizedFixture) -> dict[str, Any]:
         if self.snapshot is None:
             payload = attach_edge_desk_shadow_bundle(
@@ -7749,6 +7929,36 @@ class DashboardServices:
             ),
             "result_sync_requests_last_cycle": int(
                 self._result_sync_runtime_state.get("result_sync_requests_last_cycle") or 0
+            ),
+            "model_pick_settlement_scheduler_enabled": bool(
+                self._model_pick_settlement_runtime_state.get("model_pick_settlement_scheduler_enabled")
+            ),
+            "model_pick_settlement_interval_seconds": self._model_pick_settlement_runtime_state.get(
+                "model_pick_settlement_interval_seconds"
+            ),
+            "model_pick_settlement_last_cycle_at": self._model_pick_settlement_runtime_state.get(
+                "model_pick_settlement_last_cycle_at"
+            ),
+            "model_pick_settlement_last_success_at": self._model_pick_settlement_runtime_state.get(
+                "model_pick_settlement_last_success_at"
+            ),
+            "model_pick_settlement_last_error": self._model_pick_settlement_runtime_state.get(
+                "model_pick_settlement_last_error"
+            ),
+            "model_pick_settlement_cycles_completed": int(
+                self._model_pick_settlement_runtime_state.get("model_pick_settlement_cycles_completed") or 0
+            ),
+            "model_pick_settlement_examined_last_cycle": int(
+                self._model_pick_settlement_runtime_state.get("model_pick_settlement_examined_last_cycle") or 0
+            ),
+            "model_pick_settlement_eligible_last_cycle": int(
+                self._model_pick_settlement_runtime_state.get("model_pick_settlement_eligible_last_cycle") or 0
+            ),
+            "model_pick_settlement_applied_last_cycle": int(
+                self._model_pick_settlement_runtime_state.get("model_pick_settlement_applied_last_cycle") or 0
+            ),
+            "model_pick_settlement_conflicts_last_cycle": int(
+                self._model_pick_settlement_runtime_state.get("model_pick_settlement_conflicts_last_cycle") or 0
             ),
             "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
             "provider_budget_quota_state": self._provider_budget.quota_state(),

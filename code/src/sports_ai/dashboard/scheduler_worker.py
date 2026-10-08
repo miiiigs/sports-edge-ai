@@ -137,6 +137,30 @@ async def _run_result_sync_runtime(services: DashboardServices, stop_event: asyn
             return
 
 
+async def _run_model_pick_settlement_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Isolated, recurring, DB-only Model Pick settlement loop. No-op when disabled.
+
+    Consumes already-persisted verified sporting truth. Zero provider requests,
+    zero paper-ledger writes, zero Value Bets. Runs sequentially.
+    """
+    if not services.model_pick_settlement_scheduler_active():
+        logger.info("model pick settlement scheduler: state=disabled")
+        return
+    interval = max(1, int(services.config.model_pick_settlement_interval_seconds))
+    logger.info("model pick settlement scheduler started: interval_seconds=%s", interval)
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(services.run_model_pick_settlement_cycle)
+        except Exception:
+            logger.exception("model pick settlement cycle failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+        else:
+            return
+
+
 async def run_worker() -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -167,6 +191,9 @@ async def run_worker() -> int:
     result_sync_task = asyncio.create_task(
         _run_result_sync_runtime(services, stop_event)
     )
+    model_pick_settlement_task = asyncio.create_task(
+        _run_model_pick_settlement_runtime(services, stop_event)
+    )
 
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
@@ -178,7 +205,8 @@ async def run_worker() -> int:
         shadow_task.cancel()
         market_collection_task.cancel()
         result_sync_task.cancel()
-        for task in (shadow_task, market_collection_task, result_sync_task):
+        model_pick_settlement_task.cancel()
+        for task in (shadow_task, market_collection_task, result_sync_task, model_pick_settlement_task):
             try:
                 await task
             except asyncio.CancelledError:
