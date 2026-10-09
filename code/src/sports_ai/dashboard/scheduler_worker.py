@@ -161,6 +161,30 @@ async def _run_model_pick_settlement_runtime(services: DashboardServices, stop_e
             return
 
 
+async def _run_value_bet_evaluation_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Isolated, recurring, DB-only frozen-Model-Pick value evaluation loop.
+
+    Evaluation only: no writes of any kind (issuance stays disabled in this lane).
+    Zero provider requests. Runs sequentially.
+    """
+    if not services.value_bet_evaluation_scheduler_active():
+        logger.info("value evaluation scheduler: state=disabled")
+        return
+    interval = max(1, int(services.config.value_bet_evaluation_interval_seconds))
+    logger.info("value evaluation scheduler started: interval_seconds=%s", interval)
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(services.run_value_bet_evaluation_cycle)
+        except Exception:
+            logger.exception("value evaluation cycle failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+        else:
+            return
+
+
 async def run_worker() -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -194,6 +218,9 @@ async def run_worker() -> int:
     model_pick_settlement_task = asyncio.create_task(
         _run_model_pick_settlement_runtime(services, stop_event)
     )
+    value_evaluation_task = asyncio.create_task(
+        _run_value_bet_evaluation_runtime(services, stop_event)
+    )
 
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
@@ -206,7 +233,14 @@ async def run_worker() -> int:
         market_collection_task.cancel()
         result_sync_task.cancel()
         model_pick_settlement_task.cancel()
-        for task in (shadow_task, market_collection_task, result_sync_task, model_pick_settlement_task):
+        value_evaluation_task.cancel()
+        for task in (
+            shadow_task,
+            market_collection_task,
+            result_sync_task,
+            model_pick_settlement_task,
+            value_evaluation_task,
+        ):
             try:
                 await task
             except asyncio.CancelledError:
