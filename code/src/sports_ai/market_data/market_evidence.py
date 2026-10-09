@@ -166,6 +166,16 @@ class AsianHandicapConvention(str, Enum):
     HOME_HANDICAP = "home_handicap"
 
 
+# API-Football Asian Handicap ingestion-version trust boundary (shared contract).
+# v1 snapshots were produced by a now-proven unsafe NAMED_TEAM sign-flip and must
+# never be actionable Value evidence; they are retained for audit only. Only
+# corrected (v2) snapshots are trusted. Corners are unaffected by this boundary.
+API_FOOTBALL_MARKET_PROVIDER = "api-football"
+API_FOOTBALL_AH_INGESTION_VERSION_V2 = "api_football_current_market_provider_v2"
+TRUSTED_API_FOOTBALL_AH_INGESTION_VERSIONS = frozenset({API_FOOTBALL_AH_INGESTION_VERSION_V2})
+LEGACY_API_FOOTBALL_AH_INGESTION_VERSIONS = frozenset({"api_football_current_market_provider_v1"})
+
+
 def resolve_actionable_max_age_minutes(provider: str | None) -> int | None:
     """Provider-specific actionable freshness threshold in minutes, or ``None``.
 

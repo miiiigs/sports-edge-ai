@@ -31,10 +31,24 @@ from .freshness import (
     classify_freshness_state,
     resolve_market_max_age_minutes,
 )
+from .market_evidence import (
+    API_FOOTBALL_AH_INGESTION_VERSION_V2,
+    API_FOOTBALL_MARKET_PROVIDER,
+    LEGACY_API_FOOTBALL_AH_INGESTION_VERSIONS,
+    TRUSTED_API_FOOTBALL_AH_INGESTION_VERSIONS,
+    AsianHandicapConvention,
+    MalformedMarketRowError,
+    normalize_asian_handicap_line,
+)
 from .providers import MarketProviderError, NormalizedMarketSnapshot
 
-API_FOOTBALL_MARKET_PROVIDER = "api-football"
-API_FOOTBALL_ODDS_VERSION = "api_football_current_market_provider_v1"
+API_FOOTBALL_ODDS_VERSION = API_FOOTBALL_AH_INGESTION_VERSION_V2
+API_FOOTBALL_ODDS_VERSION_V1 = "api_football_current_market_provider_v1"
+# API-Football names BOTH sides of a handicap with the SAME numeric HOME handicap
+# (e.g. "Home -0.25" and "Away -0.25" are the two sides of home -0.25). The raw
+# numeric line is therefore already the canonical HOME handicap and must NOT be
+# sign-flipped for the AWAY selection. Verified against live raw ladder evidence.
+API_FOOTBALL_AH_CONVENTION = AsianHandicapConvention.HOME_HANDICAP
 API_FOOTBALL_ODDS_ENDPOINT = "https://v3.football.api-sports.io/odds"
 API_FOOTBALL_ODDS_MAPPING_ENDPOINT = "https://v3.football.api-sports.io/odds/mapping"
 API_FOOTBALL_FIXTURE_DETAIL_ENDPOINT = "https://v3.football.api-sports.io/fixtures"
@@ -118,9 +132,17 @@ def _normalize_asian_handicap_value(value: str) -> tuple[str, float] | None:
     normalized_side = team_side.strip().lower()
     if normalized_side not in {"home", "away"}:
         return None
-    raw_line = _parse_decimal_line(line)
     selection = normalized_side.upper()
-    canonical_line = raw_line if selection == "HOME" else -raw_line
+    try:
+        # HOME_HANDICAP: the raw numeric label is the canonical HOME handicap for
+        # BOTH sides, so HOME and AWAY at the same label form one physical pair.
+        canonical_line = normalize_asian_handicap_line(
+            selection=selection,
+            raw_line=line,
+            convention=API_FOOTBALL_AH_CONVENTION,
+        )
+    except MalformedMarketRowError:
+        return None
     return selection, canonical_line
 
 
@@ -548,6 +570,14 @@ class ApiFootballOddsProvider:
                     values=list(bet.get("values") or []),
                 )
                 for market_family, selection, line, decimal_odds in normalized_values:
+                    if market_family == "asian_handicap":
+                        # Stable market-group identity: both HOME and AWAY share it
+                        # for one physical bookmaker handicap line (selection is
+                        # stored separately), so the two sides can never be paired
+                        # across lines/bookmakers/bet blocks.
+                        provider_market_id = f"{provider_fixture_id}:{bookmaker.get('id')}:{bet.get('id')}:{market_family}:{line}"
+                    else:
+                        provider_market_id = f"{provider_fixture_id}:{bookmaker.get('id')}:{bet.get('id')}:{selection}:{line}"
                     snapshots.append(
                         NormalizedMarketSnapshot(
                             provider=self.provider_name(),
@@ -561,7 +591,7 @@ class ApiFootballOddsProvider:
                             decimal_odds=decimal_odds,
                             bookmaker=bookmaker_name,
                             ingestion_version=API_FOOTBALL_ODDS_VERSION,
-                            provider_market_id=f"{provider_fixture_id}:{bookmaker.get('id')}:{bet.get('id')}:{selection}:{line}",
+                            provider_market_id=provider_market_id,
                             is_pre_match=True,
                             home_team_name=str(fixture_context.get("home_team_name") or ""),
                             away_team_name=str(fixture_context.get("away_team_name") or ""),

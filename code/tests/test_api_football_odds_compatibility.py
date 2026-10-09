@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from sports_ai.dashboard.current_market import build_fixture_market_evaluation
 from sports_ai.market_data.api_football import ApiFootballOddsProvider
 from sports_ai.market_data.providers import NormalizedMarketSnapshot
@@ -300,20 +299,21 @@ def test_home_asian_handicap_normalization(monkeypatch):
     assert home.line == pytest.approx(-0.25)
 
 
-def test_away_asian_handicap_inverts_sign(monkeypatch):
+def test_away_asian_handicap_keeps_home_handicap_line(monkeypatch):
+    # Proven API-Football convention (HOME_HANDICAP): the raw numeric label is the
+    # canonical HOME handicap for both sides and is NEVER sign-flipped.
     snapshots = _provider_snapshots(
         monkeypatch,
-        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Away +0.25", 1.91))),
+        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Away -0.25", 2.60), _value("Away +0.25", 4.25))),
     )
-    away = next(snapshot for snapshot in snapshots if snapshot.market == "asian_handicap")
-    assert away.selection == "AWAY"
-    assert away.line == pytest.approx(-0.25)
+    lines = {(s.selection, s.line) for s in snapshots if s.market == "asian_handicap"}
+    assert lines == {("AWAY", -0.25), ("AWAY", 0.25)}
 
 
 def test_negative_quarter_line_ah_pair_shares_canonical_line(monkeypatch):
     snapshots = _provider_snapshots(
         monkeypatch,
-        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Home -0.25", 1.95), _value("Away +0.25", 1.91))),
+        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Home -0.25", 1.48), _value("Away -0.25", 2.60))),
     )
     lines = {(snapshot.selection, snapshot.line) for snapshot in snapshots if snapshot.market == "asian_handicap"}
     assert lines == {("HOME", -0.25), ("AWAY", -0.25)}
@@ -322,7 +322,7 @@ def test_negative_quarter_line_ah_pair_shares_canonical_line(monkeypatch):
 def test_positive_quarter_line_ah_pair_shares_canonical_line(monkeypatch):
     snapshots = _provider_snapshots(
         monkeypatch,
-        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Home +0.25", 2.01), _value("Away -0.25", 1.87))),
+        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Home +0.25", 1.21), _value("Away +0.25", 4.25))),
     )
     lines = {(snapshot.selection, snapshot.line) for snapshot in snapshots if snapshot.market == "asian_handicap"}
     assert lines == {("HOME", 0.25), ("AWAY", 0.25)}
@@ -331,10 +331,63 @@ def test_positive_quarter_line_ah_pair_shares_canonical_line(monkeypatch):
 def test_quarter_line_precision_preserved(monkeypatch):
     snapshots = _provider_snapshots(
         monkeypatch,
-        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Home -0.75", 2.12), _value("Away +0.75", 1.76))),
+        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Home -0.75", 1.88), _value("Away -0.75", 1.98))),
     )
     lines = {(snapshot.selection, snapshot.line) for snapshot in snapshots if snapshot.market == "asian_handicap"}
     assert lines == {("HOME", -0.75), ("AWAY", -0.75)}
+
+
+@pytest.mark.parametrize("line", ["-0.75", "-0.5", "-0.25", "0", "+0.25", "+0.5", "+0.75", "-1", "-2"])
+def test_ah_home_handicap_convention_matrix(monkeypatch, line):
+    snapshots = _provider_snapshots(
+        monkeypatch,
+        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value(f"Home {line}", 1.90), _value(f"Away {line}", 1.95))),
+    )
+    expected = float(line)
+    by_sel = {snapshot.selection: snapshot.line for snapshot in snapshots if snapshot.market == "asian_handicap"}
+    assert set(by_sel) == {"HOME", "AWAY"}
+    assert by_sel["HOME"] == pytest.approx(expected)
+    assert by_sel["AWAY"] == pytest.approx(expected)
+
+
+def test_ah_snapshots_share_provider_market_group_identity(monkeypatch):
+    snapshots = _provider_snapshots(
+        monkeypatch,
+        _bookmaker("Pinnacle", 1, _bet("Asian Handicap", 4, _value("Home -0.25", 1.48), _value("Away -0.25", 2.60))),
+    )
+    ah = [s for s in snapshots if s.market == "asian_handicap"]
+    assert len({s.provider_market_id for s in ah}) == 1
+    assert all(s.ingestion_version == "api_football_current_market_provider_v2" for s in ah)
+
+
+# Sanitized raw production ladder (fixture 1563802, Bet365, bet id 4) captured by a
+# controlled probe. No secrets. Reproduces the previously impossible pairing.
+_RAW_BET365_1563802_AH = [
+    ("Home -1.25", "2.42"), ("Away -1.25", "1.52"), ("Home -1", "2.15"), ("Away -1", "1.68"),
+    ("Home -0.75", "1.88"), ("Away -0.75", "1.98"), ("Home -0.5", "1.68"), ("Away -0.5", "2.15"),
+    ("Home -0.25", "1.48"), ("Away -0.25", "2.60"), ("Home +0", "1.26"), ("Away +0", "3.70"),
+    ("Home +0.25", "1.21"), ("Away +0.25", "4.25"), ("Home +0.5", "1.18"), ("Away +0.5", "4.65"),
+    ("Home +0.75", "1.12"), ("Away +0.75", "6.40"), ("Home -2", "4.65"), ("Away -2", "1.18"),
+    ("Home -1.75", "3.45"), ("Away -1.75", "1.30"), ("Home -1.5", "2.75"), ("Away -1.5", "1.42"),
+    ("Home -2.5", "5.75"), ("Away -2.5", "1.14"), ("Home -2.25", "5.25"), ("Away -2.25", "1.16"),
+    ("Home -2.75", "7.00"), ("Away -2.75", "1.10"),
+]
+
+
+def test_raw_production_ladder_pairs_validly_under_home_handicap(monkeypatch):
+    values = [_value(label, float(odd)) for label, odd in _RAW_BET365_1563802_AH]
+    snapshots = _provider_snapshots(monkeypatch, _bookmaker("Bet365", 8, _bet("Asian Handicap", 4, *values)))
+    by_line: dict[float, dict[str, float]] = {}
+    for snapshot in snapshots:
+        if snapshot.market != "asian_handicap":
+            continue
+        by_line.setdefault(snapshot.line, {})[snapshot.selection] = snapshot.decimal_odds
+    assert by_line, "no AH snapshots produced"
+    for line, sides in by_line.items():
+        assert set(sides) == {"HOME", "AWAY"}, (line, sides)
+        assert 1.0 / sides["HOME"] + 1.0 / sides["AWAY"] >= 1.0 - 1e-9, (line, sides)
+    # The old NAMED_TEAM sign-flip wrongly paired Home -0.25 (1.48) with Away +0.25 (4.25).
+    assert 1.0 / 1.48 + 1.0 / 4.25 < 1.0
 
 
 def test_invalid_api_football_odds_values_are_dropped(monkeypatch):

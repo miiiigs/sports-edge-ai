@@ -63,7 +63,7 @@ _ODDS_PAYLOAD = {
                             "name": "Asian Handicap",
                             "values": [
                                 {"value": "Home -0.5", "odd": "1.90"},
-                                {"value": "Away +0.5", "odd": "1.95"},
+                                {"value": "Away -0.5", "odd": "1.95"},
                             ],
                         },
                         {
