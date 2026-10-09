@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
+import sports_ai.dashboard.services as services_mod  # noqa: F401  (pre-import breaks the market_data/dashboard cycle)
 from sports_ai.dashboard import frozen_value_evaluation as fv
+from sports_ai.dashboard import storage
+from sports_ai.dashboard.models import NormalizedFixture
+from sports_ai.dashboard.services import (
+    RUNTIME_ROLE_COMBINED,
+    DashboardConfig,
+    DashboardServices,
+)
+from sports_ai.market_data.providers import NotConfiguredMarketProvider
+from sports_ai.storage import football_model_pick_ledger as ledger
+from sports_ai.storage import football_paper_trading as pt
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
 KICKOFF = "2026-10-08T15:00:00+00:00"
@@ -219,3 +232,118 @@ def test_action_hash_only_value_bets_and_deterministic():
     h2 = fv.value_action_hash([value])
     assert h1 == h2
     assert fv.value_action_hash([no_bet]) != h1  # no-bet excluded -> empty hash
+
+
+# --------------------------------------------------------------------------- services
+class _NoProvider:
+    def provider_name(self):
+        return "api-football"
+
+    def configured(self):
+        return False
+
+    def get_fixture(self, fixture_id):
+        raise AssertionError("value evaluation must not call a provider")
+
+
+def _config(tmp_path):
+    return replace(
+        DashboardConfig.default(),
+        dashboard_db_path=tmp_path / "football_dashboard.sqlite",
+        paper_trading_db_path=tmp_path / "football_paper_trading.sqlite",
+        model_pick_db_path=tmp_path / "football_model_picks.sqlite",
+        operational_data_dir=tmp_path,
+        storage_mode="test_tmpdir",
+        persistent_data_dir_configured=False,
+        enable_scheduler=False,
+        enable_value_bet_evaluation_scheduler=True,
+        value_bet_evaluation_interval_seconds=600,
+        runtime_role=RUNTIME_ROLE_COMBINED,
+    )
+
+
+def _seed_fixture(config, fixture_id, kickoff):
+    provider, _, pfid = fixture_id.partition(":")
+    normalized = NormalizedFixture(
+        fixture_id=fixture_id, provider_fixture_id=pfid or fixture_id, provider=provider or "api-football",
+        competition_id="ENG1", competition_name="Premier League", division_code="E0", season="2026",
+        home_team_id="1", home_team_name="Home", away_team_id="2", away_team_name="Away",
+        kickoff_utc=kickoff, status="PRE_MATCH", elapsed_minute=None, home_score=None, away_score=None,
+        last_provider_update="2026-10-08T10:00:00+00:00", source_version="api_football_v1", provider_payload={},
+    )
+    with storage.connect(config.dashboard_db_path) as conn:
+        storage.initialize_database(conn)
+        storage.upsert_fixtures(conn, [normalized], updated_at="2026-10-08T10:00:00+00:00", initialize_schema=False)
+
+
+def _seed_snapshot(config, fixture_id, market, selection, line, odds, bookmaker, source, captured):
+    with pt.connect(config.paper_trading_db_path) as conn:
+        pt.ensure_schema(conn)
+        pt.record_market_snapshot(
+            conn,
+            pt.StoredMarketSnapshot(
+                fixture_id=fixture_id, provider="api-football", bookmaker=bookmaker, market=market,
+                selection=selection, odds=odds, ingestion_version="api_football_current_market_provider_v1",
+                line=line, provider_timestamp=source, captured_at=captured, is_pre_match=True,
+                provider_fixture_id=fixture_id.split(":")[-1],
+            ),
+            initialize_schema=False,
+        )
+
+
+def _seed_pick(config, fixture_id, market, selection, line, *, w, fair):
+    conn = ledger.connect(config.model_pick_db_path)
+    ledger.ensure_schema(conn)
+    conn.execute(
+        """
+        INSERT INTO football_model_pick_entries (
+            model_pick_id, policy_id, policy_version, fixture_id, market, selection, line,
+            model_probability, model_fair_price, model_as_of, record_origin, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (f"mp_{fixture_id}_{market}", "football_model_pick_balanced_line_v1", "v1", fixture_id, market, selection, line,
+         w, fair, "2026-10-08T10:00:00+00:00", "LIVE_ISSUED", "2026-10-08T10:00:00+00:00", "2026-10-08T10:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_value_cycle_reads_snapshots_from_paper_db(tmp_path):
+    config = _config(tmp_path)
+    kickoff = (datetime.now(timezone.utc) + timedelta(hours=3)).replace(microsecond=0).isoformat()
+    fid = "api-football:1"
+    source = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(microsecond=0).isoformat()
+    captured = (datetime.now(timezone.utc) - timedelta(minutes=28)).replace(microsecond=0).isoformat()
+    _seed_fixture(config, fid, kickoff)
+    _seed_snapshot(config, fid, "asian_handicap", "HOME", -0.5, 2.10, "Pinnacle", source, captured)
+    _seed_snapshot(config, fid, "asian_handicap", "AWAY", -0.5, 1.80, "Pinnacle", source, captured)
+    _seed_snapshot(config, fid, "asian_handicap", "HOME", -0.5, 3.00, "Betfair", source, captured)
+    _seed_pick(config, fid, "asian_handicap", "HOME", -0.5, w=0.55, fair=1.82)
+    services = DashboardServices(config, fixture_provider=_NoProvider(), market_provider=NotConfiguredMarketProvider())
+    result = services.run_value_bet_evaluation_dry_run()
+    assert result["counts"].get(fv.VALUE_BET) == 1
+    assert result["eligible"][0]["selection"] == "HOME"
+    assert services._value_evaluation_runtime_state  # sanity
+    with pt.connect(config.paper_trading_db_path) as conn:
+        assert conn.execute("select count(*) from paper_trade_entries").fetchone()[0] == 0
+        assert conn.execute("select count(*) from paper_trade_updates").fetchone()[0] == 0
+
+
+def test_value_cycle_persists_state_without_writes(tmp_path):
+    config = _config(tmp_path)
+    kickoff = (datetime.now(timezone.utc) + timedelta(hours=3)).replace(microsecond=0).isoformat()
+    fid = "api-football:2"
+    source = (datetime.now(timezone.utc) - timedelta(minutes=20)).replace(microsecond=0).isoformat()
+    _seed_fixture(config, fid, kickoff)
+    _seed_snapshot(config, fid, "corner_total", "OVER", 9.5, 1.95, "Pinnacle", source, source)
+    _seed_snapshot(config, fid, "corner_total", "UNDER", 9.5, 1.90, "Pinnacle", source, source)
+    _seed_snapshot(config, fid, "corner_total", "OVER", 9.5, 3.20, "Betfair", source, source)
+    _seed_pick(config, fid, "corner_total", "OVER", 9.5, w=0.55, fair=1.82)
+    services = DashboardServices(config, fixture_provider=_NoProvider(), market_provider=NotConfiguredMarketProvider())
+    result = services.run_value_bet_evaluation_cycle()
+    assert result["counts"].get(fv.VALUE_BET) == 1
+    assert services._value_evaluation_runtime_state["value_evaluation_value_bets_last_cycle"] == 1
+    with storage.connect(config.dashboard_db_path) as conn:
+        state = storage.get_runtime_state(conn, "value_evaluation_state", initialize_schema=False)
+    assert state is not None and state["value_evaluation_cycles_completed"] == 1
+    assert not Path(config.paper_trading_db_path).with_name("paper_trade_entries").exists()
