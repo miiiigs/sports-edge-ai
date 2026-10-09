@@ -98,12 +98,16 @@ from .model_pick_settlement import (
 from .frozen_value_evaluation import (
     SUPPORTED_VALUE_MARKETS,
     VALUE_INTERVAL_ENV_VAR,
+    VALUE_ISSUANCE_ENV_VAR,
+    VALUE_LIFECYCLE_INTERVAL_ENV_VAR,
+    VALUE_LIFECYCLE_SCHEDULER_ENV_VAR,
     VALUE_PIPELINE_VERSION,
     VALUE_SCHEDULER_ENV_VAR,
     VALUE_BET,
     EvaluationResult,
     evaluate_frozen_pick,
     resolve_value_evaluation_interval_seconds,
+    resolve_value_lifecycle_interval_seconds,
     value_action_hash,
 )
 from .models import (
@@ -647,6 +651,11 @@ class DashboardConfig:
     # Dedicated DB-only forward Value Bet evaluation scheduler (frozen Model Picks).
     enable_value_bet_evaluation_scheduler: bool = False
     value_bet_evaluation_interval_seconds: int = 600
+    # Issuance is a SEPARATE explicit permission (default FALSE). Lifecycle is the
+    # dedicated DB-only settlement/CLV loop for frozen-value positions.
+    enable_value_bet_issuance: bool = False
+    enable_value_bet_lifecycle_scheduler: bool = False
+    value_bet_lifecycle_interval_seconds: int = 600
     odds_sync_once_token: str = ""
     current_xg_connected: bool = False
     startup_sync_timeout_seconds: int = 15
@@ -701,6 +710,11 @@ class DashboardConfig:
             enable_value_bet_evaluation_scheduler=_env_bool(VALUE_SCHEDULER_ENV_VAR, False),
             value_bet_evaluation_interval_seconds=resolve_value_evaluation_interval_seconds(
                 _env_int(VALUE_INTERVAL_ENV_VAR, 0)
+            ),
+            enable_value_bet_issuance=_env_bool(VALUE_ISSUANCE_ENV_VAR, False),
+            enable_value_bet_lifecycle_scheduler=_env_bool(VALUE_LIFECYCLE_SCHEDULER_ENV_VAR, False),
+            value_bet_lifecycle_interval_seconds=resolve_value_lifecycle_interval_seconds(
+                _env_int(VALUE_LIFECYCLE_INTERVAL_ENV_VAR, 0)
             ),
             odds_sync_once_token=_env_str(DEFAULT_ODDS_SYNC_ONCE_TOKEN_ENV_VAR, ""),
             current_xg_connected=_env_bool(DEFAULT_CURRENT_XG_CONNECTED_ENV_VAR, False),
