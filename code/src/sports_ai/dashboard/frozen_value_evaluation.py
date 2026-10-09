@@ -35,6 +35,11 @@ VALUE_PIPELINE_VERSION = "football_frozen_model_pick_value_v1"
 
 VALUE_SCHEDULER_ENV_VAR = "SPORTS_AI_ENABLE_VALUE_BET_EVALUATION_SCHEDULER"
 VALUE_INTERVAL_ENV_VAR = "SPORTS_AI_VALUE_BET_EVALUATION_INTERVAL_SECONDS"
+# Issuance is a SEPARATE explicit permission from evaluation. Default FALSE.
+VALUE_ISSUANCE_ENV_VAR = "SPORTS_AI_ENABLE_VALUE_BET_ISSUANCE"
+# Dedicated DB-only Value position lifecycle (settlement/CLV). Default FALSE.
+VALUE_LIFECYCLE_SCHEDULER_ENV_VAR = "SPORTS_AI_ENABLE_VALUE_BET_LIFECYCLE_SCHEDULER"
+VALUE_LIFECYCLE_INTERVAL_ENV_VAR = "SPORTS_AI_VALUE_BET_LIFECYCLE_INTERVAL_SECONDS"
 DEFAULT_VALUE_INTERVAL_SECONDS = 600
 MIN_VALUE_INTERVAL_SECONDS = 300
 HARD_MAX_VALUE_INTERVAL_SECONDS = 86_400
@@ -52,6 +57,10 @@ def resolve_value_evaluation_interval_seconds(configured: int | None) -> int:
     if value < MIN_VALUE_INTERVAL_SECONDS:
         return MIN_VALUE_INTERVAL_SECONDS
     return min(value, HARD_MAX_VALUE_INTERVAL_SECONDS)
+
+
+def resolve_value_lifecycle_interval_seconds(configured: int | None) -> int:
+    return resolve_value_evaluation_interval_seconds(configured)
 
 MARKET_ASIAN_HANDICAP = "asian_handicap"
 MARKET_CORNER_TOTAL = "corner_total"
