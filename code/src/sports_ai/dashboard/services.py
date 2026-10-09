@@ -5715,8 +5715,10 @@ class DashboardServices:
                 str(row["fixture_id"]): row
                 for row in storage.fetch_all_fixtures(conn, initialize_schema=self._read_requires_schema_init())
             }
-            snapshots_by_fixture: dict[str, list[dict[str, Any]]] = {}
-            for row in conn.execute(
+        # market_snapshots live in the paper-trading DB (the market collector owns them).
+        snapshots_by_fixture: dict[str, list[dict[str, Any]]] = {}
+        with football_paper_trading.connect(self.config.paper_trading_db_path) as paper_conn:
+            for row in paper_conn.execute(
                 "SELECT snapshot_id, fixture_id, provider, provider_fixture_id, market, selection, line, odds, "
                 "bookmaker, provider_timestamp, captured_at, is_pre_match, freshness_state "
                 "FROM market_snapshots WHERE market IN ('asian_handicap','corner_total')"
