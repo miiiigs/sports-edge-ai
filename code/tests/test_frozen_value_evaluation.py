@@ -276,14 +276,14 @@ def _seed_fixture(config, fixture_id, kickoff):
         storage.upsert_fixtures(conn, [normalized], updated_at="2026-10-08T10:00:00+00:00", initialize_schema=False)
 
 
-def _seed_snapshot(config, fixture_id, market, selection, line, odds, bookmaker, source, captured):
+def _seed_snapshot(config, fixture_id, market, selection, line, odds, bookmaker, source, captured, *, ingestion_version="api_football_current_market_provider_v2"):
     with pt.connect(config.paper_trading_db_path) as conn:
         pt.ensure_schema(conn)
         pt.record_market_snapshot(
             conn,
             pt.StoredMarketSnapshot(
                 fixture_id=fixture_id, provider="api-football", bookmaker=bookmaker, market=market,
-                selection=selection, odds=odds, ingestion_version="api_football_current_market_provider_v1",
+                selection=selection, odds=odds, ingestion_version=ingestion_version,
                 line=line, provider_timestamp=source, captured_at=captured, is_pre_match=True,
                 provider_fixture_id=fixture_id.split(":")[-1],
             ),
@@ -347,3 +347,56 @@ def test_value_cycle_persists_state_without_writes(tmp_path):
         state = storage.get_runtime_state(conn, "value_evaluation_state", initialize_schema=False)
     assert state is not None and state["value_evaluation_cycles_completed"] == 1
     assert not Path(config.paper_trading_db_path).with_name("paper_trade_entries").exists()
+
+
+def test_legacy_v1_ah_quarantined_from_value(tmp_path):
+    config = _config(tmp_path)
+    kickoff = (datetime.now(timezone.utc) + timedelta(hours=3)).replace(microsecond=0).isoformat()
+    fid = "api-football:16"
+    source = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(microsecond=0).isoformat()
+    captured = (datetime.now(timezone.utc) - timedelta(minutes=28)).replace(microsecond=0).isoformat()
+    _seed_fixture(config, fid, kickoff)
+    _seed_snapshot(config, fid, "asian_handicap", "HOME", -0.5, 2.10, "Pinnacle", source, captured, ingestion_version="api_football_current_market_provider_v1")
+    _seed_snapshot(config, fid, "asian_handicap", "AWAY", -0.5, 1.80, "Pinnacle", source, captured, ingestion_version="api_football_current_market_provider_v1")
+    _seed_snapshot(config, fid, "asian_handicap", "HOME", -0.5, 3.00, "Betfair", source, captured, ingestion_version="api_football_current_market_provider_v1")
+    _seed_pick(config, fid, "asian_handicap", "HOME", -0.5, w=0.55, fair=1.82)
+    services = DashboardServices(config, fixture_provider=_NoProvider(), market_provider=NotConfiguredMarketProvider())
+    result = services.run_value_bet_evaluation_dry_run()
+    assert result["counts"].get(fv.VALUE_BET) is None
+    assert result["counts"].get(fv.NO_MARKET_EVIDENCE) == 1
+    # Rows are NOT deleted; they remain available for audit.
+    with pt.connect(config.paper_trading_db_path) as conn:
+        assert conn.execute("select count(*) from market_snapshots where market='asian_handicap'").fetchone()[0] == 3
+
+
+def test_v1_corner_ingestion_not_quarantined(tmp_path):
+    config = _config(tmp_path)
+    kickoff = (datetime.now(timezone.utc) + timedelta(hours=3)).replace(microsecond=0).isoformat()
+    fid = "api-football:17"
+    source = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(microsecond=0).isoformat()
+    _seed_fixture(config, fid, kickoff)
+    _seed_snapshot(config, fid, "corner_total", "OVER", 9.5, 1.95, "Pinnacle", source, source, ingestion_version="api_football_current_market_provider_v1")
+    _seed_snapshot(config, fid, "corner_total", "UNDER", 9.5, 1.90, "Pinnacle", source, source, ingestion_version="api_football_current_market_provider_v1")
+    _seed_snapshot(config, fid, "corner_total", "OVER", 9.5, 3.20, "Betfair", source, source, ingestion_version="api_football_current_market_provider_v1")
+    _seed_pick(config, fid, "corner_total", "OVER", 9.5, w=0.55, fair=1.82)
+    services = DashboardServices(config, fixture_provider=_NoProvider(), market_provider=NotConfiguredMarketProvider())
+    result = services.run_value_bet_evaluation_dry_run()
+    assert result["counts"].get(fv.VALUE_BET) == 1
+
+
+def test_ah_underround_same_book_pair_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    kickoff = (datetime.now(timezone.utc) + timedelta(hours=3)).replace(microsecond=0).isoformat()
+    fid = "api-football:18"
+    source = (datetime.now(timezone.utc) - timedelta(minutes=30)).replace(microsecond=0).isoformat()
+    captured = (datetime.now(timezone.utc) - timedelta(minutes=28)).replace(microsecond=0).isoformat()
+    _seed_fixture(config, fid, kickoff)
+    # Structurally impossible same-book same-line pair (1/1.48 + 1/4.25 < 1).
+    _seed_snapshot(config, fid, "asian_handicap", "HOME", -0.25, 1.48, "Pinnacle", source, captured)
+    _seed_snapshot(config, fid, "asian_handicap", "AWAY", -0.25, 4.25, "Pinnacle", source, captured)
+    _seed_snapshot(config, fid, "asian_handicap", "HOME", -0.25, 1.50, "Betfair", source, captured)
+    _seed_pick(config, fid, "asian_handicap", "HOME", -0.25, w=0.70, fair=1.30)
+    services = DashboardServices(config, fixture_provider=_NoProvider(), market_provider=NotConfiguredMarketProvider())
+    result = services.run_value_bet_evaluation_dry_run()
+    assert result["counts"].get(fv.VALUE_BET) is None
+    assert result["counts"].get(fv.MARKET_EVIDENCE_INVALID) == 1

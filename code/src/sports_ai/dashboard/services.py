@@ -108,6 +108,7 @@ from .frozen_value_evaluation import (
     evaluate_frozen_pick,
     resolve_value_evaluation_interval_seconds,
     resolve_value_lifecycle_interval_seconds,
+    snapshot_is_value_eligible,
     value_action_hash,
 )
 from .models import (
@@ -5734,10 +5735,15 @@ class DashboardServices:
         with football_paper_trading.connect(self.config.paper_trading_db_path) as paper_conn:
             for row in paper_conn.execute(
                 "SELECT snapshot_id, fixture_id, provider, provider_fixture_id, market, selection, line, odds, "
-                "bookmaker, provider_timestamp, captured_at, is_pre_match, freshness_state "
+                "bookmaker, provider_timestamp, captured_at, is_pre_match, freshness_state, ingestion_version "
                 "FROM market_snapshots WHERE market IN ('asian_handicap','corner_total')"
             ).fetchall():
-                snapshots_by_fixture.setdefault(str(row["fixture_id"]), []).append(dict(row))
+                row_dict = dict(row)
+                # Quarantine legacy (v1) API-Football AH evidence: never actionable,
+                # but retained (not deleted) for diagnostics/audit.
+                if not snapshot_is_value_eligible(row_dict):
+                    continue
+                snapshots_by_fixture.setdefault(str(row["fixture_id"]), []).append(row_dict)
 
         for pick in picks:
             fixture_id = str(pick.get("fixture_id"))

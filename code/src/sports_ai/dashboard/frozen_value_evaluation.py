@@ -28,7 +28,12 @@ from ..experiments.football_day11_manager_core import (
     normalize_market_snapshot,
     validate_reference_market_rows,
 )
-from ..market_data.market_evidence import resolve_actionable_max_age_minutes
+from ..market_data.market_evidence import (
+    API_FOOTBALL_MARKET_PROVIDER,
+    LEGACY_API_FOOTBALL_AH_INGESTION_VERSIONS,
+    TRUSTED_API_FOOTBALL_AH_INGESTION_VERSIONS,
+    resolve_actionable_max_age_minutes,
+)
 
 POLICY_ID = "football_model_pick_balanced_line_v1"
 VALUE_PIPELINE_VERSION = "football_frozen_model_pick_value_v1"
@@ -79,8 +84,61 @@ SAFEGUARD_BLOCKED = "SAFEGUARD_BLOCKED"
 FIXTURE_ALREADY_STARTED = "FIXTURE_ALREADY_STARTED"
 EXISTING_POSITION = "EXISTING_POSITION"
 EXISTING_POSITION_LINEAGE_UNRESOLVED = "EXISTING_POSITION_LINEAGE_UNRESOLVED"
+MARKET_EVIDENCE_INVALID = "MARKET_EVIDENCE_INVALID"
+
+# A genuine two-sided book must have an implied-probability sum >= 1. Only a
+# purely numerical tolerance below 1.0 is permitted; anything materially below is
+# a structurally impossible pair and must fail closed.
+AH_PAIR_MIN_IMPLIED_SUM = 1.0
+_IMPLIED_TOLERANCE = 1e-6
 
 _DEFAULT_REFERENCE_BOOKMAKERS = ("pinnacle", "betfair", "bet365")
+
+
+def snapshot_is_value_eligible(row: Mapping[str, Any]) -> bool:
+    """Whether a stored snapshot may be actionable Value evidence.
+
+    Legacy (v1) API-Football Asian Handicap rows were produced under a now-proven
+    unsafe sign-flip normalization and are excluded from Value eligibility. They
+    are NOT deleted and remain available for audit. Corners and all other
+    providers/markets are unaffected. A missing/unknown api-football AH ingestion
+    version also fails closed.
+    """
+    if str(row.get("market") or "") != MARKET_ASIAN_HANDICAP:
+        return True
+    if str(row.get("provider") or "") != API_FOOTBALL_MARKET_PROVIDER:
+        return True
+    version = str(row.get("ingestion_version") or "")
+    if version in LEGACY_API_FOOTBALL_AH_INGESTION_VERSIONS:
+        return False
+    return version in TRUSTED_API_FOOTBALL_AH_INGESTION_VERSIONS
+
+
+def _ah_same_book_pairs_valid(rows: Sequence[Mapping[str, Any]]) -> bool:
+    """Fail closed when a same-book same-line AH HOME/AWAY pair is underround.
+
+    Pairing is derived from provider semantics (both sides share the canonical
+    HOME handicap line). Overround only *validates* the resulting pair; it never
+    chooses which sides pair.
+    """
+    by_book: dict[str, dict[str, float]] = {}
+    for row in rows:
+        selection = str(row.get("normalized_selection") or row.get("selection") or "")
+        try:
+            odds = float(row.get("decimal_odds"))
+        except (TypeError, ValueError):
+            continue
+        if odds <= 1.0:
+            continue
+        by_book.setdefault(_bookmaker_key(row.get("bookmaker")), {})[selection] = odds
+    for sides in by_book.values():
+        home = sides.get("HOME")
+        away = sides.get("AWAY")
+        if home is None or away is None:
+            continue
+        if 1.0 / home + 1.0 / away < AH_PAIR_MIN_IMPLIED_SUM - _IMPLIED_TOLERANCE:
+            return False
+    return True
 
 
 def _parse(value: Any) -> datetime | None:
@@ -367,6 +425,8 @@ def evaluate_frozen_pick(
 
     day11_rows = [_day11_row_from_snapshot(row, fixture=fixture) for row in fresh]
     collapsed = collapse_latest_bookmaker_quotes(day11_rows)
+    if market == MARKET_ASIAN_HANDICAP and not _ah_same_book_pairs_valid(collapsed):
+        return _stuck(MARKET_EVIDENCE_INVALID, "same_book_underround_pair")
     reference_market, reference_error = _reference_market(collapsed)
     if reference_market is None:
         return _stuck(REFERENCE_MARKET_INCOMPLETE, reference_error)
