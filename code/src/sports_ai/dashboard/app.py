@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .auth import AuthSettings, AuthStore, SESSION_COOKIE_NAME, SESSION_DAYS
+from .client_api_token import is_read_only_client_request
 from .client_history import build_client_history_payload
 from .model_pick_history import build_model_pick_history_payload
 from .fixture_provider import FixtureProvider
@@ -97,6 +98,7 @@ def create_app(
     async def auth_guard(request: Request, call_next):
         request.state.user = None
         request.state.guest = False
+        request.state.read_only_client = False
         if not auth_settings.enabled:
             return await call_next(request)
 
@@ -107,6 +109,14 @@ def create_app(
         request.state.guest = guest_access and user is None
         public_path = request.url.path in {"/login", "/signup", "/guest", "/health"} or request.url.path.startswith("/static/")
         if public_path or user is not None:
+            return await call_next(request)
+
+        if is_read_only_client_request(
+            method=request.method,
+            path=request.url.path,
+            authorization_header=request.headers.get("authorization"),
+        ):
+            request.state.read_only_client = True
             return await call_next(request)
 
         if request.state.guest:
