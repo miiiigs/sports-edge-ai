@@ -88,6 +88,18 @@ def _valid_pre_kickoff(
     return valid
 
 
+def latest_prediction_status(predictions: Sequence[Mapping[str, Any]]) -> str | None:
+    """Status of the most recent prediction version (generated_at, then version_key)."""
+    dated = [
+        (str(row.get("generated_at") or ""), str(row.get("version_key") or row.get("prediction_id") or ""), row)
+        for row in predictions
+    ]
+    if not dated:
+        return None
+    dated.sort(key=lambda item: (item[0], item[1]))
+    return str(dated[-1][2].get("status") or "").upper() or None
+
+
 def resolve_first_issued_prediction(
     predictions: Sequence[Mapping[str, Any]],
     *,
@@ -227,6 +239,7 @@ def build_live_issued_ledger(
     pre_kickoff_ready = 0
     post_kickoff_excluded = 0
     kickoff_passed_not_issued = 0
+    latest_not_ready_not_issued = 0
     duplicate_fixtures = 0
     missing_diag: list[dict[str, Any]] = []
 
@@ -247,6 +260,16 @@ def build_live_issued_ledger(
         if kickoff is None or issued_at_dt is None or issued_at_dt >= kickoff:
             kickoff_passed_not_issued += 1
             diagnostics.append({"fixture_id": fixture_id, "reason": "KICKOFF_PASSED_NOT_FORWARD_ISSUABLE"})
+            continue
+        # The current system must still endorse the fixture: if the latest
+        # prediction version is BLOCKED/SUPERSEDED (e.g. model state went stale),
+        # an older READY version is never used to mint a new forward pick.
+        latest_status = latest_prediction_status(fixture_predictions)
+        if latest_status != "READY":
+            latest_not_ready_not_issued += 1
+            diagnostics.append(
+                {"fixture_id": fixture_id, "reason": "LATEST_PREDICTION_NOT_READY", "latest_status": latest_status}
+            )
             continue
         chosen = valid[0][2]
         enriched = {**fixture, "canonical_fixture_id": _canonical_id(fixture)}
@@ -282,6 +305,7 @@ def build_live_issued_ledger(
         "post_kickoff_excluded": post_kickoff_excluded,
         "issued_at": issued_at,
         "kickoff_passed_not_issued": kickoff_passed_not_issued,
+        "latest_not_ready_not_issued": latest_not_ready_not_issued,
         "duplicate_fixtures": duplicate_fixtures,
         "proposed_ah_model_picks": sum(1 for p in proposed if p["market"] == "asian_handicap"),
         "proposed_corner_model_picks": sum(1 for p in proposed if p["market"] == "corner_total"),

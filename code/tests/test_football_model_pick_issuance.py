@@ -162,6 +162,28 @@ def test_post_kickoff_fixture_is_never_issued(dbs, issued_at):
     assert _rows(led) == []
 
 
+def test_stale_latest_prediction_blocks_issuance_from_older_ready_version(dbs):
+    dash, led = dbs
+    _add_fixture(dash, "fx1")
+    # READY earlier, then the model state went stale and the fixture was re-versioned BLOCKED.
+    _add_prediction(dash, prediction_id="p_ready", fixture_id="fx1", generated_at="2026-10-15T06:00:00+00:00", version_key="v1")
+    _add_prediction(dash, prediction_id="p_blocked", fixture_id="fx1", generated_at="2026-10-15T08:00:00+00:00", version_key="v2", status="BLOCKED")
+    dash.commit()
+
+    result = issuance.issue_forward_model_picks(dash, led, now=BEFORE_KICKOFF)
+    assert result["written"] == 0
+    assert result["latest_not_ready_not_issued"] == 1
+    assert _rows(led) == []
+
+    # Once the current system endorses the fixture again, the first pre-kickoff READY
+    # version (p_ready) is the frozen source.
+    _add_prediction(dash, prediction_id="p_ready_again", fixture_id="fx1", generated_at="2026-10-16T08:00:00+00:00", version_key="v3")
+    dash.commit()
+    result = issuance.issue_forward_model_picks(dash, led, now=BEFORE_KICKOFF)
+    assert result["written"] == 2
+    assert {row["prediction_id"] for row in _rows(led)} == {"p_ready"}
+
+
 def test_cli_apply_shares_the_forward_only_rule(dbs):
     dash, led = dbs
     _add_fixture(dash, "fx1")

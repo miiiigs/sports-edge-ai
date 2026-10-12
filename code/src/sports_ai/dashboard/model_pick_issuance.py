@@ -159,6 +159,7 @@ def issue_forward_model_picks(
         "proposed": len(manifest["proposed_picks"]),
         "skipped": skipped,
         "kickoff_passed_not_issued": manifest.get("kickoff_passed_not_issued", 0),
+        "latest_not_ready_not_issued": manifest.get("latest_not_ready_not_issued", 0),
         "canonical_duplicates": canonical_duplicates,
         "conflicts": conflicts,
         "missing_paired_lines": len(manifest.get("missing_paired_lines") or []),
