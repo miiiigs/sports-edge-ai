@@ -12,7 +12,9 @@ The token is deliberately least-privilege:
 * it never authorises mutating/admin/refresh/login routes,
 * it never authorises predictions, analysis or fixture transport routes,
 * it never exposes HTML dashboard pages, and
-* it is compared in constant time and never logged or echoed back.
+* it is compared in constant time and never logged or echoed back, and
+* a configured value shorter than ``MIN_CLIENT_API_TOKEN_LENGTH`` is treated as
+  unset (fail closed) so a weak placeholder can never authorise anything.
 
 ``/health`` is intentionally *not* in the allowlist: it is already public via
 the existing auth middleware and must not depend on the service token.
@@ -27,6 +29,10 @@ import hmac
 import os
 
 CLIENT_API_TOKEN_ENV_VAR = "SPORTS_EDGE_CLIENT_API_TOKEN"
+
+# ``secrets.token_urlsafe(32)`` yields 43 characters; anything shorter than 32
+# is far more likely a placeholder or typo than a generated credential.
+MIN_CLIENT_API_TOKEN_LENGTH = 32
 
 # Smallest GET/HEAD allowlist actually required by the unified pages. Even
 # though the Tennis client transport layer may list more routes, the production
@@ -46,8 +52,15 @@ _BEARER_SCHEME = "bearer"
 
 
 def configured_token() -> str:
-    """Return the configured read-only token, or an empty string when unset."""
-    return (os.environ.get(CLIENT_API_TOKEN_ENV_VAR) or "").strip()
+    """Return the configured read-only token, or an empty string when unset.
+
+    A configured value shorter than ``MIN_CLIENT_API_TOKEN_LENGTH`` is treated
+    as unset so the token path fails closed.
+    """
+    token = (os.environ.get(CLIENT_API_TOKEN_ENV_VAR) or "").strip()
+    if len(token) < MIN_CLIENT_API_TOKEN_LENGTH:
+        return ""
+    return token
 
 
 def presented_bearer_token(authorization_header: str | None) -> str | None:
@@ -91,6 +104,7 @@ def is_read_only_client_request(
 __all__ = [
     "CLIENT_API_READ_PATHS",
     "CLIENT_API_TOKEN_ENV_VAR",
+    "MIN_CLIENT_API_TOKEN_LENGTH",
     "configured_token",
     "is_read_only_client_request",
     "presented_bearer_token",

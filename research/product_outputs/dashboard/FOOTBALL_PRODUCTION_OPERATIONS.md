@@ -219,6 +219,19 @@ and may then read exactly these paths:
 
 No other path is authorized by this token. Do not broaden this allowlist.
 
+Responses are the same JSON payloads the owner session receives. Every other
+outcome is `401 {"detail": "Authentication required"}`: missing, empty, wrong
+or non-Bearer credentials, any other method (`POST`, `PUT`, `PATCH`, `DELETE`,
+`OPTIONS`), trailing-slash variants, and every other `/api/*` path. HTML pages,
+`/docs`, `/redoc` and `/openapi.json` redirect to `/login`. The Bearer scheme
+name is case-insensitive.
+
+Generate the value with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+A configured value shorter than 32 characters is treated as unset, so the token
+path fails closed. Configure the same value on the unified client
+(`SPORTS_EDGE_CLIENT_API_TOKEN` in the client service). It is a Football-only
+credential and is not interchangeable with Tennis owner authentication.
+
 Rules:
 
 - Not a browser login credential. It never replaces or weakens the owner session

@@ -532,11 +532,12 @@ def create_app(
             return JSONResponse({"detail": "Prediction not found"}, status_code=404)
         return JSONResponse(prediction)
 
-    @app.get("/api/candidates")
+    # HEAD is served on the read-only client token allowlist (client_api_token.py).
+    @app.api_route("/api/candidates", methods=["GET", "HEAD"])
     def api_candidates():
         return JSONResponse(resolved_services.get_candidates_payload())
 
-    @app.get("/api/performance")
+    @app.api_route("/api/performance", methods=["GET", "HEAD"])
     def api_performance():
         return JSONResponse(_with_client_history(resolved_services.get_performance_payload()))
 
@@ -544,7 +545,7 @@ def create_app(
     def api_analysis(window: str = Query(default="30")):
         return JSONResponse(_football_intelligence(window))
 
-    @app.get("/api/system/status")
+    @app.api_route("/api/system/status", methods=["GET", "HEAD"])
     def api_system_status():
         return JSONResponse(resolved_services.get_system_status())
 

@@ -9,11 +9,13 @@ from sports_ai.dashboard.auth import SESSION_COOKIE_NAME
 from sports_ai.dashboard.client_api_token import (
     CLIENT_API_READ_PATHS,
     CLIENT_API_TOKEN_ENV_VAR,
+    MIN_CLIENT_API_TOKEN_LENGTH,
+    configured_token,
     is_read_only_client_request,
     presented_bearer_token,
 )
 
-TOKEN = "read-only-token-123"
+TOKEN = "read-only-unified-client-token-0123456789"
 
 ALLOWED_PATHS = (
     "/api/candidates",
@@ -112,33 +114,33 @@ def test_service_allowlist_is_exactly_the_three_required_paths():
 
 
 def test_is_read_only_client_request_allows_only_allowlisted_get_and_head(monkeypatch):
-    monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, "secret")
+    monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, TOKEN)
 
     for path in ALLOWED_PATHS:
         assert is_read_only_client_request(
-            method="GET", path=path, authorization_header="Bearer secret"
+            method="GET", path=path, authorization_header=f"Bearer {TOKEN}"
         )
         assert is_read_only_client_request(
-            method="HEAD", path=path, authorization_header="Bearer secret"
+            method="HEAD", path=path, authorization_header=f"Bearer {TOKEN}"
         )
 
     assert not is_read_only_client_request(
-        method="POST", path="/api/candidates", authorization_header="Bearer secret"
+        method="POST", path="/api/candidates", authorization_header=f"Bearer {TOKEN}"
     )
     assert not is_read_only_client_request(
-        method="GET", path="/health", authorization_header="Bearer secret"
+        method="GET", path="/health", authorization_header=f"Bearer {TOKEN}"
     )
 
 
 def test_is_read_only_client_request_denies_removed_transport_paths(monkeypatch):
-    monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, "secret")
+    monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, TOKEN)
 
     for path in REMOVED_CAPABILITY_PATHS:
         assert not is_read_only_client_request(
-            method="GET", path=path, authorization_header="Bearer secret"
+            method="GET", path=path, authorization_header=f"Bearer {TOKEN}"
         )
         assert not is_read_only_client_request(
-            method="HEAD", path=path, authorization_header="Bearer secret"
+            method="HEAD", path=path, authorization_header=f"Bearer {TOKEN}"
         )
 
     assert not is_read_only_client_request(
@@ -150,12 +152,12 @@ def test_is_read_only_client_request_denies_removed_transport_paths(monkeypatch)
 
     monkeypatch.delenv(CLIENT_API_TOKEN_ENV_VAR, raising=False)
     assert not is_read_only_client_request(
-        method="GET", path="/api/candidates", authorization_header="Bearer secret"
+        method="GET", path="/api/candidates", authorization_header=f"Bearer {TOKEN}"
     )
 
 
 def test_is_read_only_client_request_rejects_non_ascii_without_error(monkeypatch):
-    monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, "secret")
+    monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, TOKEN)
 
     assert not is_read_only_client_request(
         method="GET", path="/api/candidates", authorization_header="Bearer caf\u00e9"
@@ -179,10 +181,11 @@ def test_read_only_token_allows_allowlisted_get_and_head(tmp_path, monkeypatch):
         performance = client.get("/api/performance", headers=_bearer())
         assert performance.status_code == 200
 
-        # HEAD is authorized as a read method (never 401). Whether the JSON
-        # route answers HEAD (200) or the router rejects the verb (405) is a
-        # routing detail independent of token authorization.
-        assert client.head("/api/candidates", headers=_bearer()).status_code != 401
+        # HEAD is part of the read contract and is actually served.
+        for path in ALLOWED_PATHS:
+            head = client.head(path, headers=_bearer())
+            assert head.status_code == 200, path
+            assert head.content == b"", path
 
 
 def test_read_only_token_does_not_authorize_removed_endpoints(tmp_path, monkeypatch):
@@ -245,6 +248,19 @@ def test_blank_configured_token_never_authorises(tmp_path, monkeypatch):
     with TestClient(app, follow_redirects=False) as client:
         response = client.get("/api/system/status", headers=_bearer("   "))
         assert response.status_code == 401
+
+
+def test_short_configured_token_never_authorises(tmp_path, monkeypatch):
+    weak = "short-placeholder"
+    assert len(weak) < MIN_CLIENT_API_TOKEN_LENGTH
+    monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, weak)
+    assert configured_token() == ""
+    assert not is_read_only_client_request(
+        method="GET", path="/api/candidates", authorization_header=f"Bearer {weak}"
+    )
+    app = _app_with_auth(tmp_path, monkeypatch, weak)
+    with TestClient(app, follow_redirects=False) as client:
+        assert client.get("/api/system/status", headers=_bearer(weak)).status_code == 401
 
 
 def test_health_is_public_without_token(tmp_path, monkeypatch):
