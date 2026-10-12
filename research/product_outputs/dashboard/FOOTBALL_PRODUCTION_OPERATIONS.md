@@ -1,6 +1,6 @@
 # Football Production Operations
 
-Last updated: Thursday, August 20, 2026
+Last updated: Monday, October 12, 2026
 
 ## Scope
 
@@ -193,12 +193,48 @@ Useful optional runtime controls:
 - `SPORTS_AI_UPCOMING_HORIZON_DAYS`
 - `SPORTS_AI_CURRENT_XG_CONNECTED`
 - `SPORTS_AI_CURRENT_ODDS_CONNECTED`
+- `SPORTS_EDGE_CLIENT_API_TOKEN` (optional server-to-server read credential)
 
 Current/future market-provider variables:
 
 - `SPORTS_AI_API_FOOTBALL_TOKEN`
 - `SPORTS_AI_API_FOOTBALL_LEAGUE_MAP`
 - `SPORTS_AI_THE_ODDS_API_KEY` future only, not currently required
+
+## Unified Client Read-Only Service Token
+
+`SPORTS_EDGE_CLIENT_API_TOKEN` is an optional, deployment-managed secret used
+only for server-to-server reads by the Unified Sports Edge client. It is not
+required for normal dashboard operation and it is never committed to the repo.
+
+When it is set, a server caller may present it as a Bearer credential:
+
+`Authorization: Bearer <SPORTS_EDGE_CLIENT_API_TOKEN>`
+
+and may then read exactly these paths:
+
+- `GET/HEAD /api/candidates`
+- `GET/HEAD /api/performance`
+- `GET/HEAD /api/system/status`
+
+No other path is authorized by this token. Do not broaden this allowlist.
+
+Rules:
+
+- Not a browser login credential. It never replaces or weakens the owner session
+  cookie guard, and it does not authenticate a normal user session.
+- Not accepted through query parameters. Only the `Authorization` header is
+  considered; `token`, `api_key`, and `access_token` query parameters never
+  authenticate an otherwise unauthenticated request.
+- Not stored in SQLite. The value is held only in the process environment; it is
+  never written to the auth database or the session table.
+- Must never be exposed client-side. Use it only on the server-to-server
+  boundary; do not embed it in browser JavaScript, HTML, or any public client
+  code.
+- `/health` remains public and does not require this token.
+
+Rotation or removal takes effect on the next request; no database migration is
+involved.
 
 ## Known External Dependencies
 

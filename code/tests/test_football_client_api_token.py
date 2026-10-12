@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi.testclient import TestClient
 
 from sports_ai.dashboard.app import create_app
+from sports_ai.dashboard.auth import SESSION_COOKIE_NAME
 from sports_ai.dashboard.client_api_token import (
     CLIENT_API_READ_PATHS,
     CLIENT_API_TOKEN_ENV_VAR,
@@ -58,6 +61,9 @@ class _StubServices:
     def get_performance_payload(self) -> dict:
         return {"summary": {}}
 
+    def get_predictions_payload(self) -> dict:
+        return {"predictions": []}
+
     def get_health_payload(self) -> dict:
         return {"status": "ok"}
 
@@ -65,6 +71,16 @@ class _StubServices:
 def _app_with_auth(tmp_path, monkeypatch, token: str | None):
     monkeypatch.setenv("SPORTS_AI_AUTH_ENABLED", "1")
     monkeypatch.setenv("SPORTS_AI_AUTH_COOKIE_SECURE", "0")
+    monkeypatch.setenv("SPORTS_AI_AUTH_DB_PATH", str(tmp_path / "auth.sqlite"))
+    if token is None:
+        monkeypatch.delenv(CLIENT_API_TOKEN_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(CLIENT_API_TOKEN_ENV_VAR, token)
+    return create_app(services=_StubServices(tmp_path))
+
+
+def _app_with_auth_disabled(tmp_path, monkeypatch, token: str | None):
+    monkeypatch.setenv("SPORTS_AI_AUTH_ENABLED", "0")
     monkeypatch.setenv("SPORTS_AI_AUTH_DB_PATH", str(tmp_path / "auth.sqlite"))
     if token is None:
         monkeypatch.delenv(CLIENT_API_TOKEN_ENV_VAR, raising=False)
@@ -236,3 +252,68 @@ def test_health_is_public_without_token(tmp_path, monkeypatch):
     with TestClient(app, follow_redirects=False) as client:
         response = client.get("/health")
         assert response.status_code == 200
+
+
+def test_auth_disabled_public_behavior_unchanged_with_token_configured(tmp_path, monkeypatch):
+    app = _app_with_auth_disabled(tmp_path, monkeypatch, TOKEN)
+    with TestClient(app, follow_redirects=False) as client:
+        # With auth disabled the middleware is a passthrough: configuring the
+        # service token must not introduce any new gating.
+        assert client.get("/api/system/status").status_code == 200
+        assert client.get("/health").status_code == 200
+        # Even a non-allowlisted read path stays public while auth is disabled.
+        assert client.get("/api/predictions").status_code == 200
+        # Presenting the token changes nothing while auth is disabled.
+        assert client.get("/api/system/status", headers=_bearer()).status_code == 200
+
+
+def test_guest_cookie_get_access_unchanged(tmp_path, monkeypatch):
+    app = _app_with_auth(tmp_path, monkeypatch, TOKEN)
+    with TestClient(app, follow_redirects=False) as client:
+        client.cookies.set("sports_edge_guest", "1")
+        # Guest GET continues to work, including on a path the service token
+        # does not authorize.
+        assert client.get("/api/system/status").status_code == 200
+        assert client.get("/api/predictions").status_code == 200
+        # Existing guest write restriction is unchanged.
+        assert client.post("/api/fixtures/refresh").status_code == 403
+
+
+def test_query_parameters_never_authenticate(tmp_path, monkeypatch):
+    app = _app_with_auth(tmp_path, monkeypatch, TOKEN)
+    with TestClient(app, follow_redirects=False) as client:
+        for param in ("token", "api_key", "access_token"):
+            response = client.get(f"/api/system/status?{param}={TOKEN}")
+            assert response.status_code == 401, param
+        assert client.get(f"/api/candidates?access_token={TOKEN}").status_code == 401
+
+
+def test_bearer_request_sets_no_session_cookie(tmp_path, monkeypatch):
+    app = _app_with_auth(tmp_path, monkeypatch, TOKEN)
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get("/api/system/status", headers=_bearer())
+        assert response.status_code == 200
+        set_cookie = " ".join(response.headers.get_list("set-cookie"))
+        assert SESSION_COOKIE_NAME not in set_cookie
+        assert all(cookie.name != SESSION_COOKIE_NAME for cookie in client.cookies.jar)
+
+
+def test_service_token_not_persisted_in_auth_sqlite(tmp_path, monkeypatch):
+    app = _app_with_auth(tmp_path, monkeypatch, TOKEN)
+    with TestClient(app, follow_redirects=False) as client:
+        assert client.get("/api/system/status", headers=_bearer()).status_code == 200
+
+    auth_db = tmp_path / "auth.sqlite"
+    assert auth_db.exists()
+    assert TOKEN.encode("utf-8") not in auth_db.read_bytes()
+
+    with sqlite3.connect(auth_db) as conn:
+        tables = [
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
+        assert "sessions" in tables
+        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+        for table in tables:
+            for row in conn.execute(f"SELECT * FROM {table}"):
+                assert TOKEN not in " ".join(str(value) for value in row)
