@@ -9,7 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-from datetime import date, datetime, timezone
+from contextlib import closing
+from datetime import date
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -30,7 +31,7 @@ def build_weekend_model_pick_report(
     if not db.exists():
         raise FileNotFoundError("model pick ledger does not exist")
 
-    with _connect_readonly(db) as conn:
+    with closing(_connect_readonly(db)) as conn:
         raw_rows = [dict(row) for row in conn.execute(
             "SELECT * FROM football_model_pick_entries WHERE record_origin = 'LIVE_ISSUED'"
         )]
