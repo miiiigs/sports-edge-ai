@@ -225,3 +225,41 @@ def test_client_history_excludes_quarantined_positions(tmp_path):
     assert {"fx-ah-v2", "fx-corner-v1"} <= fixture_ids
     assert "fx-ah-v1" not in fixture_ids
     assert "fx-ah-unlinked" not in fixture_ids
+
+
+def test_portfolio_headline_cannot_include_quarantined_positions(tmp_path, monkeypatch):
+    ids = _seed_mixed_ledger(tmp_path / "paper.sqlite")
+    services = _services(tmp_path)
+    # Even if every position (including legacy AH) were portfolio-selected, the
+    # portfolio KPIs are built from counted rows only.
+    monkeypatch.setattr(
+        services,
+        "_portfolio_selection_records",
+        lambda: {
+            "policy": None,
+            "rows": [],
+            "evaluation_rows": [],
+            "by_trade_id": {},
+            "selected_trade_ids": set(ids.values()),
+            "publish_state": "ACTIVE",
+            "publish_note": "",
+            "mode": "test",
+        },
+    )
+    payload = services.get_performance_payload()
+    portfolio = payload["current_portfolio_summary"]
+    assert portfolio["positions"] == 3
+    assert portfolio["by_market"]["asian_handicap"]["positions"] == 2
+    quarantined = {ids["ah_v1"], ids["ah_unlinked"]}
+    assert not quarantined & {str(row.get("paper_trade_id")) for row in payload.get("portfolio_positions") or []}
+
+
+def test_quarantined_count_excludes_reconciled_duplicates(tmp_path):
+    ids = _seed_mixed_ledger(tmp_path / "paper.sqlite")
+    with pt.connect(tmp_path / "paper.sqlite") as conn:
+        rows = pt.fetch_paper_trade_rows(conn)
+    # A legacy AH row that is also a reconciled duplicate is counted once, as a
+    # reconciliation exclusion, never as a quarantined position.
+    counted, quarantined = partition_counted_paper_rows(rows, excluded_trade_ids={ids["ah_v1"]})
+    assert {row["paper_trade_id"] for row in quarantined} == {ids["ah_unlinked"]}
+    assert len(counted) + len(quarantined) == len(rows) - 1
