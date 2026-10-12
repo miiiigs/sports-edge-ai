@@ -391,8 +391,16 @@ def evaluate_frozen_pick(
     # Fresh pre-match only, at decision time (provider-specific actionable age).
     fresh: list[Mapping[str, Any]] = []
     stale: list[Mapping[str, Any]] = []
-    max_age = resolve_actionable_max_age_minutes(str(next((r.get("provider") for r in line_rows), "api-football")))
+    # The actionable max age is resolved PER ROW from that row's own provider.
+    # Resolving it once from the first row would let a mixed-provider set apply
+    # the longer api-football window (240m) to a provider whose approved window
+    # is shorter (or absent, which fails closed).
+    max_age_by_provider: dict[str, int | None] = {}
     for row in line_rows:
+        provider_key = str(row.get("provider") or "api-football")
+        if provider_key not in max_age_by_provider:
+            max_age_by_provider[provider_key] = resolve_actionable_max_age_minutes(provider_key)
+        max_age = max_age_by_provider[provider_key]
         if not bool(row.get("is_pre_match", True)):
             stale.append(row)
             continue
