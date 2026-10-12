@@ -232,6 +232,29 @@ CLIENT_MATCH_CARD_MARKET_ORDER = {
 }
 
 
+CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF_ENV_VAR = "SPORTS_AI_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF"
+DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF = 60
+HARD_MAX_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF = 360
+
+
+def resolve_closing_odds_max_minutes_before_kickoff() -> int:
+    """Max distance (minutes) before kickoff for a closing quote.
+
+    Unset/invalid/non-positive fails safe to the 60-minute default; values are
+    clamped to 360 so a closing quote can never be a day-old capture.
+    """
+    raw = os.environ.get(CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF_ENV_VAR, "").strip()
+    if not raw:
+        return DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF
+    if value <= 0:
+        return DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF
+    return min(value, HARD_MAX_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF)
+
+
 def _fixture_sort_key(row: dict[str, Any]) -> tuple[str, str]:
     return (str(row.get("kickoff_utc") or ""), str(row.get("fixture_id") or ""))
 
@@ -3720,16 +3743,36 @@ class DashboardServices:
         line: float | None,
         kickoff_utc: str,
     ) -> dict[str, Any] | None:
+        """Latest eligible pre-match closing quote, or ``None`` (CLV stays null).
+
+        Eligible: same market/selection/line, pre-match, ``captured_at <= kickoff``
+        AND within ``SPORTS_AI_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF`` (default
+        60) of kickoff, and value-eligible evidence (legacy v1 / unknown-version
+        API-Football AH is never closing evidence). There is no fallback to an
+        older capture. Only used for NEW closing selections; already stored
+        closing_odds / clv_pct values are never rewritten by the caller.
+        """
         kickoff = parse_iso_datetime(kickoff_utc)
-        candidates = [
-            row
-            for row in snapshot_rows
-            if str(row["market"]) == market
-            and str(row["selection"]) == selection
-            and ((line is None and row.get("line") is None) or row.get("line") == line)
-            and bool(row.get("is_pre_match"))
-            and parse_iso_datetime(str(row["captured_at"])) <= kickoff
-        ]
+        max_minutes = resolve_closing_odds_max_minutes_before_kickoff()
+        earliest = kickoff - timedelta(minutes=max_minutes)
+        candidates = []
+        for row in snapshot_rows:
+            if not (
+                str(row["market"]) == market
+                and str(row["selection"]) == selection
+                and ((line is None and row.get("line") is None) or row.get("line") == line)
+                and bool(row.get("is_pre_match"))
+            ):
+                continue
+            try:
+                captured = parse_iso_datetime(str(row["captured_at"]))
+            except (TypeError, ValueError):
+                continue
+            if captured > kickoff or captured < earliest:
+                continue
+            if not snapshot_is_value_eligible(dict(row)):
+                continue
+            candidates.append(row)
         if not candidates:
             return None
         return sorted(candidates, key=lambda row: (row["captured_at"], int(row["snapshot_id"])))[-1]
