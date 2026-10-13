@@ -128,10 +128,25 @@ step. App sleeping stays **on** until step 4, so each deploy is one cold start.
 | 9 | Env: closing window `90` | Near-kickoff capture | Snapshots with `captured_at` within 60 min of kickoff for Model Pick fixtures; `closing_captured_at` populated on new paper positions. |
 | 10 | After ≥ 7 days of steps 4–9 stable: retire wakers | – | Delete `football-hourly-wake` and `football-hourly-wake-v2`. Change `football-production-wake.yml` to a 3-hourly health check that fails loudly. |
 
-Expected first issuance (dry run of #110 against the 15:22Z snapshot): **12 picks
-for 6 fixtures** (ENG3 1, ENG4 5). 12 fixtures are withheld because their latest
-prediction is not READY. Fixtures that kicked off since the snapshot drop out
-automatically.
+Expected first issuance (dry run of #110 against the 15:22Z snapshot, repeated at
+2026-10-13 03:00Z): **12 picks for 6 fixtures** (ENG3 1, ENG4 5), all kicking off
+2026-10-17. The latest prediction is READY and is the frozen source for each.
+Withheld: 12 at 15:22Z, 10 at 03:00Z.
+
+**Gate before step 6 (model freshness).** All 12 projected picks come from a model
+whose state is `model_as_of = 2026-10-03`. ENG3 and ENG4 completed league matches
+on 2026-10-10 that the model does not contain. The 21-day calendar gate passes
+them, but schedule mode (#112) would mark both leagues STALE. Issuance freezes the
+first pre-kickoff READY prediction. Enabling it before the research refresh picks
+up the 10-10 results would lock those picks to the older model. Enable step 6 only
+when one of these holds:
+- (a) for every competition with READY fixtures in the next 7 days, the latest
+  prediction's model state includes its most recently completed matchday, checked
+  from a read-only snapshot;
+- (b) the owner adopts `SPORTS_AI_FOOTBALL_MODEL_FRESHNESS_MODE=schedule`.
+
+ENG1, ENG2 and ESP1 are already BLOCKED (`MODEL_STATE_STALE`; ENG1's latest
+complete research match is 2026-09-20).
 
 ## 5. Verification commands
 
@@ -169,6 +184,6 @@ python -m sports_ai.diagnostics.football_model_pick_backlog --model-pick-db <sna
 3. Osasuna v Getafe (ESP1, 2026-08-31): football-data.org 1-1, API-Football 1-0.
    - Verify against an official source.
    - Then remove the entry from `DISPUTED_FINAL_SCORE_FIXTURES` and decide whether a documented correction record is needed. Ledger rows are never rewritten in place.
-4. Whether to adopt `SPORTS_AI_FOOTBALL_MODEL_FRESHNESS_MODE=schedule`. It is stricter, and READY fixtures drop to 0 during weekend publication lag.
+4. Whether to adopt `SPORTS_AI_FOOTBALL_MODEL_FRESHNESS_MODE=schedule` (stricter; READY fixtures can drop to 0 during publication lag), or to rely on the manual model-freshness gate before step 6.
 5. How to treat the 67 open retrospective picks on football-data.org fixture ids that API-Football cannot poll: identity mapping or retirement.
 6. A VOID state for the 6 postponed or cancelled picks.
