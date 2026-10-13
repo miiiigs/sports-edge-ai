@@ -117,3 +117,66 @@ def test_asian_handicap_pricing_matches_the_paper_settlement_engine(ready):
         assert won / total == pytest.approx(sp["full_win_probability"] + 0.5 * sp["half_win_probability"], abs=1e-9)
         assert lost / total == pytest.approx(sp["full_loss_probability"] + 0.5 * sp["half_loss_probability"], abs=1e-9)
         assert push / total == pytest.approx(sp["push_probability"], abs=1e-9)
+
+
+# ---------------------------------------------------------------- behavioural safeguards
+from sports_ai.dashboard import prediction_service as ps  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "model_as_of,kickoff,expected",
+    [
+        ("2026-05-24T23:59:59+00:00", "2026-05-25T11:30:00+00:00", True),
+        ("2026-05-24T23:59:59+00:00", "2026-05-24T19:00:00+00:00", False),  # same day fails closed
+        ("2026-05-24T23:59:59+00:00", "2026-05-23T15:00:00+00:00", False),
+        (None, "2026-05-25T11:30:00+00:00", False),
+    ],
+)
+def test_model_state_must_predate_kickoff_date(model_as_of, kickoff, expected):
+    assert ps.model_state_predates_kickoff(model_as_of, kickoff) is expected
+
+
+def test_fixture_on_or_before_the_research_cutoff_is_blocked(snapshot):
+    same_day = snapshot.model_as_of[:10] + "T20:00:00+00:00"
+    prediction = build_prediction_for_fixture(PredictionContext(fixture=_fixture(kickoff=same_day), snapshot=snapshot))
+    assert prediction["prediction_status"] == "BLOCKED"
+    assert prediction["blockers"] == ["MODEL_STATE_NOT_BEFORE_KICKOFF"]
+    assert not prediction.get("market_rows")
+
+
+@pytest.mark.parametrize("raw,expected", [(None, 1), ("", 1), ("2", 2), ("0", 1), ("-3", 1), ("99", 10), ("x", 1)])
+def test_min_venue_history_resolver(monkeypatch, raw, expected):
+    if raw is None:
+        monkeypatch.delenv(ps.MIN_VENUE_HISTORY_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(ps.MIN_VENUE_HISTORY_ENV_VAR, raw)
+    assert ps.resolve_min_venue_history_matches() == expected
+
+
+def _with_history(snapshot, monkeypatch, home_count):
+    original = snapshot.team_model_history_status
+
+    def fake(*, competition_id, canonical_team_id, venue):
+        status = original(competition_id=competition_id, canonical_team_id=canonical_team_id, venue=venue)
+        if venue == "home":
+            status = {**status, "matches_observed_by_statistic": {k: home_count for k in status["matches_observed_by_statistic"]}}
+        return status
+
+    monkeypatch.setattr(type(snapshot), "team_model_history_status", lambda self, **kw: fake(**kw))
+
+
+def test_default_keeps_historical_behaviour_for_one_venue_match(snapshot, monkeypatch):
+    monkeypatch.delenv(ps.MIN_VENUE_HISTORY_ENV_VAR, raising=False)
+    _with_history(snapshot, monkeypatch, home_count=1)
+    prediction = build_prediction_for_fixture(PredictionContext(fixture=_fixture(), snapshot=snapshot))
+    assert prediction["prediction_status"] == "READY"
+
+
+def test_min_venue_history_blocks_insufficient_history_when_enabled(snapshot, monkeypatch):
+    monkeypatch.setenv(ps.MIN_VENUE_HISTORY_ENV_VAR, "2")
+    _with_history(snapshot, monkeypatch, home_count=1)
+    prediction = build_prediction_for_fixture(PredictionContext(fixture=_fixture(), snapshot=snapshot))
+    assert prediction["prediction_status"] == "BLOCKED"
+    assert prediction["blockers"] == ["HOME_MODEL_HISTORY_INSUFFICIENT"]
+    _with_history(snapshot, monkeypatch, home_count=2)
+    assert build_prediction_for_fixture(PredictionContext(fixture=_fixture(), snapshot=snapshot))["prediction_status"] == "READY"
