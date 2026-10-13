@@ -118,7 +118,7 @@ step. App sleeping stays **on** until step 4, so each deploy is one cold start.
 |---|---|---|---|
 | 0 | Railway: volume backup of `/data` | – | Backup listed with timestamp; record the 4 DB file sizes (read-only `ls -l /data`). |
 | 1 | Merge **#107** | HEAD served on 3 client routes | Section 5 auth checks. `/health` 200. |
-| 2 | Merge **#109** | **Client-visible:** the paper headline drops to 811 counted positions | `/api/performance` → `paper_market_evidence_quarantine.market_evidence_quarantined_positions == 791`, `disputed_result_quarantined_positions == 9` |
+| 2 | Merge **#109** | **Client-visible:** the paper headline drops to 820 counted positions (net −104.37u, ROI −12.79% on 816 settled, at the 15:22Z snapshot) | `/api/performance` → `paper_market_evidence_quarantine.market_evidence_quarantined_positions == 791`, `disputed_result_quarantined_positions == 0` |
 | 3 | Merge **#110**, **#111**, **#113**, **#112**, **#114**, one at a time | Flags off. **Client-visible:** the Model Pick headline becomes forward-only (86 issued, 488 disclosed as retrospective). CLI issuance becomes forward-only. Collection attempt recency persisted. 3 aliases resolve. | Logs: `model pick issuance scheduler: state=disabled`, `prediction refresh scheduler: state=disabled`. `/health`: `model_pick_issuance_*`, `result_sync_backlog_lookback_days: 0`, `provider_budget_quota_alert`. No `Traceback`; no `sqlite3.OperationalError`. |
 | 4 | **Approval:** Railway app sleeping **off**. Wakers untouched. | Continuous loops | No `Stopping Container` for 24h. `market collection scheduler started: interval_seconds=600` appears exactly once per deploy. |
 | 5 | Observe 24h | Baseline provider usage | `/health.provider_budget` daily usage below 300 (no new loops yet); `provider_budget_quota_alert: NONE`. |
@@ -179,11 +179,15 @@ python -m sports_ai.diagnostics.football_model_pick_backlog --model-pick-db <sna
 
 1. Approve app sleeping off (≈ $6–8/month before plan credit). Wakers are retired only at step 10.
 2. Approve the client-visible headline changes:
-   - #109: paper 811 counted; 791 legacy AH and 9 disputed quarantined;
+   - #109: paper 820 counted; 791 legacy AH quarantined;
    - #110: Model Pick headline forward-only.
-3. Osasuna v Getafe (ESP1, 2026-08-31): football-data.org 1-1, API-Football 1-0.
-   - Verify against an official source.
-   - Then remove the entry from `DISPUTED_FINAL_SCORE_FIXTURES` and decide whether a documented correction record is needed. Ledger rows are never rewritten in place.
+3. ~~Osasuna v Getafe score dispute~~ **Resolved 2026-10-13: 1-0**, per the official
+   [LaLiga](https://www.laliga.com/es-GB/partido/temporada-2026-2027-laliga-ea-sports-ca-osasuna-getafe-cf-3)
+   and [CA Osasuna](https://www.osasuna.es/en-laliga-2026-osasuna-vs-getafe) match pages.
+   - football-data.org's 1-1 was a single post-match capture (lastUpdated 19:36:28Z) that was never re-polled. Getafe's goal was disallowed for offside by VAR.
+   - All 9 counted positions were graded from the correct API-Football 1-0, so they count again.
+   - The evidence is in `RESOLVED_FINAL_SCORE_DISPUTES`; `DISPUTED_FINAL_SCORE_FIXTURES` is empty.
+   - Still open: the football-data.org-id Model Picks on this match (AH FULL_WIN). They are retrospective, excluded from every success rate, and settled from the wrong 1-1. A documented correction record is the owner's decision; rows are never rewritten in place.
 4. Whether to adopt `SPORTS_AI_FOOTBALL_MODEL_FRESHNESS_MODE=schedule` (stricter; READY fixtures can drop to 0 during publication lag), or to rely on the manual model-freshness gate before step 6.
 5. How to treat the 67 open retrospective picks on football-data.org fixture ids that API-Football cannot poll: identity mapping or retirement.
 6. A VOID state for the 6 postponed or cancelled picks.
