@@ -98,6 +98,7 @@ from .result_sync import (
     within_backlog_lookback,
     within_result_lookback,
 )
+from . import high_confidence_shadow
 from .model_pick_issuance import (
     ISSUANCE_INTERVAL_ENV_VAR,
     ISSUANCE_SCHEDULER_ENV_VAR,
@@ -949,6 +950,18 @@ class DashboardServices:
             "model_pick_settlement_applied_last_cycle": 0,
             "model_pick_settlement_conflicts_last_cycle": 0,
         }
+        self._high_confidence_shadow_runtime_state: dict[str, Any] = {
+            "high_confidence_shadow_enabled": False,
+            "high_confidence_shadow_policy_id": high_confidence_shadow.POLICY_ID,
+            "high_confidence_shadow_last_cycle_at": None,
+            "high_confidence_shadow_last_success_at": None,
+            "high_confidence_shadow_last_error": None,
+            "high_confidence_shadow_cycles_completed": 0,
+            "high_confidence_shadow_evaluated_last_cycle": 0,
+            "high_confidence_shadow_issued_last_cycle": 0,
+            "high_confidence_shadow_abstained_last_cycle": {},
+            "high_confidence_shadow_settled_last_cycle": 0,
+        }
         self._model_pick_issuance_runtime_state: dict[str, Any] = {
             "model_pick_issuance_scheduler_enabled": self.config.enable_model_pick_issuance_scheduler,
             "model_pick_issuance_interval_seconds": self.config.model_pick_issuance_interval_seconds,
@@ -1121,6 +1134,9 @@ class DashboardServices:
         model_pick_issuance_state = storage.get_runtime_state(
             conn, "model_pick_issuance_state", initialize_schema=False
         )
+        high_confidence_shadow_state = storage.get_runtime_state(
+            conn, "high_confidence_shadow_state", initialize_schema=False
+        )
         value_evaluation_state = storage.get_runtime_state(
             conn, "value_evaluation_state", initialize_schema=False
         )
@@ -1167,6 +1183,8 @@ class DashboardServices:
                     "prediction_refresh_interval_seconds": self.config.prediction_refresh_interval_seconds,
                 }
             )
+        if isinstance(high_confidence_shadow_state, dict):
+            self._high_confidence_shadow_runtime_state.update(high_confidence_shadow_state)
         if isinstance(value_evaluation_state, dict):
             self._value_evaluation_runtime_state.update(value_evaluation_state)
         if isinstance(storage_runtime_state, dict):
@@ -6021,6 +6039,98 @@ class DashboardServices:
             )
         return {"state": "MODEL_PICK_ISSUANCE", **result, "error": error}
 
+    # ------------------------------------------- high-confidence AH shadow (isolated)
+    def high_confidence_shadow_scheduler_active(self) -> bool:
+        """Off unless SPORTS_AI_ENABLE_HIGH_CONFIDENCE_SHADOW is set; never on the web role."""
+        return (
+            high_confidence_shadow.enabled()
+            and self.config.runtime_role != RUNTIME_ROLE_WEB
+            and getattr(self.config, "model_pick_db_path", None) is not None
+        )
+
+    def high_confidence_shadow_db_path(self) -> Path | None:
+        model_pick_db_path = getattr(self.config, "model_pick_db_path", None)
+        if not model_pick_db_path:
+            return None
+        return high_confidence_shadow.default_db_path(model_pick_db_path)
+
+    def run_high_confidence_shadow_cycle(self) -> dict[str, Any]:
+        """Evaluate and settle the high-confidence AH shadow lane. No-op when disabled.
+
+        DB-only and isolated: the dashboard and paper DBs are opened read-only and
+        the only write target is the separate shadow DB. Never touches the Model
+        Pick ledger, paper positions or Value Bets; publishes nothing.
+        """
+        started_at = utc_now_iso()
+        if not self.high_confidence_shadow_scheduler_active():
+            return {"state": "DISABLED", "issued": 0}
+        error: str | None = None
+        issue: dict[str, Any] = {}
+        settle: dict[str, Any] = {}
+        try:
+            dashboard_conn = sqlite3.connect(
+                f"file:{Path(self.config.dashboard_db_path).as_posix()}?mode=ro", uri=True
+            )
+            paper_conn: sqlite3.Connection | None = None
+            try:
+                paper_path = Path(self.config.paper_trading_db_path)
+                if paper_path.exists():
+                    paper_conn = sqlite3.connect(f"file:{paper_path.as_posix()}?mode=ro", uri=True)
+                    paper_conn.row_factory = sqlite3.Row
+                shadow_conn = high_confidence_shadow.connect(self.high_confidence_shadow_db_path())
+                try:
+                    issue = high_confidence_shadow.issue_high_confidence_shadow(
+                        dashboard_conn, shadow_conn, paper_conn, now=started_at
+                    )
+                    settle = high_confidence_shadow.settle_high_confidence_shadow(
+                        dashboard_conn, shadow_conn, now=started_at
+                    )
+                finally:
+                    shadow_conn.close()
+            finally:
+                dashboard_conn.close()
+                if paper_conn is not None:
+                    paper_conn.close()
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+        completed = int(
+            self._high_confidence_shadow_runtime_state.get("high_confidence_shadow_cycles_completed") or 0
+        ) + 1
+        self._high_confidence_shadow_runtime_state.update(
+            {
+                "high_confidence_shadow_enabled": True,
+                "high_confidence_shadow_last_cycle_at": started_at,
+                "high_confidence_shadow_last_success_at": None if error else utc_now_iso(),
+                "high_confidence_shadow_last_error": error,
+                "high_confidence_shadow_cycles_completed": completed,
+                "high_confidence_shadow_evaluated_last_cycle": int(issue.get("issued") or 0)
+                + int(issue.get("already_issued") or 0)
+                + sum(int(v) for v in (issue.get("abstained") or {}).values()),
+                "high_confidence_shadow_issued_last_cycle": int(issue.get("issued") or 0),
+                "high_confidence_shadow_abstained_last_cycle": dict(issue.get("abstained") or {}),
+                "high_confidence_shadow_settled_last_cycle": int(settle.get("applied") or 0),
+            }
+        )
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            storage.put_runtime_state(
+                conn,
+                state_key="high_confidence_shadow_state",
+                state_value=self._high_confidence_shadow_runtime_state,
+                updated_at=utc_now_iso(),
+                initialize_schema=self._read_requires_schema_init(),
+            )
+        if error:
+            logger.warning("high-confidence shadow cycle error: %s", error)
+        else:
+            logger.info(
+                "high-confidence shadow: evaluated=%s issued=%s abstained=%s settled=%s",
+                issue.get("evaluated"),
+                issue.get("issued"),
+                issue.get("abstained"),
+                settle.get("applied"),
+            )
+        return {"state": "HIGH_CONFIDENCE_SHADOW", "issue": issue, "settle": settle, "error": error}
+
     # ------------------------------------------- dedicated prediction refresh
     def prediction_refresh_scheduler_active(self) -> bool:
         return bool(self.config.enable_prediction_refresh_scheduler) and self.config.runtime_role != RUNTIME_ROLE_WEB
@@ -8587,6 +8697,17 @@ class DashboardServices:
                     "prediction_refresh_cycles_completed",
                 )
             },
+            **{
+                key: self._high_confidence_shadow_runtime_state.get(key)
+                for key in (
+                    "high_confidence_shadow_last_cycle_at",
+                    "high_confidence_shadow_last_success_at",
+                    "high_confidence_shadow_last_error",
+                    "high_confidence_shadow_cycles_completed",
+                    "high_confidence_shadow_issued_last_cycle",
+                )
+            },
+            "high_confidence_shadow_enabled": self.high_confidence_shadow_scheduler_active(),
             "value_evaluation_scheduler_enabled": bool(
                 self._value_evaluation_runtime_state.get("value_evaluation_scheduler_enabled")
             ),

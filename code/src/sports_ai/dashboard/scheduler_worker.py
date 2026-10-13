@@ -223,6 +223,32 @@ async def _run_model_pick_issuance_runtime(services: DashboardServices, stop_eve
             return
 
 
+async def _run_high_confidence_shadow_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Isolated, recurring high-confidence AH shadow lane. No-op when disabled.
+
+    Shares the Model Pick issuance cadence so the lane freezes the same first
+    pre-kickoff READY prediction. Writes only the separate shadow DB; never
+    publishes, never creates Value Bets or paper positions.
+    """
+    if not services.high_confidence_shadow_scheduler_active():
+        logger.info("high-confidence shadow scheduler: state=disabled")
+        return
+    interval = max(1, int(services.config.model_pick_issuance_interval_seconds))
+    logger.info("high-confidence shadow scheduler started: interval_seconds=%s", interval)
+    await _wait_for_startup_sync(services, stop_event)
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(services.run_high_confidence_shadow_cycle)
+        except Exception:
+            logger.exception("high-confidence shadow cycle failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+        else:
+            return
+
+
 async def _run_prediction_refresh_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
     """Isolated, recurring fixture + prediction refresh. No-op when disabled.
 
@@ -293,6 +319,9 @@ async def run_worker() -> int:
     prediction_refresh_task = asyncio.create_task(
         _run_prediction_refresh_runtime(services, stop_event)
     )
+    high_confidence_shadow_task = asyncio.create_task(
+        _run_high_confidence_shadow_runtime(services, stop_event)
+    )
 
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
@@ -308,6 +337,7 @@ async def run_worker() -> int:
         value_evaluation_task.cancel()
         model_pick_issuance_task.cancel()
         prediction_refresh_task.cancel()
+        high_confidence_shadow_task.cancel()
         for task in (
             shadow_task,
             market_collection_task,
@@ -316,6 +346,7 @@ async def run_worker() -> int:
             value_evaluation_task,
             model_pick_issuance_task,
             prediction_refresh_task,
+            high_confidence_shadow_task,
         ):
             try:
                 await task
