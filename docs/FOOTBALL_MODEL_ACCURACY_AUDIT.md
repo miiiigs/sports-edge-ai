@@ -186,8 +186,8 @@ Holdout ECE falls from 0.026 to **0.011** and log loss from 0.6805 to 0.6786.
 | # | Change | Evidence | Expected impact | Status |
 |---|---|---|---|---|
 | 1 | Leakage-safe confidence replay harness | This audit | Reproducible threshold/calibration validation; selection and holdout separation enforced by tests | **This PR** |
-| 2 | Show q = 1/fair as "win probability (excl. push)", and add stake-weighted win share next to Weighted Success | §1 gaps 1–2, §2 | Model Pick confidence becomes interpretable and calibratable. No accuracy change, but reported numbers rise honestly (balanced AH 48.7% → 52.3%), so both are shown. | Proposed (touches #110's template) |
-| 3 | Corner temperature T = 1.20 (flag, default off) | §4 | Corner ECE 0.026 → 0.011, log loss −0.0019. Fewer overconfident corner picks and value candidates. | Proposed; needs owner approval as a model change |
+| 2 | Show q = 1/fair as "win probability (excl. push)", and add stake-weighted win share next to Weighted Success | §1 gaps 1–2, §2 | Model Pick confidence becomes interpretable and calibratable. No accuracy change, but reported numbers rise honestly (balanced AH 48.7% → 52.3%), so both are shown. | **#118** (stacked on #110) |
+| 3 | Corner temperature T = 1.20 (flag, default off) | §4 | Corner ECE 0.026 → 0.011, log loss −0.0019. Balanced-line selections unchanged; corner value edges more conservative. | **#117** (flag default off; enabling needs owner approval) |
 | 4 | High-confidence AH shadow track (output A) | §3 | ≈ 75% forward win share expected at fair ≈ 1.38; no EV claim | Proposed (shadow only) |
 | 5 | Shrink toward the market / market-informed prior before any value publication | §3 (blend weight 0.0, negative ROI on disagreement) | Prevents publishing systematic −4 to −6% disagreement bets | Required before B |
 | 6 | Ingest historical AH, OU and corner closing odds (football-data.co.uk AH/OU columns) | §1 gap 6 | Makes AH/corner EV and CLV testable historically | Proposed |
