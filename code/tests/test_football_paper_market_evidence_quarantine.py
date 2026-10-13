@@ -13,8 +13,11 @@ from pathlib import Path
 
 from sports_ai.dashboard.client_history import build_client_history_payload
 from sports_ai.dashboard.paper_market_evidence import (
+    DISPUTED_FINAL_SCORE_FIXTURES,
+    QUARANTINE_REASON_DISPUTED_RESULT,
     QUARANTINE_REASON_LEGACY_AH,
     partition_counted_paper_rows,
+    quarantine_summary,
 )
 from sports_ai.dashboard.services import DashboardConfig, DashboardServices
 from sports_ai.market_data.providers import NotConfiguredMarketProvider
@@ -198,6 +201,10 @@ def test_performance_payload_reports_quarantine_block(tmp_path):
         "market_evidence_quarantined_by_market": {"asian_handicap": 2},
         "market_evidence_quarantine_applied": True,
         "market_evidence_quarantine_reason": QUARANTINE_REASON_LEGACY_AH,
+        "disputed_result_quarantined_positions": 0,
+        "disputed_result_quarantined_by_market": {},
+        "disputed_result_fixture_ids": [],
+        "disputed_result_quarantine_reason": None,
     }
 
 
@@ -263,3 +270,56 @@ def test_quarantined_count_excludes_reconciled_duplicates(tmp_path):
     counted, quarantined = partition_counted_paper_rows(rows, excluded_trade_ids={ids["ah_v1"]})
     assert {row["paper_trade_id"] for row in quarantined} == {ids["ah_unlinked"]}
     assert len(counted) + len(quarantined) == len(rows) - 1
+
+
+DISPUTED_AF = "api-football:1570358"
+DISPUTED_FDO = "football-data.org:564657"
+
+
+def test_disputed_fixture_quarantines_score_markets_but_keeps_corners(tmp_path):
+    with pt.connect(tmp_path / "paper.sqlite") as conn:
+        cf.fetch_excluded_paper_trade_ids(conn, initialize_schema=True)
+        ids = {
+            "x12": _seed(conn, fixture_id=DISPUTED_AF, market="1x2", selection="HOME", line=None),
+            "goals": _seed(conn, fixture_id=DISPUTED_AF, market="goals_total", selection="OVER", line=1.5, trade_state="LOST"),
+            "btts": _seed(conn, fixture_id=DISPUTED_AF, market="btts", selection="YES", line=None, trade_state="LOST"),
+            "corner": _seed(conn, fixture_id=DISPUTED_AF, market="corner_total", selection="UNDER", line=8.5),
+            "ah_v2": _seed(conn, fixture_id=DISPUTED_AF, ingestion_version=AF_V2),
+            "ah_v1": _seed(conn, fixture_id=DISPUTED_AF, line=-0.5),
+            "other": _seed(conn, fixture_id="fx-undisputed", market="goals_total", selection="OVER", line=2.5),
+        }
+        rows = pt.fetch_paper_trade_rows(conn)
+    counted, quarantined = partition_counted_paper_rows(rows, set())
+    by_id = {r["paper_trade_id"]: r for r in quarantined}
+    assert {r["paper_trade_id"] for r in counted} == {ids["corner"], ids["other"]}
+    for key in ("x12", "goals", "btts", "ah_v2"):
+        assert by_id[ids[key]]["market_evidence_quarantine_reason"] == QUARANTINE_REASON_DISPUTED_RESULT
+    # Legacy AH keeps its own reason and is never double-counted as disputed.
+    assert by_id[ids["ah_v1"]]["market_evidence_quarantine_reason"] == QUARANTINE_REASON_LEGACY_AH
+
+    summary = quarantine_summary(quarantined)
+    assert summary["market_evidence_quarantined_positions"] == 1
+    assert summary["disputed_result_quarantined_positions"] == 4
+    assert summary["disputed_result_quarantined_by_market"] == {"1x2": 1, "asian_handicap": 1, "btts": 1, "goals_total": 1}
+    assert summary["disputed_result_fixture_ids"] == [DISPUTED_AF]
+
+
+def test_disputed_fixture_quarantine_is_read_only_and_reported(tmp_path):
+    with pt.connect(tmp_path / "paper.sqlite") as conn:
+        cf.fetch_excluded_paper_trade_ids(conn, initialize_schema=True)
+        _seed(conn, fixture_id=DISPUTED_FDO, market="1x2", selection="HOME", line=None)
+        _seed(conn, fixture_id="fx-ok", market="1x2", selection="HOME", line=None, trade_state="LOST")
+    with pt.connect(tmp_path / "paper.sqlite") as conn:
+        before = [tuple(row) for row in conn.execute("SELECT * FROM paper_trade_updates ORDER BY rowid")]
+    services = _services(tmp_path)
+    rows, status = services._paper_positions()
+    assert [r["fixture_id"] for r in rows] == ["fx-ok"]
+    assert status["disputed_result_quarantined_positions"] == 1
+    assert status["disputed_result_fixture_ids"] == [DISPUTED_FDO]
+    with pt.connect(tmp_path / "paper.sqlite") as conn:
+        after = [tuple(row) for row in conn.execute("SELECT * FROM paper_trade_updates ORDER BY rowid")]
+    assert before == after
+
+
+def test_disputed_registry_covers_both_provider_ids():
+    assert set(DISPUTED_FINAL_SCORE_FIXTURES) == {DISPUTED_AF, DISPUTED_FDO}
