@@ -34,10 +34,30 @@ SCORE_INDEPENDENT_MARKETS = frozenset({"corner_total"})
 # Provider fixture ids whose final score is disputed. Remove an entry only after
 # the result is verified against an authoritative source; settlements already in
 # the ledger are never changed by this list.
-DISPUTED_FINAL_SCORE_FIXTURES: dict[str, str] = {
-    # Osasuna v Getafe, LaLiga, 2026-08-31 17:30 UTC (2026-10-12 duplicate-identity diagnostic).
-    "football-data.org:564657": "ESP1 Osasuna v Getafe 2026-08-31: football-data.org 1-1 vs API-Football 1-0",
-    "api-football:1570358": "ESP1 Osasuna v Getafe 2026-08-31: football-data.org 1-1 vs API-Football 1-0",
+DISPUTED_FINAL_SCORE_FIXTURES: dict[str, str] = {}
+
+# Disputes closed against an authoritative source, kept as an audit trail. These
+# ids are NOT quarantined. Positions on a provider id whose record was wrong are
+# reconciled cross-provider duplicates and therefore already excluded; they stay
+# in the ledger unchanged.
+RESOLVED_FINAL_SCORE_DISPUTES: dict[str, dict[str, str]] = {
+    "api-football:1570358": {
+        "fixture": "ESP1 matchday 3, CA Osasuna v Getafe CF, 2026-08-31 17:30 UTC, El Sadar",
+        "authoritative_result": "1-0",
+        "sources": "https://www.laliga.com/es-GB/partido/temporada-2026-2027-laliga-ea-sports-ca-osasuna-getafe-cf-3 ; "
+        "https://www.osasuna.es/en-laliga-2026-osasuna-vs-getafe",
+        "provider_record": "API-Football 1-0 (correct); counted positions were graded from this record",
+        "resolved_on": "2026-10-13",
+    },
+    "football-data.org:564657": {
+        "fixture": "ESP1 matchday 3, CA Osasuna v Getafe CF, 2026-08-31 17:30 UTC, El Sadar",
+        "authoritative_result": "1-0",
+        "sources": "https://www.laliga.com/es-GB/partido/temporada-2026-2027-laliga-ea-sports-ca-osasuna-getafe-cf-3 ; "
+        "https://www.osasuna.es/en-laliga-2026-osasuna-vs-getafe",
+        "provider_record": "football-data.org 1-1 (incorrect), captured once at lastUpdated 2026-08-31T19:36:28Z "
+        "and never re-polled; Getafe's goal was disallowed for offside by VAR",
+        "resolved_on": "2026-10-13",
+    },
 }
 
 
@@ -112,6 +132,7 @@ def quarantine_summary(quarantined: list[dict[str, Any]]) -> dict[str, Any]:
 
 __all__ = [
     "DISPUTED_FINAL_SCORE_FIXTURES",
+    "RESOLVED_FINAL_SCORE_DISPUTES",
     "QUARANTINE_REASON_DISPUTED_RESULT",
     "QUARANTINE_REASON_LEGACY_AH",
     "SCORE_INDEPENDENT_MARKETS",
