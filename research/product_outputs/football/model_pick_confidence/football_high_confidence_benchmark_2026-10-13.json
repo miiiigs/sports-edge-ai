@@ -1,0 +1,1080 @@
+{
+  "experiment_version": "football_high_confidence_benchmark_v1",
+  "market_ah_method": "independent Poisson means solved to de-vigged Pinnacle closing 1X2 (approximation)",
+  "min_venue_history": 2,
+  "periods": {
+    "holdout": {
+      "by_league": {
+        "ENG1": {
+          "MARKET_HC": {
+            "break_even_price": 1.4005681818181819,
+            "ci95": [
+              0.6725711646722254,
+              0.752111470598251
+            ],
+            "mean_fair_price": 1.3639260018968837,
+            "mean_market_q": 0.7340754170970686,
+            "mean_q": 0.7340754170970686,
+            "n": 590,
+            "states": {
+              "HALF_LOSS": 36,
+              "HALF_WIN": 20,
+              "LOST": 123,
+              "PUSH": 69,
+              "WON": 342
+            },
+            "win_share": 0.7139959432048681
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.3255578093306288,
+            "ci95": [
+              0.7199730101890537,
+              0.7858522715213995
+            ],
+            "mean_fair_price": 1.3749644193684063,
+            "mean_market_q": 0.7516361732518066,
+            "mean_q": 0.7278407297384074,
+            "n": 752,
+            "states": {
+              "HALF_LOSS": 41,
+              "HALF_WIN": 30,
+              "LOST": 140,
+              "PUSH": 63,
+              "WON": 478
+            },
+            "win_share": 0.7543993879112472
+          }
+        },
+        "ENG2": {
+          "MARKET_HC": {
+            "break_even_price": 1.3493150684931507,
+            "ci95": [
+              0.7071489222031568,
+              0.7724126676394258
+            ],
+            "mean_fair_price": 1.36877513998953,
+            "mean_market_q": 0.7313262220576283,
+            "mean_q": 0.731326222057628,
+            "n": 823,
+            "states": {
+              "HALF_LOSS": 67,
+              "HALF_WIN": 38,
+              "LOST": 145,
+              "PUSH": 81,
+              "WON": 492
+            },
+            "win_share": 0.7411167512690355
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.3454675231977158,
+            "ci95": [
+              0.7143980086873212,
+              0.7700993440656383
+            ],
+            "mean_fair_price": 1.3779322821383533,
+            "mean_market_q": 0.7315183662905869,
+            "mean_q": 0.7261792640379008,
+            "n": 1088,
+            "states": {
+              "HALF_LOSS": 64,
+              "HALF_WIN": 55,
+              "LOST": 210,
+              "PUSH": 86,
+              "WON": 673
+            },
+            "win_share": 0.743236074270557
+          }
+        },
+        "ENG3": {
+          "MARKET_HC": {
+            "break_even_price": 1.3711790393013101,
+            "ci95": [
+              0.6932314688246639,
+              0.7625789748055116
+            ],
+            "mean_fair_price": 1.3692772408773115,
+            "mean_market_q": 0.7310410055859192,
+            "mean_q": 0.7310410055859193,
+            "n": 717,
+            "states": {
+              "HALF_LOSS": 46,
+              "HALF_WIN": 24,
+              "LOST": 147,
+              "PUSH": 54,
+              "WON": 446
+            },
+            "win_share": 0.7292993630573248
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.356936416184971,
+            "ci95": [
+              0.7078678691541949,
+              0.7641096082927061
+            ],
+            "mean_fair_price": 1.3769327133356828,
+            "mean_market_q": 0.7321440100172004,
+            "mean_q": 0.7267378093438972,
+            "n": 1070,
+            "states": {
+              "HALF_LOSS": 66,
+              "HALF_WIN": 50,
+              "LOST": 214,
+              "PUSH": 73,
+              "WON": 667
+            },
+            "win_share": 0.7369542066027689
+          }
+        },
+        "ENG4": {
+          "MARKET_HC": {
+            "break_even_price": 1.3870246085011186,
+            "ci95": [
+              0.6843838668433022,
+              0.7548301900583214
+            ],
+            "mean_fair_price": 1.3722863620090482,
+            "mean_market_q": 0.7294198794380553,
+            "mean_q": 0.7294198794380556,
+            "n": 719,
+            "states": {
+              "HALF_LOSS": 44,
+              "HALF_WIN": 34,
+              "LOST": 151,
+              "PUSH": 60,
+              "WON": 430
+            },
+            "win_share": 0.7209677419354839
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.3345221112696148,
+            "ci95": [
+              0.7205774467287224,
+              0.7760469974564387
+            ],
+            "mean_fair_price": 1.3787792163276542,
+            "mean_market_q": 0.7264499760620096,
+            "mean_q": 0.7257590825047634,
+            "n": 1076,
+            "states": {
+              "HALF_LOSS": 53,
+              "HALF_WIN": 58,
+              "LOST": 208,
+              "PUSH": 85,
+              "WON": 672
+            },
+            "win_share": 0.7493319080705505
+          }
+        },
+        "ESP1": {
+          "MARKET_HC": {
+            "break_even_price": 1.3141289437585733,
+            "ci95": [
+              0.7207848972963139,
+              0.796983248613235
+            ],
+            "mean_fair_price": 1.3642768596995423,
+            "mean_market_q": 0.733926040025621,
+            "mean_q": 0.7339260400256208,
+            "n": 568,
+            "states": {
+              "HALF_LOSS": 31,
+              "HALF_WIN": 29,
+              "LOST": 99,
+              "PUSH": 59,
+              "WON": 350
+            },
+            "win_share": 0.7609603340292276
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.3093812375249503,
+            "ci95": [
+              0.7297349508692389,
+              0.794633321758616
+            ],
+            "mean_fair_price": 1.3742895396041273,
+            "mean_market_q": 0.7501711491407698,
+            "mean_q": 0.7281999970233599,
+            "n": 752,
+            "states": {
+              "HALF_LOSS": 40,
+              "HALF_WIN": 30,
+              "LOST": 135,
+              "PUSH": 61,
+              "WON": 486
+            },
+            "win_share": 0.7637195121951219
+          }
+        }
+      },
+      "eligible_fixtures": 4832,
+      "exploratory_thresholds": {
+        "0.60": {
+          "MARKET_HC": {
+            "break_even_price": 1.595967964650649,
+            "ci95": [
+              0.6087845443851082,
+              0.6440373139118866
+            ],
+            "coverage": 0.7071605960264901,
+            "mean_fair_price": 1.5787961167858247,
+            "mean_market_q": 0.6347247778841061,
+            "mean_q": 0.6347247778841068,
+            "n": 3417,
+            "states": {
+              "HALF_LOSS": 242,
+              "HALF_WIN": 179,
+              "LOST": 958,
+              "PUSH": 317,
+              "WON": 1721
+            },
+            "win_share": 0.6265789929053469
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.5674936511037312,
+            "ci95": [
+              0.6229643228349279,
+              0.6526939601013314
+            ],
+            "coverage": 0.980546357615894,
+            "mean_fair_price": 1.5939174813800399,
+            "mean_market_q": 0.6371505906259541,
+            "mean_q": 0.6279692975843114,
+            "n": 4738,
+            "states": {
+              "HALF_LOSS": 331,
+              "HALF_WIN": 269,
+              "LOST": 1287,
+              "PUSH": 426,
+              "WON": 2425
+            },
+            "win_share": 0.6379611166500498
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        },
+        "0.65": {
+          "MARKET_HC": {
+            "break_even_price": 1.4711122423008398,
+            "ci95": [
+              0.6625180224715426,
+              0.6965202884021418
+            ],
+            "coverage": 0.7071605960264901,
+            "mean_fair_price": 1.4669089924025949,
+            "mean_market_q": 0.6827960329683775,
+            "mean_q": 0.6827960329683774,
+            "n": 3417,
+            "states": {
+              "HALF_LOSS": 243,
+              "HALF_WIN": 217,
+              "LOST": 804,
+              "PUSH": 297,
+              "WON": 1856
+            },
+            "win_share": 0.6797577854671281
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.455373081042485,
+            "ci95": [
+              0.672704662727781,
+              0.7011610940019987
+            ],
+            "coverage": 0.980546357615894,
+            "mean_fair_price": 1.4769136879286135,
+            "mean_market_q": 0.688861675521295,
+            "mean_q": 0.6777793541274351,
+            "n": 4738,
+            "states": {
+              "HALF_LOSS": 275,
+              "HALF_WIN": 266,
+              "LOST": 1138,
+              "PUSH": 391,
+              "WON": 2668
+            },
+            "win_share": 0.6871090396173187
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        },
+        "0.75": {
+          "MARKET_HC": {
+            "break_even_price": 1.2689221427022337,
+            "ci95": [
+              0.772888233586192,
+              0.8024970338745918
+            ],
+            "coverage": 0.7071605960264901,
+            "mean_fair_price": 1.282813090741535,
+            "mean_market_q": 0.7801650480743881,
+            "mean_q": 0.7801650480743885,
+            "n": 3417,
+            "states": {
+              "HALF_LOSS": 210,
+              "HALF_WIN": 103,
+              "LOST": 515,
+              "PUSH": 335,
+              "WON": 2254
+            },
+            "win_share": 0.7880704153136217
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.2581575352860828,
+            "ci95": [
+              0.7822484828202072,
+              0.806831611247496
+            ],
+            "coverage": 0.980546357615894,
+            "mean_fair_price": 1.2843574020432185,
+            "mean_market_q": 0.790547543826545,
+            "mean_q": 0.7791472027431199,
+            "n": 4738,
+            "states": {
+              "HALF_LOSS": 339,
+              "HALF_WIN": 87,
+              "LOST": 681,
+              "PUSH": 380,
+              "WON": 3251
+            },
+            "win_share": 0.7948130277442702
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        },
+        "0.80": {
+          "MARKET_HC": {
+            "break_even_price": 1.1844014510278114,
+            "ci95": [
+              0.830750424393053,
+              0.8569671404199515
+            ],
+            "coverage": 0.7052980132450332,
+            "mean_fair_price": 1.200018956213477,
+            "mean_market_q": 0.8340001357810225,
+            "mean_q": 0.8340001357810244,
+            "n": 3408,
+            "states": {
+              "HALF_LOSS": 171,
+              "HALF_WIN": 60,
+              "LOST": 372,
+              "PUSH": 354,
+              "WON": 2451
+            },
+            "win_share": 0.8443083205717202
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.1833180568285977,
+            "ci95": [
+              0.8333444016757529,
+              0.8561343740369304
+            ],
+            "coverage": 0.9317052980132451,
+            "mean_fair_price": 1.2001360862367032,
+            "mean_market_q": 0.8436857797292943,
+            "mean_q": 0.8338342224929968,
+            "n": 4502,
+            "states": {
+              "HALF_LOSS": 204,
+              "HALF_WIN": 30,
+              "LOST": 498,
+              "PUSH": 512,
+              "WON": 3258
+            },
+            "win_share": 0.8450813323005422
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        }
+      },
+      "lanes": {
+        "BALANCED": {
+          "break_even_price": 1.9056261343012704,
+          "ci95": [
+            0.5096429889826236,
+            0.5398355641579135
+          ],
+          "coverage": 1.0,
+          "mean_fair_price": 1.921158333372399,
+          "mean_market_q": 0.5242769440787224,
+          "mean_q": 0.5211693325945878,
+          "n": 4832,
+          "states": {
+            "HALF_LOSS": 288,
+            "HALF_WIN": 354,
+            "LOST": 1852,
+            "PUSH": 311,
+            "WON": 2027
+          },
+          "win_share": 0.5247619047619048
+        },
+        "FAVOURITE_DNB": {
+          "break_even_price": 1.4792518994739918,
+          "ci95": [
+            0.6575298456196386,
+            0.6939714079498152
+          ],
+          "coverage": 0.7071605960264901,
+          "mean_fair_price": 1.5455602301762692,
+          "mean_market_q": 0.6641047400811756,
+          "mean_q": 0.6641047400811759,
+          "n": 3417,
+          "states": {
+            "LOST": 820,
+            "PUSH": 886,
+            "WON": 1711
+          },
+          "win_share": 0.6760173844330304
+        },
+        "FAVOURITE_WIN": {
+          "break_even_price": 1.9970777323202809,
+          "ci95": [
+            0.48397524730862995,
+            0.5174863813151566
+          ],
+          "coverage": 0.7071605960264901,
+          "mean_fair_price": 2.116631981742136,
+          "mean_market_q": 0.49311613427533885,
+          "mean_q": 0.49311613427533885,
+          "n": 3417,
+          "states": {
+            "LOST": 1706,
+            "WON": 1711
+          },
+          "win_share": 0.5007316359379572
+        },
+        "MARKET_HC": {
+          "break_even_price": 1.3643610785463072,
+          "ci95": [
+            0.7165681003975668,
+            0.7487051789185284
+          ],
+          "coverage": 0.7071605960264901,
+          "mean_fair_price": 1.3680343030826538,
+          "mean_market_q": 0.7317720988868356,
+          "mean_q": 0.7317720988868358,
+          "n": 3417,
+          "states": {
+            "HALF_LOSS": 224,
+            "HALF_WIN": 145,
+            "LOST": 665,
+            "PUSH": 323,
+            "WON": 2060
+          },
+          "win_share": 0.7329438047774531
+        },
+        "MODEL_HC": {
+          "break_even_price": 1.3365182186234819,
+          "ci95": [
+            0.734742808126618,
+            0.7612210123961204
+          ],
+          "coverage": 0.980546357615894,
+          "mean_fair_price": 1.3768496707791535,
+          "mean_market_q": 0.7372599188228958,
+          "mean_q": 0.7267944057769474,
+          "n": 4738,
+          "states": {
+            "HALF_LOSS": 264,
+            "HALF_WIN": 223,
+            "LOST": 907,
+            "PUSH": 368,
+            "WON": 2976
+          },
+          "win_share": 0.7482127711135345
+        }
+      },
+      "market_ah_calibration": {
+        "bins": [
+          {
+            "bin": "0.3-0.4",
+            "mean_q": 0.3752725073749936,
+            "observed": 0.3802228412256267,
+            "weight": 718.0
+          },
+          {
+            "bin": "0.4-0.5",
+            "mean_q": 0.44504019815461665,
+            "observed": 0.4652567975830816,
+            "weight": 1324.0
+          },
+          {
+            "bin": "0.5-0.6",
+            "mean_q": 0.5480142805161912,
+            "observed": 0.5435294117647059,
+            "weight": 1700.0
+          },
+          {
+            "bin": "0.6-0.7",
+            "mean_q": 0.6473900821136724,
+            "observed": 0.6610956360259982,
+            "weight": 1077.0
+          },
+          {
+            "bin": "0.7-0.8",
+            "mean_q": 0.7331648150370037,
+            "observed": 0.7339614798392684,
+            "weight": 3608.5
+          },
+          {
+            "bin": "0.8-0.9",
+            "mean_q": 0.8414781744892817,
+            "observed": 0.8721590909090909,
+            "weight": 352.0
+          },
+          {
+            "bin": "0.9-1.0",
+            "mean_q": 0.9250493221670174,
+            "observed": 0.9487179487179487,
+            "weight": 78.0
+          }
+        ],
+        "ece": 0.00770272381358843,
+        "log_loss": 0.6183420175722543,
+        "weight": 8857.5
+      },
+      "paired_model_hc_vs_market": {
+        "difference_ci95_cluster_bootstrap_by_date": [
+          0.014577613732244865,
+          0.02875342776782286
+        ],
+        "interpretation": "negative = model better than market on the same bets",
+        "log_loss_difference_model_minus_market": 0.02166865590465339,
+        "market_log_loss": 0.540822408187463,
+        "model_log_loss": 0.5624910640921164,
+        "n": 3323
+      }
+    },
+    "selection": {
+      "by_league": {
+        "ENG1": {
+          "MARKET_HC": {
+            "break_even_price": 1.328643216080402,
+            "ci95": [
+              0.7183569080995612,
+              0.7840183945289146
+            ],
+            "mean_fair_price": 1.3627149484869285,
+            "mean_market_q": 0.7349239055562959,
+            "mean_q": 0.7349239055562965,
+            "n": 758,
+            "states": {
+              "HALF_LOSS": 37,
+              "HALF_WIN": 27,
+              "LOST": 145,
+              "PUSH": 65,
+              "WON": 484
+            },
+            "win_share": 0.7526475037821483
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.3395061728395061,
+            "ci95": [
+              0.7117489716395861,
+              0.7784459090766055
+            ],
+            "mean_fair_price": 1.3770931138175553,
+            "mean_market_q": 0.7480167455317391,
+            "mean_q": 0.7267166046275799,
+            "n": 740,
+            "states": {
+              "HALF_LOSS": 44,
+              "HALF_WIN": 18,
+              "LOST": 143,
+              "PUSH": 58,
+              "WON": 477
+            },
+            "win_share": 0.7465437788018433
+          }
+        },
+        "ENG2": {
+          "MARKET_HC": {
+            "break_even_price": 1.4125,
+            "ci95": [
+              0.6784253616515744,
+              0.7358469252641825
+            ],
+            "mean_fair_price": 1.3694162903728417,
+            "mean_market_q": 0.7310239627967072,
+            "mean_q": 0.7310239627967071,
+            "n": 1104,
+            "states": {
+              "HALF_LOSS": 71,
+              "HALF_WIN": 48,
+              "LOST": 245,
+              "PUSH": 84,
+              "WON": 656
+            },
+            "win_share": 0.7079646017699115
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.4173648134044172,
+            "ci95": [
+              0.675450695455652,
+              0.7339284866336396
+            ],
+            "mean_fair_price": 1.3757756796100173,
+            "mean_market_q": 0.7294212581924663,
+            "mean_q": 0.7273712260534104,
+            "n": 1061,
+            "states": {
+              "HALF_LOSS": 56,
+              "HALF_WIN": 47,
+              "LOST": 246,
+              "PUSH": 79,
+              "WON": 633
+            },
+            "win_share": 0.7055346587855992
+          }
+        },
+        "ENG3": {
+          "MARKET_HC": {
+            "break_even_price": 1.382634289919058,
+            "ci95": [
+              0.6937833964786903,
+              0.7509123531839982
+            ],
+            "mean_fair_price": 1.369832090050232,
+            "mean_market_q": 0.7307414769995796,
+            "mean_q": 0.7307414769995795,
+            "n": 1104,
+            "states": {
+              "HALF_LOSS": 82,
+              "HALF_WIN": 49,
+              "LOST": 219,
+              "PUSH": 99,
+              "WON": 655
+            },
+            "win_share": 0.7232570516232039
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.3938697318007662,
+            "ci95": [
+              0.6872976012009365,
+              0.7457276765264768
+            ],
+            "mean_fair_price": 1.3796367232535884,
+            "mean_market_q": 0.7355650494463192,
+            "mean_q": 0.7252516129797117,
+            "n": 1057,
+            "states": {
+              "HALF_LOSS": 66,
+              "HALF_WIN": 45,
+              "LOST": 224,
+              "PUSH": 92,
+              "WON": 630
+            },
+            "win_share": 0.7174271577789995
+          }
+        },
+        "ENG4": {
+          "MARKET_HC": {
+            "break_even_price": 1.4128035320088301,
+            "ci95": [
+              0.6782616134941821,
+              0.7357068228131944
+            ],
+            "mean_fair_price": 1.373721097636014,
+            "mean_market_q": 0.7286205198941181,
+            "mean_q": 0.7286205198941188,
+            "n": 1103,
+            "states": {
+              "HALF_LOSS": 69,
+              "HALF_WIN": 39,
+              "LOST": 246,
+              "PUSH": 89,
+              "WON": 660
+            },
+            "win_share": 0.7078125
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.4377387318563788,
+            "ci95": [
+              0.6653878978455197,
+              0.7240953763879603
+            ],
+            "mean_fair_price": 1.3787574667764058,
+            "mean_market_q": 0.7262842789708444,
+            "mean_q": 0.7257459888637111,
+            "n": 1065,
+            "states": {
+              "HALF_LOSS": 59,
+              "HALF_WIN": 47,
+              "LOST": 257,
+              "PUSH": 71,
+              "WON": 631
+            },
+            "win_share": 0.6955366631243358
+          }
+        },
+        "ESP1": {
+          "MARKET_HC": {
+            "break_even_price": 1.32073544433095,
+            "ci95": [
+              0.7226432548286689,
+              0.7886265147816406
+            ],
+            "mean_fair_price": 1.3642524827547478,
+            "mean_market_q": 0.733946310279444,
+            "mean_q": 0.7339463102794441,
+            "n": 760,
+            "states": {
+              "HALF_LOSS": 46,
+              "HALF_WIN": 27,
+              "LOST": 134,
+              "PUSH": 77,
+              "WON": 476
+            },
+            "win_share": 0.757153905645785
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.3453389830508475,
+            "ci95": [
+              0.7079396462916085,
+              0.7757483289435672
+            ],
+            "mean_fair_price": 1.3749469683070166,
+            "mean_market_q": 0.7381739368450564,
+            "mean_q": 0.7278389240894031,
+            "n": 745,
+            "states": {
+              "HALF_LOSS": 32,
+              "HALF_WIN": 38,
+              "LOST": 147,
+              "PUSH": 75,
+              "WON": 453
+            },
+            "win_share": 0.7433070866141732
+          }
+        }
+      },
+      "eligible_fixtures": 4832,
+      "exploratory_thresholds": {
+        "0.60": {
+          "MARKET_HC": {
+            "break_even_price": 1.5548216644649933,
+            "ci95": [
+              0.6284038919802334,
+              0.657650506229219
+            ],
+            "coverage": 0.9993791390728477,
+            "mean_fair_price": 1.5801252597431885,
+            "mean_market_q": 0.6342373620862853,
+            "mean_q": 0.634237362086285,
+            "n": 4829,
+            "states": {
+              "HALF_LOSS": 332,
+              "HALF_WIN": 253,
+              "LOST": 1304,
+              "PUSH": 417,
+              "WON": 2523
+            },
+            "win_share": 0.643160577740017
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.6182439220413904,
+            "ci95": [
+              0.6028408746648335,
+              0.6328419167403161
+            ],
+            "coverage": 0.9660596026490066,
+            "mean_fair_price": 1.5941360051278894,
+            "mean_market_q": 0.6355671016509866,
+            "mean_q": 0.6278581308479595,
+            "n": 4668,
+            "states": {
+              "HALF_LOSS": 299,
+              "HALF_WIN": 247,
+              "LOST": 1389,
+              "PUSH": 368,
+              "WON": 2365
+            },
+            "win_share": 0.6179538117705488
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        },
+        "0.65": {
+          "MARKET_HC": {
+            "break_even_price": 1.4840844062947067,
+            "ci95": [
+              0.6593964271950686,
+              0.6879142779971071
+            ],
+            "coverage": 0.9993791390728477,
+            "mean_fair_price": 1.466690410459992,
+            "mean_market_q": 0.6829241700395304,
+            "mean_q": 0.6829241700395311,
+            "n": 4829,
+            "states": {
+              "HALF_LOSS": 305,
+              "HALF_WIN": 290,
+              "LOST": 1201,
+              "PUSH": 382,
+              "WON": 2651
+            },
+            "win_share": 0.6738161224243885
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.467041946613401,
+            "ci95": [
+              0.6671112468457744,
+              0.695831127352834
+            ],
+            "coverage": 0.9660596026490066,
+            "mean_fair_price": 1.4763746359299297,
+            "mean_market_q": 0.6858670530131669,
+            "mean_q": 0.678015665548088,
+            "n": 4668,
+            "states": {
+              "HALF_LOSS": 260,
+              "HALF_WIN": 249,
+              "LOST": 1156,
+              "PUSH": 374,
+              "WON": 2629
+            },
+            "win_share": 0.6816437677930437
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        },
+        "0.75": {
+          "MARKET_HC": {
+            "break_even_price": 1.2902827128070447,
+            "ci95": [
+              0.762109582701297,
+              0.7874327731621406
+            ],
+            "coverage": 0.9993791390728477,
+            "mean_fair_price": 1.2815323275639616,
+            "mean_market_q": 0.7809632615671027,
+            "mean_q": 0.7809632615671015,
+            "n": 4829,
+            "states": {
+              "HALF_LOSS": 295,
+              "HALF_WIN": 143,
+              "LOST": 792,
+              "PUSH": 434,
+              "WON": 3165
+            },
+            "win_share": 0.7750239463601533
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.2883647798742137,
+            "ci95": [
+              0.763159252734204,
+              0.7886786919452492
+            ],
+            "coverage": 0.9660596026490066,
+            "mean_fair_price": 1.2835309619706115,
+            "mean_market_q": 0.787514996414915,
+            "mean_q": 0.7796456946427229,
+            "n": 4668,
+            "states": {
+              "HALF_LOSS": 348,
+              "HALF_WIN": 94,
+              "LOST": 743,
+              "PUSH": 350,
+              "WON": 3133
+            },
+            "win_share": 0.7761776909934098
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        },
+        "0.80": {
+          "MARKET_HC": {
+            "break_even_price": 1.2078905226379386,
+            "ci95": [
+              0.8161007221761137,
+              0.8390717713393524
+            ],
+            "coverage": 0.9935844370860927,
+            "mean_fair_price": 1.1996950829623974,
+            "mean_market_q": 0.8342389437931033,
+            "mean_q": 0.8342389437931034,
+            "n": 4801,
+            "states": {
+              "HALF_LOSS": 246,
+              "HALF_WIN": 71,
+              "LOST": 591,
+              "PUSH": 494,
+              "WON": 3399
+            },
+            "win_share": 0.8278895986501145
+          },
+          "MODEL_HC": {
+            "break_even_price": 1.2055721706280498,
+            "ci95": [
+              0.8172411499985016,
+              0.8410617781830098
+            ],
+            "coverage": 0.9236341059602649,
+            "mean_fair_price": 1.198376658395384,
+            "mean_market_q": 0.8387111435773871,
+            "mean_q": 0.8350762274592214,
+            "n": 4463,
+            "states": {
+              "HALF_LOSS": 214,
+              "HALF_WIN": 35,
+              "LOST": 546,
+              "PUSH": 509,
+              "WON": 3159
+            },
+            "win_share": 0.8294816555686121
+          },
+          "note": "exploratory; 4 extra thresholds tested, not used for any decision"
+        }
+      },
+      "lanes": {
+        "BALANCED": {
+          "break_even_price": 1.9196732471068756,
+          "ci95": [
+            0.5058550092167716,
+            0.5359509950513143
+          ],
+          "coverage": 1.0,
+          "mean_fair_price": 1.9246472608031517,
+          "mean_market_q": 0.5243187216919143,
+          "mean_q": 0.5200683060239992,
+          "n": 4832,
+          "states": {
+            "HALF_LOSS": 283,
+            "HALF_WIN": 327,
+            "LOST": 1885,
+            "PUSH": 297,
+            "WON": 2040
+          },
+          "win_share": 0.5209219858156028
+        },
+        "FAVOURITE_DNB": {
+          "break_even_price": 1.4823914823914826,
+          "ci95": [
+            0.659144570982934,
+            0.6896565465935074
+          ],
+          "coverage": 0.9993791390728477,
+          "mean_fair_price": 1.5410774946143613,
+          "mean_market_q": 0.6662320164047765,
+          "mean_q": 0.6662320164047771,
+          "n": 4829,
+          "states": {
+            "LOST": 1178,
+            "PUSH": 1209,
+            "WON": 2442
+          },
+          "win_share": 0.674585635359116
+        },
+        "FAVOURITE_WIN": {
+          "break_even_price": 1.9774774774774773,
+          "ci95": [
+            0.4915942095451816,
+            0.5197862586249319
+          ],
+          "coverage": 0.9993791390728477,
+          "mean_fair_price": 2.111430853541422,
+          "mean_market_q": 0.4946070675667313,
+          "mean_q": 0.49460706756673206,
+          "n": 4829,
+          "states": {
+            "LOST": 2387,
+            "WON": 2442
+          },
+          "win_share": 0.5056947608200456
+        },
+        "MARKET_HC": {
+          "break_even_price": 1.377230667547918,
+          "ci95": [
+            0.7123513052086149,
+            0.7394218125815945
+          ],
+          "coverage": 0.9993791390728477,
+          "mean_fair_price": 1.3686300270296694,
+          "mean_market_q": 0.7314825005596112,
+          "mean_q": 0.7314825005596106,
+          "n": 4829,
+          "states": {
+            "HALF_LOSS": 305,
+            "HALF_WIN": 190,
+            "LOST": 989,
+            "PUSH": 414,
+            "WON": 2931
+          },
+          "win_share": 0.7260947810437912
+        },
+        "MODEL_HC": {
+          "break_even_price": 1.3920931028581207,
+          "ci95": [
+            0.7043173312939888,
+            0.7319560918723658
+          ],
+          "coverage": 0.9660596026490066,
+          "mean_fair_price": 1.377406835963126,
+          "mean_market_q": 0.7344374332655809,
+          "mean_q": 0.7264913431390528,
+          "n": 4668,
+          "states": {
+            "HALF_LOSS": 257,
+            "HALF_WIN": 195,
+            "LOST": 1017,
+            "PUSH": 375,
+            "WON": 2824
+          },
+          "win_share": 0.7183427587902631
+        }
+      },
+      "market_ah_calibration": {
+        "bins": [
+          {
+            "bin": "0.3-0.4",
+            "mean_q": 0.3747546072776521,
+            "observed": 0.3916015625,
+            "weight": 1024.0
+          },
+          {
+            "bin": "0.4-0.5",
+            "mean_q": 0.4466597233292333,
+            "observed": 0.4508108108108108,
+            "weight": 1850.0
+          },
+          {
+            "bin": "0.5-0.6",
+            "mean_q": 0.5481355642939648,
+            "observed": 0.545804794520548,
+            "weight": 2336.0
+          },
+          {
+            "bin": "0.6-0.7",
+            "mean_q": 0.6462575547725355,
+            "observed": 0.654911838790932,
+            "weight": 1588.0
+          },
+          {
+            "bin": "0.7-0.8",
+            "mean_q": 0.7328887345567522,
+            "observed": 0.7335847596944203,
+            "weight": 5170.5
+          },
+          {
+            "bin": "0.8-0.9",
+            "mean_q": 0.8410684670500506,
+            "observed": 0.8563432835820896,
+            "weight": 536.0
+          },
+          {
+            "bin": "0.9-1.0",
+            "mean_q": 0.9232783613777277,
+            "observed": 0.9642857142857143,
+            "weight": 112.0
+          }
+        ],
+        "ece": 0.004795101522743876,
+        "log_loss": 0.6196192627097924,
+        "weight": 12616.5
+      },
+      "paired_model_hc_vs_market": {
+        "difference_ci95_cluster_bootstrap_by_date": [
+          0.026331082801101635,
+          0.03746790408356826
+        ],
+        "interpretation": "negative = model better than market on the same bets",
+        "log_loss_difference_model_minus_market": 0.031842576166063896,
+        "market_log_loss": 0.5603840969417345,
+        "model_log_loss": 0.5922266731077984,
+        "n": 4665
+      }
+    }
+  },
+  "preregistered_threshold": 0.7
+}
