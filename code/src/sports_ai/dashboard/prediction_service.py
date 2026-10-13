@@ -12,6 +12,7 @@ from ..agents.football.route_a_classifier import (
     ROUTE_A_AGENT_VERSION_TAG,
     build_route_a_market_rows,
 )
+from .football_corner_calibration import apply_corner_temperature, resolve_corner_temperature
 from ..experiments.football_day10_market_pricing import (
     DAY10_INPUT_CONTRACT_VERSION,
     DAY7_BASELINE_EXPERIMENT_VERSION,
@@ -517,7 +518,9 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
         },
     }
 
-    market_rows = derive_goals_markets_for_fixture(pricing_input) + derive_corner_markets_for_fixture(pricing_input)
+    corner_temperature = resolve_corner_temperature()
+    corner_rows = [apply_corner_temperature(row, corner_temperature) for row in derive_corner_markets_for_fixture(pricing_input)]
+    market_rows = derive_goals_markets_for_fixture(pricing_input) + corner_rows
     representative_prices = _representative_fair_prices(market_rows)
     top_scoreline_rows = _top_scorelines(scoreline_distribution["matrix"], limit=5)
     prediction_version_key = canonical_hash(
