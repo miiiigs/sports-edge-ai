@@ -180,6 +180,7 @@ def build_manifest(
                 "raw_research_kickoff": event.get("raw_kickoff") if event else None,
                 "research_timezone_assumption": RESEARCH_SOURCE_TIMEZONE,
                 "normalized_research_kickoff_utc": event.get("normalized_kickoff_utc") if event else None,
+                "canonical_fixture_id": dash_identity["canonical_fixture_id"],
                 "canonical_dashboard_home": dash_identity["canonical_home_team"],
                 "canonical_dashboard_away": dash_identity["canonical_away_team"],
                 "canonical_research_home": event.get("canonical_home_team") if event else None,
