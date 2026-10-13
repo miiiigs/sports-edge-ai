@@ -64,9 +64,11 @@ from .market_collection_policy import (
 )
 from .paper_market_evidence import partition_counted_paper_rows, quarantine_summary
 from .result_sync import (
+    RESULT_SYNC_BACKLOG_LOOKBACK_DAYS_ENV_VAR,
     RESULT_SYNC_INTERVAL_ENV_VAR,
     RESULT_SYNC_MAX_FIXTURES_ENV_VAR,
     RESULT_SYNC_SCHEDULER_ENV_VAR,
+    RESULT_SYNC_STATUS_BATCH_SIZE_ENV_VAR,
     STATE_ABANDONED,
     STATE_CANCELLED,
     STATE_FINISHED,
@@ -74,17 +76,22 @@ from .result_sync import (
     CornerFixtureCandidate,
     ResultFixtureCandidate,
     canonical_status_for_fixture,
+    chunk_status_batches,
     is_finished_verified,
+    is_pollable_api_football_fixture_id,
     merge_corner_truth,
     merge_fixture_truth,
     needs_corner_truth_sync,
     needs_result_sync,
     normalize_dashboard_status,
     plan_result_sync_slots,
+    resolve_result_sync_backlog_lookback_days,
     resolve_result_sync_interval_seconds,
     resolve_result_sync_max_fixtures,
+    resolve_result_sync_status_batch_size,
     select_corner_sync_fixtures,
     select_result_sync_fixtures,
+    within_backlog_lookback,
     within_result_lookback,
 )
 from .model_pick_issuance import (
@@ -657,6 +664,10 @@ class DashboardConfig:
     enable_result_sync_scheduler: bool = False
     result_sync_interval_seconds: int = 600
     result_sync_max_fixtures_per_cycle: int = 0
+    # Bounded backlog recovery window in days (0 = disabled, historical 72h only).
+    result_sync_backlog_lookback_days: int = 0
+    # Status ids per batched /fixtures?ids= request (<=1 = one /fixtures?id= each).
+    result_sync_status_batch_size: int = 0
     # Dedicated DB-only Model Pick settlement scheduler (consumes verified truth).
     enable_model_pick_settlement_scheduler: bool = False
     model_pick_settlement_interval_seconds: int = 600
@@ -722,6 +733,8 @@ class DashboardConfig:
                 _env_int(RESULT_SYNC_INTERVAL_ENV_VAR, 0)
             ),
             result_sync_max_fixtures_per_cycle=_env_int(RESULT_SYNC_MAX_FIXTURES_ENV_VAR, 0),
+            result_sync_backlog_lookback_days=_env_int(RESULT_SYNC_BACKLOG_LOOKBACK_DAYS_ENV_VAR, 0),
+            result_sync_status_batch_size=_env_int(RESULT_SYNC_STATUS_BATCH_SIZE_ENV_VAR, 0),
             enable_model_pick_settlement_scheduler=_env_bool(SETTLEMENT_SCHEDULER_ENV_VAR, False),
             model_pick_settlement_interval_seconds=resolve_settlement_interval_seconds(
                 _env_int(SETTLEMENT_INTERVAL_ENV_VAR, 0)
@@ -5360,20 +5373,102 @@ class DashboardServices:
             return "APPLIED", None
         return decision.action, None
 
+    def _open_live_issued_pick_fixture_markets(self) -> dict[str, set[str]]:
+        """Fixture -> markets for OPEN (unsettled) LIVE_ISSUED Model Picks only."""
+        out: dict[str, set[str]] = {}
+        for row in self._read_open_live_issued_picks():
+            out.setdefault(str(row.get("fixture_id") or ""), set()).add(str(row.get("market") or ""))
+        return out
+
+    def _apply_fetched_result(
+        self,
+        conn: Any,
+        *,
+        fixture_id: str,
+        fetched: NormalizedFixture,
+        live_markets: dict[str, set[str]],
+        allow_same_cycle_corner: bool,
+    ) -> dict[str, int]:
+        """Conservative merge of one fetched fixture + optional same-cycle corner truth."""
+        counts = {"results_updated": 0, "conflicts": 0, "corners_updated": 0, "corner_conflicts": 0, "provider_errors": 0, "corner_requests": 0}
+        incoming_status = canonical_status_for_fixture(
+            normalized_status=fetched.status,
+            provider_payload=fetched.provider_payload,
+        )
+        existing = storage.fetch_fixture(
+            conn, fixture_id, initialize_schema=self._read_requires_schema_init()
+        ) or {}
+        decision = merge_fixture_truth(
+            existing_status=normalize_dashboard_status(existing.get("status")),
+            existing_home_score=existing.get("home_score"),
+            existing_away_score=existing.get("away_score"),
+            incoming_status=incoming_status,
+            incoming_home_score=fetched.home_score,
+            incoming_away_score=fetched.away_score,
+        )
+        if decision.action == "APPLY":
+            incoming_fixture = fetched if incoming_status == fetched.status else replace(fetched, status=incoming_status)
+            storage.upsert_fixtures(
+                conn,
+                [incoming_fixture],
+                updated_at=utc_now_iso(),
+                initialize_schema=self._read_requires_schema_init(),
+            )
+            counts["results_updated"] += 1
+        elif decision.action == "CONFLICT":
+            counts["conflicts"] += 1
+            logger.warning("result sync conflict for %s: %s", fixture_id, decision.reason)
+
+        # Same-cycle corner eligibility: only after FINISHED_VERIFIED is proven.
+        if (
+            allow_same_cycle_corner
+            and is_finished_verified(
+                status=incoming_status,
+                home_score=fetched.home_score,
+                away_score=fetched.away_score,
+            )
+            and "corner_total" in live_markets.get(fixture_id, set())
+        ):
+            existing_result = storage.fetch_fixture_result(
+                conn, fixture_id, initialize_schema=self._read_requires_schema_init()
+            )
+            already = (existing_result or {}).get("home_corners") is not None and (
+                existing_result or {}
+            ).get("away_corners") is not None
+            if not already:
+                counts["corner_requests"] += 1
+                action, _ = self._attempt_corner_truth(
+                    conn,
+                    fixture_id=fixture_id,
+                    context=self._fixture_context_from_normalized(fetched),
+                )
+                if action == "APPLIED":
+                    counts["corners_updated"] += 1
+                elif action == "CONFLICT":
+                    counts["corner_conflicts"] += 1
+                elif action == "ERROR":
+                    counts["provider_errors"] += 1
+        return counts
+
     def run_current_result_sync_cycle(self) -> dict[str, Any]:
         """One dedicated current-result sync cycle (sporting truth only).
 
         Two independent tracks:
 
-        * FOOTBALL RESULT — exact ``/fixtures?id=`` for bounded current/recent
-          past-kickoff LIVE_ISSUED Model Pick fixtures that are not yet verified
-          terminal;
+        * FOOTBALL RESULT — exact ``/fixtures?id=`` (or, when status batching is
+          enabled, ONE ``/fixtures?ids=`` per slot for up to 20 fixtures) for
+          bounded current/recent past-kickoff LIVE_ISSUED Model Pick fixtures that
+          are not yet verified terminal; plus, when the bounded backlog window is
+          enabled, fixtures with OPEN LIVE_ISSUED picks older than the recent window
+          (always lower priority than recent fixtures);
         * CORNER TRUTH — exact ``/fixtures/statistics`` ONLY for FINISHED_VERIFIED
           fixtures with a corner_total Model Pick and no corner truth yet.
 
         Non-final fixtures never request or persist corner statistics. The path
         never touches the paper ledger, never settles, never creates Value Bets
-        and never refreshes market odds.
+        and never refreshes market odds. Only ``api-football:<digits>`` fixtures are
+        polled for status: other provider ids can never be resolved by API-Football
+        and would only waste a slot.
         """
         started_at = utc_now_iso()
         now = datetime.now(timezone.utc)
@@ -5387,11 +5482,23 @@ class DashboardServices:
         corner_conflicts = 0
         provider_errors = 0
         identity_unresolved = 0
+        provider_mismatch = 0
+        status_batches_issued = 0
         status_selected_ids: list[str] = []
         corner_selected_ids: list[str] = []
+        backlog_selected_ids: list[str] = []
+        backlog_days = resolve_result_sync_backlog_lookback_days(
+            getattr(self.config, "result_sync_backlog_lookback_days", 0)
+        )
+        batch_size = resolve_result_sync_status_batch_size(
+            getattr(self.config, "result_sync_status_batch_size", 0)
+        )
+        batch_fetch = getattr(self.fixture_provider, "get_fixtures_by_ids", None)
+        batching = batch_size > 1 and callable(batch_fetch)
         try:
             rows_with_predictions = self._all_fixtures_with_predictions()
             live_markets = self._live_issued_pick_fixture_markets()
+            open_markets = self._open_live_issued_pick_fixture_markets() if backlog_days > 0 else {}
             row_by_id = {str(row.get("fixture_id") or ""): row for row in rows_with_predictions}
             with storage.connect(self.config.dashboard_db_path) as conn:
                 storage.initialize_database(conn)
@@ -5403,30 +5510,41 @@ class DashboardServices:
             corner_candidates: list[CornerFixtureCandidate] = []
             for row in rows_with_predictions:
                 fixture_id = str(row.get("fixture_id") or "")
-                markets = live_markets.get(fixture_id)
-                if not markets:
-                    continue
                 status = canonical_status_for_fixture(
                     normalized_status=row.get("status"),
                     provider_payload=row.get("provider_payload"),
                 )
-                if not within_result_lookback(kickoff_utc=row.get("kickoff_utc"), status=status, now_utc=now):
+                in_recent = bool(live_markets.get(fixture_id)) and within_result_lookback(
+                    kickoff_utc=row.get("kickoff_utc"), status=status, now_utc=now
+                )
+                in_backlog = (
+                    not in_recent
+                    and bool(open_markets.get(fixture_id))
+                    and within_backlog_lookback(kickoff_utc=row.get("kickoff_utc"), now_utc=now, backlog_days=backlog_days)
+                )
+                if not (in_recent or in_backlog):
                     continue
+                markets = live_markets.get(fixture_id) if in_recent else open_markets.get(fixture_id)
+                markets = markets or set()
                 home_score = row.get("home_score")
                 away_score = row.get("away_score")
                 if needs_result_sync(status=status, home_score=home_score, away_score=away_score):
-                    status_candidates.append(
-                        ResultFixtureCandidate(
-                            fixture_id=fixture_id,
-                            provider_fixture_id=str(row.get("provider_fixture_id") or ""),
-                            kickoff_utc=str(row.get("kickoff_utc") or ""),
-                            status=status,
-                            home_score=home_score,
-                            away_score=away_score,
-                            has_live_issued_pick=True,
-                            last_result_sync_attempt_at=self._result_sync_attempts.get(fixture_id),
+                    if not is_pollable_api_football_fixture_id(fixture_id):
+                        provider_mismatch += 1
+                    else:
+                        status_candidates.append(
+                            ResultFixtureCandidate(
+                                fixture_id=fixture_id,
+                                provider_fixture_id=str(row.get("provider_fixture_id") or ""),
+                                kickoff_utc=str(row.get("kickoff_utc") or ""),
+                                status=status,
+                                home_score=home_score,
+                                away_score=away_score,
+                                has_live_issued_pick=True,
+                                last_result_sync_attempt_at=self._result_sync_attempts.get(fixture_id),
+                                backlog=in_backlog,
+                            )
                         )
-                    )
                 result_row = existing_results.get(fixture_id) or {}
                 corner_present = (
                     result_row.get("home_corners") is not None and result_row.get("away_corners") is not None
@@ -5449,82 +5567,99 @@ class DashboardServices:
                             has_corner_pick=True,
                             corner_result_present=corner_present,
                             last_corner_sync_attempt_at=self._corner_sync_attempts.get(fixture_id),
+                            backlog=in_backlog,
                         )
                     )
             max_fixtures = resolve_result_sync_max_fixtures(self.config.result_sync_max_fixtures_per_cycle)
-            status_selected, corner_selected = plan_result_sync_slots(
-                status_candidates=select_result_sync_fixtures(status_candidates, max_fixtures=max_fixtures),
-                corner_candidates=select_corner_sync_fixtures(corner_candidates, max_fixtures=max_fixtures),
-                max_fixtures=max_fixtures,
+            ordered_status = select_result_sync_fixtures(
+                status_candidates,
+                max_fixtures=(max_fixtures * batch_size) if batching else max_fixtures,
             )
+            ordered_corners = select_corner_sync_fixtures(corner_candidates, max_fixtures=max_fixtures)
+            if batching:
+                # One slot == one batched /fixtures?ids= request (<= 20 ids).
+                batches = chunk_status_batches(ordered_status, batch_size=batch_size, max_batches=max_fixtures)
+                selected_batches, corner_selected = plan_result_sync_slots(
+                    status_candidates=batches,  # type: ignore[arg-type]
+                    corner_candidates=ordered_corners,
+                    max_fixtures=max_fixtures,
+                )
+                status_selected = [candidate for batch in selected_batches for candidate in batch]
+            else:
+                selected_batches = []
+                status_selected, corner_selected = plan_result_sync_slots(
+                    status_candidates=ordered_status,
+                    corner_candidates=ordered_corners,
+                    max_fixtures=max_fixtures,
+                )
             status_selected_ids = [candidate.fixture_id for candidate in status_selected]
             corner_selected_ids = [candidate.fixture_id for candidate in corner_selected]
+            backlog_selected_ids = [c.fixture_id for c in status_selected if c.backlog] + [
+                c.fixture_id for c in corner_selected if c.backlog
+            ]
+            # Batched mode keeps total requests <= max_fixtures: same-cycle corner
+            # attempts only use slots the plan left unused; otherwise the corner
+            # track picks them up next cycle.
+            spare_corner_slots = max(0, max_fixtures - len(selected_batches) - len(corner_selected))
+
+            def _accumulate(counts: dict[str, int]) -> None:
+                nonlocal results_updated, conflicts, corners_updated, corner_conflicts, provider_errors
+                results_updated += counts["results_updated"]
+                conflicts += counts["conflicts"]
+                corners_updated += counts["corners_updated"]
+                corner_conflicts += counts["corner_conflicts"]
+                provider_errors += counts["provider_errors"]
+
             with storage.connect(self.config.dashboard_db_path) as conn:
                 storage.initialize_database(conn)
-                for candidate in status_selected:
-                    fixture_id = candidate.fixture_id
-                    self._result_sync_attempts[fixture_id] = utc_now_iso()
-                    try:
-                        fetched = self.fixture_provider.get_fixture(fixture_id)
-                    except Exception as exc:  # noqa: BLE001
-                        provider_errors += 1
-                        logger.warning("result sync provider error for %s: %s", fixture_id, exc)
-                        continue
-                    if fetched is None:
-                        identity_unresolved += 1
-                        continue
-                    incoming_status = canonical_status_for_fixture(
-                        normalized_status=fetched.status,
-                        provider_payload=fetched.provider_payload,
-                    )
-                    existing = storage.fetch_fixture(
-                        conn, fixture_id, initialize_schema=self._read_requires_schema_init()
-                    ) or {}
-                    decision = merge_fixture_truth(
-                        existing_status=normalize_dashboard_status(existing.get("status")),
-                        existing_home_score=existing.get("home_score"),
-                        existing_away_score=existing.get("away_score"),
-                        incoming_status=incoming_status,
-                        incoming_home_score=fetched.home_score,
-                        incoming_away_score=fetched.away_score,
-                    )
-                    if decision.action == "APPLY":
-                        incoming_fixture = fetched if incoming_status == fetched.status else replace(fetched, status=incoming_status)
-                        storage.upsert_fixtures(
-                            conn,
-                            [incoming_fixture],
-                            updated_at=utc_now_iso(),
-                            initialize_schema=self._read_requires_schema_init(),
-                        )
-                        results_updated += 1
-                    elif decision.action == "CONFLICT":
-                        conflicts += 1
-                        logger.warning("result sync conflict for %s: %s", fixture_id, decision.reason)
-
-                    # Same-cycle corner eligibility: only after FINISHED_VERIFIED is proven.
-                    if is_finished_verified(
-                        status=incoming_status,
-                        home_score=fetched.home_score,
-                        away_score=fetched.away_score,
-                    ) and "corner_total" in live_markets.get(fixture_id, set()):
-                        existing_result = storage.fetch_fixture_result(
-                            conn, fixture_id, initialize_schema=self._read_requires_schema_init()
-                        )
-                        already = (existing_result or {}).get("home_corners") is not None and (
-                            existing_result or {}
-                        ).get("away_corners") is not None
-                        if not already:
-                            action, _ = self._attempt_corner_truth(
+                if batching:
+                    for batch in selected_batches:
+                        attempted_at = utc_now_iso()
+                        for candidate in batch:
+                            self._result_sync_attempts[candidate.fixture_id] = attempted_at
+                        status_batches_issued += 1
+                        try:
+                            fetched_by_id = batch_fetch([candidate.fixture_id for candidate in batch])  # type: ignore[misc]
+                        except Exception as exc:  # noqa: BLE001
+                            provider_errors += 1
+                            logger.warning("result sync batched provider error: %s", exc)
+                            continue
+                        for candidate in batch:
+                            fetched = (fetched_by_id or {}).get(candidate.fixture_id)
+                            if fetched is None:
+                                identity_unresolved += 1
+                                continue
+                            counts = self._apply_fetched_result(
+                                conn,
+                                fixture_id=candidate.fixture_id,
+                                fetched=fetched,
+                                live_markets=live_markets if not candidate.backlog else open_markets,
+                                allow_same_cycle_corner=spare_corner_slots > 0,
+                            )
+                            spare_corner_slots -= counts["corner_requests"]
+                            _accumulate(counts)
+                else:
+                    for candidate in status_selected:
+                        fixture_id = candidate.fixture_id
+                        self._result_sync_attempts[fixture_id] = utc_now_iso()
+                        try:
+                            fetched = self.fixture_provider.get_fixture(fixture_id)
+                        except Exception as exc:  # noqa: BLE001
+                            provider_errors += 1
+                            logger.warning("result sync provider error for %s: %s", fixture_id, exc)
+                            continue
+                        if fetched is None:
+                            identity_unresolved += 1
+                            continue
+                        _accumulate(
+                            self._apply_fetched_result(
                                 conn,
                                 fixture_id=fixture_id,
-                                context=self._fixture_context_from_normalized(fetched),
+                                fetched=fetched,
+                                live_markets=live_markets if not candidate.backlog else open_markets,
+                                allow_same_cycle_corner=True,
                             )
-                            if action == "APPLIED":
-                                corners_updated += 1
-                            elif action == "CONFLICT":
-                                corner_conflicts += 1
-                            elif action == "ERROR":
-                                provider_errors += 1
+                        )
 
                 # Corner-only track: already FINISHED_VERIFIED; statistics only (no status re-fetch).
                 for candidate in corner_selected:
@@ -5555,6 +5690,11 @@ class DashboardServices:
                 "result_sync_cycles_completed": completed,
                 "result_sync_selected_last_cycle": list(status_selected_ids),
                 "result_sync_corner_selected_last_cycle": list(corner_selected_ids),
+                "result_sync_backlog_selected_last_cycle": list(backlog_selected_ids),
+                "result_sync_backlog_lookback_days": backlog_days,
+                "result_sync_status_batch_size": batch_size if batching else 1,
+                "result_sync_status_batches_last_cycle": status_batches_issued,
+                "result_sync_provider_mismatch_last_cycle": provider_mismatch,
                 "result_sync_requests_last_cycle": requests_this_cycle,
                 "result_sync_last_results_updated": results_updated,
                 "result_sync_last_corners_updated": corners_updated,
@@ -5568,12 +5708,15 @@ class DashboardServices:
             "state": "RESULT_SYNC",
             "selected": status_selected_ids,
             "corner_selected": corner_selected_ids,
+            "backlog_selected": backlog_selected_ids,
+            "status_batches": status_batches_issued,
             "results_updated": results_updated,
             "corners_updated": corners_updated,
             "conflicts": conflicts,
             "corner_conflicts": corner_conflicts,
             "provider_errors": provider_errors,
             "identity_unresolved": identity_unresolved,
+            "provider_mismatch": provider_mismatch,
             "requests": requests_this_cycle,
             "error": error,
         }
