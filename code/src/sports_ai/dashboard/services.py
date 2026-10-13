@@ -6402,13 +6402,19 @@ class DashboardServices:
             return "COMPETITION_UNSUPPORTED"
         if {"HOME_TEAM_IDENTITY_UNRESOLVED", "AWAY_TEAM_IDENTITY_UNRESOLVED"} & blockers or "PREDICTION_BLOCKED_TEAM_IDENTITY" in blockers:
             return "TEAM_IDENTITY_UNRESOLVED"
-        if {"HOME_MODEL_HISTORY_MISSING", "AWAY_MODEL_HISTORY_MISSING"} & blockers:
+        if {
+            "HOME_MODEL_HISTORY_MISSING",
+            "AWAY_MODEL_HISTORY_MISSING",
+            "HOME_MODEL_HISTORY_INSUFFICIENT",
+            "AWAY_MODEL_HISTORY_INSUFFICIENT",
+        } & blockers:
             return "MODEL_HISTORY_MISSING"
         if {
             "MODEL_SNAPSHOT_UNAVAILABLE",
             "CURRENT_MODEL_SNAPSHOT_UNAVAILABLE",
             "MODEL_STATE_UNAVAILABLE",
             "CURRENT_STATE_UNAVAILABLE",
+            "MODEL_STATE_NOT_BEFORE_KICKOFF",
         } & blockers:
             return "CURRENT_MODEL_STATE_UNAVAILABLE"
         if "PREDICTION_AFTER_KICKOFF_BLOCKED" in blockers or "PREDICTION_LOCKED_AFTER_KICKOFF" in blockers:
