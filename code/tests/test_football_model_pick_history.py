@@ -188,3 +188,45 @@ def test_section_discloses_retrospective_exclusion(tmp_path):
     assert "4 retrospective backfill picks" in html
     assert "Retrospective backfill" in html
     assert "Timing unknown" in html
+
+
+def test_win_probability_ex_push_uses_fair_price_not_unconditional_probability(tmp_path):
+    path, conn = _db(tmp_path)
+    # AH 0.0 with 26% push mass: unconditional stake probability 0.397, fair 1.852 -> 54.0% excl. push.
+    conn.execute(
+        f"INSERT INTO football_model_pick_entries ({_COLUMNS}) VALUES "
+        "(:model_pick_id,:fixture_id,:canonical_fixture_id,:competition_id,:competition_name,:home_team_name,"
+        ":away_team_name,:kickoff_utc,:market,:selection,:line,:model_probability,:model_fair_price,"
+        ":record_origin,:prediction_generated_at,:trade_state,:created_at)",
+        _row(model_pick_id="push_line", line=0.0, model_probability=0.3973, model_fair_price=1.8523, trade_state="FULL_WIN"),
+    )
+    conn.commit()
+    conn.close()
+    payload = mph.build_model_pick_history_payload(model_pick_db_path=path, timezone_name="UTC", now=_NOW)
+    row = payload["recent_settled"][0]
+    assert row["model_probability"] == 0.3973  # stored value is untouched
+    assert round(row["win_probability_ex_push"], 3) == 0.540
+    assert mph.win_probability_ex_push(None) is None
+    assert mph.win_probability_ex_push("inf") is None
+    assert mph.win_probability_ex_push(1.0) is None
+
+
+def test_stake_weighted_win_share_is_reported_beside_weighted_success(tmp_path):
+    path, conn = _db(tmp_path)
+    states = ["FULL_WIN", "HALF_WIN", "HALF_WIN", "HALF_LOSS", "FULL_LOSS"]
+    for i, state in enumerate(states):
+        conn.execute(
+            f"INSERT INTO football_model_pick_entries ({_COLUMNS}) VALUES "
+            "(:model_pick_id,:fixture_id,:canonical_fixture_id,:competition_id,:competition_name,:home_team_name,"
+            ":away_team_name,:kickoff_utc,:market,:selection,:line,:model_probability,:model_fair_price,"
+            ":record_origin,:prediction_generated_at,:trade_state,:created_at)",
+            _row(model_pick_id=f"p{i}", fixture_id=f"f{i}", trade_state=state),
+        )
+    conn.commit()
+    conn.close()
+    payload = mph.build_model_pick_history_payload(model_pick_db_path=path, timezone_name="UTC", now=_NOW)
+    s = payload["summary"]
+    assert s["weighted_success_rate"] == round((1 + 0.5 * 2) / 5, 4)  # unchanged definition: 0.4
+    assert s["stake_weighted_win_share"] == round(2.0 / (2.0 + 1.5), 4)  # 0.5714
+    retro = payload["by_issuance_timing"]["RETROSPECTIVE_BACKFILL"]
+    assert retro["stake_weighted_win_share"] is None  # never a rate for non-forward cohorts
