@@ -93,11 +93,12 @@ def _summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "source_prediction_count": manifest["predictions"],
         "ready_predictions": manifest["ready_predictions"],
         "blocked_predictions": manifest["blocked_predictions"],
+        "kickoff_passed_not_issued": manifest.get("kickoff_passed_not_issued", 0),
     }
 
 
-def run_dry_run(dashboard_conn: sqlite3.Connection) -> dict[str, Any]:
-    manifest = build_live_issued_ledger(dashboard_conn, dry_run=True)
+def run_dry_run(dashboard_conn: sqlite3.Connection, *, now: str | None = None) -> dict[str, Any]:
+    manifest = build_live_issued_ledger(dashboard_conn, dry_run=True, now=now)
     summary = _summary(manifest)
     summary["dry_run"] = True
     return summary
@@ -110,7 +111,8 @@ def apply_live_issued(
     expected_manifest_hash: str | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:
-    manifest = build_live_issued_ledger(dashboard_conn, dry_run=True)
+    issued_at = now or _utc_now()
+    manifest = build_live_issued_ledger(dashboard_conn, dry_run=True, now=issued_at)
     proposed = manifest["proposed_picks"]
     digest = manifest_hash(proposed)
     if expected_manifest_hash is not None and expected_manifest_hash != digest:
@@ -120,7 +122,7 @@ def apply_live_issued(
     # One explicit transaction: any immutable conflict rolls back the whole apply.
     with ledger_conn:
         for pick in proposed:
-            ledger.record_model_pick(ledger_conn, pick, now=now or _utc_now(), initialize_schema=False)
+            ledger.record_model_pick(ledger_conn, pick, now=issued_at, initialize_schema=False)
     after = int(ledger_conn.execute("SELECT COUNT(*) FROM football_model_pick_entries").fetchone()[0])
     return {
         **_summary(manifest),
@@ -165,7 +167,11 @@ def main(argv: list[str] | None = None) -> int:
         description="Model-pick ledger maintenance (observational, evidence-only).",
     )
     parser.add_argument("--dry-run", action="store_true", help="produce a manifest; zero writes")
-    parser.add_argument("--apply-live-issued", action="store_true", help="write LIVE_ISSUED picks (idempotent)")
+    parser.add_argument(
+        "--apply-live-issued",
+        action="store_true",
+        help="write LIVE_ISSUED picks for fixtures that have not kicked off yet (idempotent)",
+    )
     parser.add_argument("--settle", action="store_true", help="settle open picks from persisted results")
     parser.add_argument("--dashboard-db", default=None)
     parser.add_argument("--ledger-db", default=None)

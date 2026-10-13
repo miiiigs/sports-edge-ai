@@ -185,6 +185,72 @@ async def _run_value_bet_evaluation_runtime(services: DashboardServices, stop_ev
             return
 
 
+async def _wait_for_startup_sync(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Let the startup fixture/prediction sync finish before DB-only consumers run."""
+    task = getattr(services, "_startup_sync_task", None)
+    if task is None or task.done():
+        return
+    stop_wait = asyncio.create_task(stop_event.wait())
+    try:
+        await asyncio.wait({task, stop_wait}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        stop_wait.cancel()
+
+
+async def _run_model_pick_issuance_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Isolated, recurring, DB-only forward Model Pick issuance. No-op when disabled.
+
+    Issues LIVE_ISSUED picks only for fixtures that have not kicked off, from the
+    first pre-kickoff READY prediction. Zero provider requests. The first cycle
+    runs as soon as the startup sync completes so short-lived wakes still issue.
+    """
+    if not services.model_pick_issuance_scheduler_active():
+        logger.info("model pick issuance scheduler: state=disabled")
+        return
+    interval = max(1, int(services.config.model_pick_issuance_interval_seconds))
+    logger.info("model pick issuance scheduler started: interval_seconds=%s", interval)
+    await _wait_for_startup_sync(services, stop_event)
+    while not stop_event.is_set():
+        try:
+            await asyncio.to_thread(services.run_model_pick_issuance_cycle)
+        except Exception:
+            logger.exception("model pick issuance cycle failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            continue
+        else:
+            return
+
+
+async def _run_prediction_refresh_runtime(services: DashboardServices, stop_event: asyncio.Event) -> None:
+    """Isolated, recurring fixture + prediction refresh. No-op when disabled.
+
+    Runs the standard fixture sync without its market-sync step (the dedicated
+    market collector owns market requests), then an issuance pass so new READY
+    predictions become forward Model Picks promptly. The first cycle waits one
+    interval because startup already performed a full sync.
+    """
+    if not services.prediction_refresh_scheduler_active():
+        logger.info("prediction refresh scheduler: state=disabled")
+        return
+    interval = max(1, int(services.config.prediction_refresh_interval_seconds))
+    logger.info("prediction refresh scheduler started: interval_seconds=%s", interval)
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+        else:
+            return
+        try:
+            await services.run_prediction_refresh_cycle()
+            if services.model_pick_issuance_scheduler_active():
+                await asyncio.to_thread(services.run_model_pick_issuance_cycle)
+        except Exception:
+            logger.exception("prediction refresh cycle failed")
+
+
 async def run_worker() -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -221,6 +287,12 @@ async def run_worker() -> int:
     value_evaluation_task = asyncio.create_task(
         _run_value_bet_evaluation_runtime(services, stop_event)
     )
+    model_pick_issuance_task = asyncio.create_task(
+        _run_model_pick_issuance_runtime(services, stop_event)
+    )
+    prediction_refresh_task = asyncio.create_task(
+        _run_prediction_refresh_runtime(services, stop_event)
+    )
 
     block_seconds = _test_block_seconds()
     if block_seconds > 0:
@@ -234,12 +306,16 @@ async def run_worker() -> int:
         result_sync_task.cancel()
         model_pick_settlement_task.cancel()
         value_evaluation_task.cancel()
+        model_pick_issuance_task.cancel()
+        prediction_refresh_task.cancel()
         for task in (
             shadow_task,
             market_collection_task,
             result_sync_task,
             model_pick_settlement_task,
             value_evaluation_task,
+            model_pick_issuance_task,
+            prediction_refresh_task,
         ):
             try:
                 await task

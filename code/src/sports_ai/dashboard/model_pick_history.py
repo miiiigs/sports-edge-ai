@@ -19,7 +19,14 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-POLICY_ID = "football_model_pick_balanced_line_v1"
+from ..storage.football_model_pick_ledger import (
+    ISSUANCE_TIMING_FORWARD,
+    ISSUANCE_TIMING_RETROSPECTIVE,
+    ISSUANCE_TIMING_UNKNOWN,
+    issuance_timing,
+)
+
+POLICY_ID ="football_model_pick_balanced_line_v1"
 POLICY_VERSION = "v1"
 
 MARKET_ASIAN_HANDICAP = "asian_handicap"
@@ -120,6 +127,7 @@ def _display_row(row: Mapping[str, Any], *, now: datetime, tz: ZoneInfo) -> dict
         "model_fair_price": row.get("model_fair_price"),
         "result_state": state,
         "record_origin": row.get("record_origin"),
+        "issuance_timing": issuance_timing(row),
         "prediction_generated_at": row.get("prediction_generated_at"),
     }
 
@@ -179,6 +187,11 @@ def build_model_pick_history_payload(
         "policy": {"policy_id": POLICY_ID, "policy_version": POLICY_VERSION},
         "summary": _aggregate([]),
         "by_market": {m: _aggregate([]) for m in MARKETS},
+        "by_issuance_timing": {
+            timing: _aggregate([])
+            for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
+        },
+        "forward_by_market": {m: _aggregate([]) for m in MARKETS},
         "labels": {
             "latest_model_pick_issued_day": None,
             "latest_model_pick_scheduled_kickoff_day": None,
@@ -213,6 +226,14 @@ def build_model_pick_history_payload(
     corners = [r for r in rows if r.get("market") == MARKET_CORNER_TOTAL]
     payload["summary"] = _aggregate(rows)
     payload["by_market"] = {MARKET_ASIAN_HANDICAP: _aggregate(ah), MARKET_CORNER_TOTAL: _aggregate(corners)}
+    payload["by_issuance_timing"] = {
+        timing: _aggregate([r for r in rows if issuance_timing(r) == timing])
+        for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
+    }
+    payload["forward_by_market"] = {
+        market: _aggregate([r for r in subset if issuance_timing(r) == ISSUANCE_TIMING_FORWARD])
+        for market, subset in ((MARKET_ASIAN_HANDICAP, ah), (MARKET_CORNER_TOTAL, corners))
+    }
 
     issued_days = [d for d in (_local_day(r.get("prediction_generated_at"), tz) for r in rows) if d]
     kickoff_days = [d for d in (_local_day(r.get("kickoff_utc"), tz) for r in rows) if d]
