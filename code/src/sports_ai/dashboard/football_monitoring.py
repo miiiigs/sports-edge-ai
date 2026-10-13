@@ -186,6 +186,8 @@ def _scheduler_heartbeats(status: Mapping[str, Any], now: datetime) -> dict[str,
             if f"{name}_{suffix}" in status
         }
         enabled = beat.pop("scheduler_enabled", None)
+        # Exception text can carry paths or provider detail; expose presence only.
+        beat["last_error_present"] = bool(beat.pop("last_error", None))
         if "enabled" not in beat:
             beat["enabled"] = enabled
         success = _parse(beat.get("last_success_at"))
@@ -267,7 +269,7 @@ def _operational(
     for name, beat in heartbeats.items():
         if beat.get("stale"):
             alerts.append({"code": "SCHEDULER_STALE", "scheduler": name, "hours_since_success": beat.get("hours_since_success")})
-        if beat.get("last_error"):
+        if beat.get("last_error_present"):
             alerts.append({"code": "SCHEDULER_LAST_CYCLE_ERROR", "scheduler": name})
     if issuance.get("enabled") and ready_without_pick:
         alerts.append({"code": "READY_FIXTURES_WITHOUT_PICK", "count": len(ready_without_pick)})

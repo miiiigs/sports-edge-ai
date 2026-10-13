@@ -38,7 +38,7 @@ any client-side env var (`NEXT_PUBLIC_*`, `VITE_*`, …), cookie or HTML.
 
 | Field | Meaning |
 |---|---|
-| `schedulers.<name>` | For `market_collection`, `result_sync`, `model_pick_settlement`, `model_pick_issuance`, `prediction_refresh`, `value_evaluation` and `high_confidence_shadow`: `enabled`, `last_cycle_at`, `last_success_at`, `last_error`, `cycles_completed`, `hours_since_success`, `stale` (enabled and no success in 24h) |
+| `schedulers.<name>` | For `market_collection`, `result_sync`, `model_pick_settlement`, `model_pick_issuance`, `prediction_refresh`, `value_evaluation` and `high_confidence_shadow`: `enabled`, `last_cycle_at`, `last_success_at`, `last_error_present` (boolean; error text is never exposed), `cycles_completed`, `hours_since_success`, `stale` (enabled and no success in 24h) |
 | `latest_forward_model_pick_issued_at` | Latest `created_at` of a forward LIVE_ISSUED pick |
 | `latest_prediction_generated_at` | Latest prediction version timestamp |
 | `prediction_coverage` | Next 72h: `upcoming_fixtures`, `with_prediction`, `latest_ready`, `ready_without_model_pick`, `latest_not_ready_by_status`, `ready_rate` |

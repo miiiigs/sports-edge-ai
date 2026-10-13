@@ -130,6 +130,7 @@ def test_operational_coverage_backlog_and_alerts(paths):
         "model_pick_issuance_last_success_at": "2026-10-11T00:00:00+00:00",
         "result_sync_scheduler_enabled": False,
         "fixture_provider_state": "DEGRADED",
+        "result_sync_last_error": "OperationalError: /data/secret/path.sqlite",
     }
     op = _build(paths, status)["operational"]
     cov = op["prediction_coverage"]
@@ -140,9 +141,11 @@ def test_operational_coverage_backlog_and_alerts(paths):
     assert op["settlement_backlog"]["open_past_kickoff"] == 1
     assert op["schedulers"]["model_pick_issuance"]["stale"] is True
     assert op["schedulers"]["result_sync"]["stale"] is False
+    assert op["schedulers"]["result_sync"]["last_error_present"] is True
+    assert "/data/secret" not in json.dumps(op)
     codes = {a["code"] for a in op["alerts"]}
     assert {"SCHEDULER_STALE", "READY_FIXTURES_WITHOUT_PICK", "SETTLEMENT_LAG", "ALL_ODDS_STALE",
-            "FIXTURE_PROVIDER_NOT_CONNECTED"} <= codes
+            "FIXTURE_PROVIDER_NOT_CONNECTED", "SCHEDULER_LAST_CYCLE_ERROR"} <= codes
     (odds,) = op["odds_freshness"]
     assert odds["age_minutes"] == 360.0 and odds["stale"] is True
 
