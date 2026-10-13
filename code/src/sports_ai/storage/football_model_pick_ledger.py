@@ -29,6 +29,36 @@ RECORD_ORIGIN_LIVE_ISSUED = "LIVE_ISSUED"
 RECORD_ORIGIN_CURRENT_SYSTEM_REPLAY = "CURRENT_SYSTEM_REPLAY"
 RECORD_ORIGINS = frozenset({RECORD_ORIGIN_LIVE_ISSUED, RECORD_ORIGIN_CURRENT_SYSTEM_REPLAY})
 
+# Read-time issuance timing. ``record_origin`` is immutable, so picks written
+# after kickoff by the earlier manual backfill keep ``LIVE_ISSUED``; this derived
+# classification keeps them from being presented as forward picks.
+ISSUANCE_TIMING_FORWARD = "FORWARD"
+ISSUANCE_TIMING_RETROSPECTIVE = "RETROSPECTIVE_BACKFILL"
+ISSUANCE_TIMING_UNKNOWN = "UNKNOWN"
+
+
+def issuance_timing(row: Mapping[str, Any]) -> str:
+    """FORWARD when the pick row was written strictly before kickoff."""
+    created = _parse_utc(row.get("created_at"))
+    kickoff = _parse_utc(row.get("kickoff_utc"))
+    if created is None or kickoff is None:
+        return ISSUANCE_TIMING_UNKNOWN
+    return ISSUANCE_TIMING_FORWARD if created < kickoff else ISSUANCE_TIMING_RETROSPECTIVE
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if value in {None, ""}:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 # Settlement states (existing engine returns WON/LOST; normalised to FULL_*).
 STATE_FULL_WIN = "FULL_WIN"
 STATE_HALF_WIN = "HALF_WIN"
@@ -410,5 +440,9 @@ def model_pick_performance(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "by_origin": {
             origin: _agg([r for r in materialized if str(r.get("record_origin")) == origin])
             for origin in sorted(RECORD_ORIGINS)
+        },
+        "by_issuance_timing": {
+            timing: _agg([r for r in materialized if issuance_timing(r) == timing])
+            for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
         },
     }

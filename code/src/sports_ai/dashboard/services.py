@@ -98,6 +98,16 @@ from .result_sync import (
     within_backlog_lookback,
     within_result_lookback,
 )
+from .model_pick_issuance import (
+    ISSUANCE_INTERVAL_ENV_VAR,
+    ISSUANCE_SCHEDULER_ENV_VAR,
+    PREDICTION_REFRESH_INTERVAL_ENV_VAR,
+    PREDICTION_REFRESH_SCHEDULER_ENV_VAR,
+    PREDICTION_REFRESH_SYNC_KIND,
+    issue_forward_model_picks,
+    resolve_issuance_interval_seconds,
+    resolve_prediction_refresh_interval_seconds,
+)
 from .model_pick_settlement import (
     CONFLICT_SETTLEMENT_EVIDENCE,
     CONFLICT_SETTLEMENT_STATE,
@@ -691,6 +701,13 @@ class DashboardConfig:
     # Dedicated DB-only Model Pick settlement scheduler (consumes verified truth).
     enable_model_pick_settlement_scheduler: bool = False
     model_pick_settlement_interval_seconds: int = 600
+    # Dedicated DB-only forward Model Pick issuance scheduler (future fixtures only).
+    enable_model_pick_issuance_scheduler: bool = False
+    model_pick_issuance_interval_seconds: int = 600
+    # Dedicated fixture + prediction refresh scheduler. Runs the fixture sync
+    # without its market-sync step (the market collector owns market requests).
+    enable_prediction_refresh_scheduler: bool = False
+    prediction_refresh_interval_seconds: int = 3600
     # Dedicated DB-only forward Value Bet evaluation scheduler (frozen Model Picks).
     enable_value_bet_evaluation_scheduler: bool = False
     value_bet_evaluation_interval_seconds: int = 600
@@ -754,6 +771,14 @@ class DashboardConfig:
             enable_model_pick_settlement_scheduler=_env_bool(SETTLEMENT_SCHEDULER_ENV_VAR, False),
             model_pick_settlement_interval_seconds=resolve_settlement_interval_seconds(
                 _env_int(SETTLEMENT_INTERVAL_ENV_VAR, 0)
+            ),
+            enable_model_pick_issuance_scheduler=_env_bool(ISSUANCE_SCHEDULER_ENV_VAR, False),
+            model_pick_issuance_interval_seconds=resolve_issuance_interval_seconds(
+                _env_int(ISSUANCE_INTERVAL_ENV_VAR, 0)
+            ),
+            enable_prediction_refresh_scheduler=_env_bool(PREDICTION_REFRESH_SCHEDULER_ENV_VAR, False),
+            prediction_refresh_interval_seconds=resolve_prediction_refresh_interval_seconds(
+                _env_int(PREDICTION_REFRESH_INTERVAL_ENV_VAR, 0)
             ),
             enable_value_bet_evaluation_scheduler=_env_bool(VALUE_SCHEDULER_ENV_VAR, False),
             value_bet_evaluation_interval_seconds=resolve_value_evaluation_interval_seconds(
@@ -924,6 +949,24 @@ class DashboardServices:
             "model_pick_settlement_applied_last_cycle": 0,
             "model_pick_settlement_conflicts_last_cycle": 0,
         }
+        self._model_pick_issuance_runtime_state: dict[str, Any] = {
+            "model_pick_issuance_scheduler_enabled": self.config.enable_model_pick_issuance_scheduler,
+            "model_pick_issuance_interval_seconds": self.config.model_pick_issuance_interval_seconds,
+            "model_pick_issuance_last_cycle_at": None,
+            "model_pick_issuance_last_success_at": None,
+            "model_pick_issuance_last_error": None,
+            "model_pick_issuance_cycles_completed": 0,
+            "model_pick_issuance_written_last_cycle": 0,
+            "model_pick_issuance_skipped_last_cycle": {},
+            "model_pick_issuance_canonical_duplicates_last_cycle": 0,
+            "model_pick_issuance_conflicts_last_cycle": 0,
+            "prediction_refresh_scheduler_enabled": self.config.enable_prediction_refresh_scheduler,
+            "prediction_refresh_interval_seconds": self.config.prediction_refresh_interval_seconds,
+            "prediction_refresh_last_cycle_at": None,
+            "prediction_refresh_last_success_at": None,
+            "prediction_refresh_last_error": None,
+            "prediction_refresh_cycles_completed": 0,
+        }
         self._value_evaluation_runtime_state: dict[str, Any] = {
             "value_evaluation_scheduler_enabled": self.config.enable_value_bet_evaluation_scheduler,
             "value_evaluation_interval_seconds": self.config.value_bet_evaluation_interval_seconds,
@@ -1075,6 +1118,9 @@ class DashboardServices:
         model_pick_settlement_state = storage.get_runtime_state(
             conn, "model_pick_settlement_state", initialize_schema=False
         )
+        model_pick_issuance_state = storage.get_runtime_state(
+            conn, "model_pick_issuance_state", initialize_schema=False
+        )
         value_evaluation_state = storage.get_runtime_state(
             conn, "value_evaluation_state", initialize_schema=False
         )
@@ -1110,6 +1156,17 @@ class DashboardServices:
                 self._corner_sync_attempts.update({str(k): str(v) for k, v in corner_attempts.items()})
         if isinstance(model_pick_settlement_state, dict):
             self._model_pick_settlement_runtime_state.update(model_pick_settlement_state)
+        if isinstance(model_pick_issuance_state, dict):
+            self._model_pick_issuance_runtime_state.update(model_pick_issuance_state)
+            # Config is authoritative for enablement and cadence; persisted state is history.
+            self._model_pick_issuance_runtime_state.update(
+                {
+                    "model_pick_issuance_scheduler_enabled": self.config.enable_model_pick_issuance_scheduler,
+                    "model_pick_issuance_interval_seconds": self.config.model_pick_issuance_interval_seconds,
+                    "prediction_refresh_scheduler_enabled": self.config.enable_prediction_refresh_scheduler,
+                    "prediction_refresh_interval_seconds": self.config.prediction_refresh_interval_seconds,
+                }
+            )
         if isinstance(value_evaluation_state, dict):
             self._value_evaluation_runtime_state.update(value_evaluation_state)
         if isinstance(storage_runtime_state, dict):
@@ -3695,7 +3752,8 @@ class DashboardServices:
                 xg_readiness.get("competition_counts"),
                 xg_readiness.get("missing_examples"),
             )
-            self._run_market_sync(rows_with_predictions, conn)
+            if sync_kind != PREDICTION_REFRESH_SYNC_KIND:
+                self._run_market_sync(rows_with_predictions, conn)
             storage.put_runtime_state(
                 conn,
                 state_key="provider_state",
@@ -5893,6 +5951,109 @@ class DashboardServices:
             "action_hash": None if plan is None else plan.action_hash,
             "error": error,
         }
+
+    # ------------------------------------------- dedicated Model Pick issuance
+    def model_pick_issuance_scheduler_active(self) -> bool:
+        return bool(self.config.enable_model_pick_issuance_scheduler) and self.config.runtime_role != RUNTIME_ROLE_WEB
+
+    def _persist_model_pick_issuance_state(self) -> None:
+        with storage.connect(self.config.dashboard_db_path) as conn:
+            storage.put_runtime_state(
+                conn,
+                state_key="model_pick_issuance_state",
+                state_value=self._model_pick_issuance_runtime_state,
+                updated_at=utc_now_iso(),
+                initialize_schema=self._read_requires_schema_init(),
+            )
+
+    def run_model_pick_issuance_cycle(self) -> dict[str, Any]:
+        """Issue forward LIVE_ISSUED Model Picks for fixtures that have not kicked off.
+
+        DB-only: reads persisted predictions/fixtures, writes only the Model Pick
+        ledger. Zero provider requests, zero paper-ledger writes, zero Value Bets.
+        """
+        started_at = utc_now_iso()
+        if not self.model_pick_issuance_scheduler_active():
+            return {"state": "DISABLED", "written": 0}
+        error: str | None = None
+        result: dict[str, Any] = {}
+        try:
+            dashboard_conn = sqlite3.connect(
+                f"file:{Path(self.config.dashboard_db_path).as_posix()}?mode=ro", uri=True
+            )
+            dashboard_conn.row_factory = sqlite3.Row
+            try:
+                ledger_conn = football_model_pick_ledger.connect(self.config.model_pick_db_path)
+                try:
+                    result = issue_forward_model_picks(dashboard_conn, ledger_conn, now=started_at)
+                finally:
+                    ledger_conn.close()
+            finally:
+                dashboard_conn.close()
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+        completed = int(self._model_pick_issuance_runtime_state.get("model_pick_issuance_cycles_completed") or 0) + 1
+        self._model_pick_issuance_runtime_state.update(
+            {
+                "model_pick_issuance_scheduler_enabled": True,
+                "model_pick_issuance_last_cycle_at": started_at,
+                "model_pick_issuance_last_success_at": None if error else utc_now_iso(),
+                "model_pick_issuance_last_error": error,
+                "model_pick_issuance_cycles_completed": completed,
+                "model_pick_issuance_written_last_cycle": int(result.get("written") or 0),
+                "model_pick_issuance_skipped_last_cycle": dict(result.get("skipped") or {}),
+                "model_pick_issuance_canonical_duplicates_last_cycle": len(result.get("canonical_duplicates") or []),
+                "model_pick_issuance_conflicts_last_cycle": len(result.get("conflicts") or []),
+            }
+        )
+        self._persist_model_pick_issuance_state()
+        if error:
+            logger.warning("model pick issuance cycle error: %s", error)
+        else:
+            logger.info(
+                "model pick issuance: written=%s ah=%s corners=%s skipped=%s canonical_duplicates=%s conflicts=%s",
+                result.get("written"),
+                result.get("written_ah"),
+                result.get("written_corners"),
+                result.get("skipped"),
+                len(result.get("canonical_duplicates") or []),
+                len(result.get("conflicts") or []),
+            )
+        return {"state": "MODEL_PICK_ISSUANCE", **result, "error": error}
+
+    # ------------------------------------------- dedicated prediction refresh
+    def prediction_refresh_scheduler_active(self) -> bool:
+        return bool(self.config.enable_prediction_refresh_scheduler) and self.config.runtime_role != RUNTIME_ROLE_WEB
+
+    async def run_prediction_refresh_cycle(self) -> dict[str, Any]:
+        """Refresh fixtures and generate predictions; never runs the market sync.
+
+        Uses the standard fixture sync (provider budget, circuit breaker, kickoff
+        locking and prediction versioning unchanged) under a dedicated sync kind
+        that skips ``_run_market_sync``.
+        """
+        started_at = utc_now_iso()
+        if not self.prediction_refresh_scheduler_active():
+            return {"state": "DISABLED"}
+        error: str | None = None
+        try:
+            await self.sync_once(sync_kind=PREDICTION_REFRESH_SYNC_KIND, include_schedule=True)
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+        completed = int(self._model_pick_issuance_runtime_state.get("prediction_refresh_cycles_completed") or 0) + 1
+        self._model_pick_issuance_runtime_state.update(
+            {
+                "prediction_refresh_scheduler_enabled": True,
+                "prediction_refresh_last_cycle_at": started_at,
+                "prediction_refresh_last_success_at": None if error else utc_now_iso(),
+                "prediction_refresh_last_error": error,
+                "prediction_refresh_cycles_completed": completed,
+            }
+        )
+        self._persist_model_pick_issuance_state()
+        if error:
+            logger.warning("prediction refresh cycle error: %s", error)
+        return {"state": "PREDICTION_REFRESH", "error": error}
 
     # ------------------------------------------- dedicated value evaluation
     def value_bet_evaluation_scheduler_active(self) -> bool:
@@ -8400,6 +8561,26 @@ class DashboardServices:
             "model_pick_settlement_conflicts_last_cycle": int(
                 self._model_pick_settlement_runtime_state.get("model_pick_settlement_conflicts_last_cycle") or 0
             ),
+            **{
+                key: self._model_pick_issuance_runtime_state.get(key)
+                for key in (
+                    "model_pick_issuance_scheduler_enabled",
+                    "model_pick_issuance_interval_seconds",
+                    "model_pick_issuance_last_cycle_at",
+                    "model_pick_issuance_last_success_at",
+                    "model_pick_issuance_last_error",
+                    "model_pick_issuance_cycles_completed",
+                    "model_pick_issuance_written_last_cycle",
+                    "model_pick_issuance_canonical_duplicates_last_cycle",
+                    "model_pick_issuance_conflicts_last_cycle",
+                    "prediction_refresh_scheduler_enabled",
+                    "prediction_refresh_interval_seconds",
+                    "prediction_refresh_last_cycle_at",
+                    "prediction_refresh_last_success_at",
+                    "prediction_refresh_last_error",
+                    "prediction_refresh_cycles_completed",
+                )
+            },
             "value_evaluation_scheduler_enabled": bool(
                 self._value_evaluation_runtime_state.get("value_evaluation_scheduler_enabled")
             ),
