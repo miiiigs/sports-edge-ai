@@ -62,6 +62,7 @@ from .market_collection_policy import (
     resolve_market_collection_interval_seconds,
     select_collection_fixtures,
 )
+from .paper_market_evidence import partition_counted_paper_rows, quarantine_summary
 from .result_sync import (
     RESULT_SYNC_INTERVAL_ENV_VAR,
     RESULT_SYNC_MAX_FIXTURES_ENV_VAR,
@@ -1640,15 +1641,12 @@ class DashboardServices:
                 conn,
                 initialize_schema=self._read_requires_schema_init(),
             )
-        counted_rows = [
-            row
-            for row in rows
-            if str(row.get("paper_trade_id") or "") not in excluded
-        ]
+        counted_rows, quarantined_rows = partition_counted_paper_rows(rows, excluded)
         status = football_paper_trading.paper_trading_status(counted_rows)
         status["raw_paper_rows"] = len(rows)
         status["reconciled_excluded_positions"] = len(excluded)
         status["reconciliation_applied"] = len(excluded) > 0
+        status.update(quarantine_summary(quarantined_rows))
         return counted_rows, status
 
     def _paper_fixture_identity_map(self) -> dict[str, dict[str, Any]]:
@@ -7769,6 +7767,19 @@ class DashboardServices:
             "route_a_state": "REJECTED",
             "agent_3_state": "NOT IMPLEMENTED",
             "window_rows": self._performance_windows(paper_positions),
+            "paper_market_evidence_quarantine": {
+                key: paper_status.get(key)
+                for key in (
+                    "market_evidence_quarantined_positions",
+                    "market_evidence_quarantined_by_market",
+                    "market_evidence_quarantine_applied",
+                    "market_evidence_quarantine_reason",
+                    "disputed_result_quarantined_positions",
+                    "disputed_result_quarantined_by_market",
+                    "disputed_result_fixture_ids",
+                    "disputed_result_quarantine_reason",
+                )
+            },
             "portfolio_window_rows": self._performance_windows(portfolio_context["selected_rows"]),
             "market_breakdown": self._paper_breakdown_rows(
                 paper_rows=paper_positions,
