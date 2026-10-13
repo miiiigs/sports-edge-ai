@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode
@@ -17,6 +18,7 @@ from .client_history import build_client_history_payload
 from .model_pick_history import build_model_pick_history_payload
 from .fixture_provider import FixtureProvider
 from .football_intelligence import build_football_intelligence_payload
+from .football_monitoring import build_football_monitoring_payload
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from .services import DashboardConfig, DashboardServices
 
@@ -548,6 +550,21 @@ def create_app(
     @app.api_route("/api/system/status", methods=["GET", "HEAD"])
     def api_system_status():
         return JSONResponse(resolved_services.get_system_status())
+
+    # On the read-only client token allowlist (client_api_token.py): aggregate, DB-only.
+    @app.api_route("/api/monitoring/football", methods=["GET", "HEAD"])
+    def api_football_monitoring():
+        return JSONResponse(
+            build_football_monitoring_payload(
+                dashboard_db_path=resolved_services.config.dashboard_db_path,
+                paper_db_path=resolved_services.config.paper_trading_db_path,
+                model_pick_db_path=_model_pick_db_path(),
+                shadow_db_path=resolved_services.high_confidence_shadow_db_path(),
+                runtime_status=resolved_services.get_health_payload(),
+                value_bet_issuance_enabled=bool(resolved_services.config.enable_value_bet_issuance),
+                deployed_commit=os.environ.get("RAILWAY_GIT_COMMIT_SHA"),
+            )
+        )
 
     @app.get("/api/reconciliation/report")
     def api_reconciliation_report():

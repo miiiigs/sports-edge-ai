@@ -46,6 +46,14 @@ CLIENT_CONSUMED_KEYS = {
         "current_streak",
     },
     "/api/system/status": {"fixture_feed", "prediction_engine", "odds_feed", "market_sync", "storage"},
+    "/api/monitoring/football": {
+        "schema_version",
+        "generated_at",
+        "operational",
+        "model_performance",
+        "qualified_betting",
+        "high_confidence_shadow",
+    },
 }
 
 NON_ALLOWLISTED_READS = (

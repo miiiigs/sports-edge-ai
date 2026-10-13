@@ -21,6 +21,7 @@ ALLOWED_PATHS = (
     "/api/candidates",
     "/api/performance",
     "/api/system/status",
+    "/api/monitoring/football",
 )
 
 # Routes the unified Tennis transport layer may list, but which the production
@@ -42,6 +43,7 @@ class _StubConfig:
         self.dashboard_db_path = tmp_path / "dashboard.sqlite"
         self.model_pick_db_path = tmp_path / "model_picks.sqlite"
         self.display_timezone = "Asia/Manila"
+        self.enable_value_bet_issuance = False
 
 
 class _StubServices:
@@ -56,6 +58,12 @@ class _StubServices:
 
     def get_system_status(self) -> dict:
         return {"status": "ok"}
+
+    def get_health_payload(self) -> dict:
+        return {"status": "ok"}
+
+    def high_confidence_shadow_db_path(self):
+        return None
 
     def get_candidates_payload(self) -> dict:
         return {"rows": [], "connected": True}
@@ -180,6 +188,11 @@ def test_read_only_token_allows_allowlisted_get_and_head(tmp_path, monkeypatch):
 
         performance = client.get("/api/performance", headers=_bearer())
         assert performance.status_code == 200
+
+        monitoring = client.get("/api/monitoring/football", headers=_bearer())
+        assert monitoring.status_code == 200
+        assert monitoring.json()["schema_version"] == "football_monitoring_v1"
+        assert monitoring.json()["read_only"] is True
 
         # HEAD is part of the read contract and is actually served.
         for path in ALLOWED_PATHS:

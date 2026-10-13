@@ -36,13 +36,16 @@ MIN_CLIENT_API_TOKEN_LENGTH = 32
 
 # Smallest GET/HEAD allowlist actually required by the unified pages. Even
 # though the Tennis client transport layer may list more routes, the production
-# machine credential must not exceed these three read-only JSON endpoints. No
+# machine credential must not exceed these read-only JSON endpoints. No
 # predictions, analysis or fixture transport route is reachable with the token.
+# ``/api/monitoring/football`` is an aggregate, DB-only (mode=ro) monitoring
+# document; it exposes no secrets and makes no provider requests.
 CLIENT_API_READ_PATHS: frozenset[str] = frozenset(
     {
         "/api/candidates",
         "/api/performance",
         "/api/system/status",
+        "/api/monitoring/football",
     }
 )
 
