@@ -634,3 +634,32 @@ def test_fixture_provider_gate_on_single_live_call(tmp_path, monkeypatch, api_fo
     assert len(live2) == 1
     assert fake.calls == 1
     assert budget.metrics()["http_requests"] == 1
+
+
+def test_quota_alert_logs_once_per_transition_and_reports_level(tmp_path, caplog):
+    import logging
+
+    budget = _budget(tmp_path)
+    caplog.set_level(logging.INFO, logger="sports_ai.dashboard.provider_budget")
+
+    _seed_quota(budget, limit=1000, remaining=900)
+    assert budget.quota_alert_level() == "NONE"
+    assert not [r for r in caplog.records if "provider quota alert" in r.getMessage()]
+
+    _seed_quota(budget, limit=1000, remaining=300)  # CONSERVE
+    assert budget.quota_state() == "CONSERVE"
+    budget.quota_state()
+    budget.quota_alert_level()
+    alerts = [r for r in caplog.records if "provider quota alert" in r.getMessage()]
+    assert len(alerts) == 1  # one line per transition, not per call
+    assert alerts[0].levelno == logging.WARNING and "state=CONSERVE" in alerts[0].getMessage()
+    assert budget.quota_alert_level() == "WARNING"
+
+    _seed_quota(budget, limit=1000, remaining=50)  # CRITICAL
+    assert budget.quota_alert_level() == "CRITICAL"
+    critical = [r for r in caplog.records if "state=CRITICAL" in r.getMessage()]
+    assert len(critical) == 1 and critical[0].levelno == logging.ERROR
+
+    _seed_quota(budget, limit=1000, remaining=950)
+    assert budget.quota_alert_level() == "NONE"
+    assert any("provider quota recovered" in r.getMessage() for r in caplog.records)

@@ -49,6 +49,8 @@ API_FOOTBALL_PROVIDER = "api-football"
 API_FOOTBALL_FIXTURE_STATS_ENDPOINT = "https://v3.football.api-sports.io/fixtures/statistics"
 API_FOOTBALL_LEAGUES_ENDPOINT = "https://v3.football.api-sports.io/leagues"
 API_FOOTBALL_REFERENCE_CACHE_TTL_SECONDS = 24 * 60 * 60
+# API-Football documents a maximum of 20 fixture ids per ``/fixtures?ids=`` call.
+API_FOOTBALL_MAX_FIXTURE_IDS_PER_REQUEST = 20
 
 FOOTBALL_DATA_ORG_SOURCE_VERSION = "football_data_org_fixture_adapter_v1"
 FOOTBALL_DATA_ORG_PROVIDER = "football-data.org"
@@ -725,7 +727,7 @@ class ApiFootballFixtureProvider(FixtureProvider):
         """Endpoint-specific TTL + priority for a fixtures request by lifecycle."""
         if "live" in params:
             return 90, PRIORITY_ESSENTIAL
-        if "id" in params:
+        if "id" in params or "ids" in params:
             return 300, PRIORITY_ESSENTIAL
         raw_date = params.get("date")
         if raw_date:
@@ -1382,3 +1384,42 @@ class ApiFootballFixtureProvider(FixtureProvider):
         if not rows:
             return None
         return self._normalize_fixture(rows[0])
+
+    def get_fixtures_by_ids(self, fixture_ids: list[str]) -> dict[str, NormalizedFixture]:
+        """ONE ``/fixtures?ids=a-b-c`` request for up to 20 API-Football fixtures.
+
+        Goes through the same request budget / circuit breaker / persistent cache as
+        every other fixtures request. Only ``api-football:<digits>`` ids are sent;
+        ids are de-duplicated and sorted so the cache key is deterministic. Rows are
+        mapped back by the provider fixture id in the response and any row whose id
+        was not requested is ignored. Missing ids are simply absent from the result
+        (never inferred).
+        """
+        wanted: dict[str, str] = {}
+        prefix = f"{API_FOOTBALL_PROVIDER}:"
+        for fixture_id in fixture_ids:
+            text = str(fixture_id or "").strip()
+            if not text.startswith(prefix):
+                continue
+            provider_fixture_id = text[len(prefix):]
+            if not provider_fixture_id.isdigit():
+                continue
+            wanted[provider_fixture_id] = text
+        if not wanted:
+            return {}
+        if len(wanted) > API_FOOTBALL_MAX_FIXTURE_IDS_PER_REQUEST:
+            raise FixtureProviderError("too many fixture ids for one API-Football ids request")
+        ordered = sorted(wanted, key=int)
+        rows = self._request_fixtures(params={"ids": "-".join(ordered)})
+        out: dict[str, NormalizedFixture] = {}
+        for row in rows:
+            fixture_payload = row.get("fixture") or {}
+            returned_id = str(fixture_payload.get("id") or "").strip()
+            fixture_id = wanted.get(returned_id)
+            if fixture_id is None:
+                continue
+            normalized = self._normalize_fixture(row)
+            if normalized is None or normalized.fixture_id != fixture_id:
+                continue
+            out[fixture_id] = normalized
+        return out
