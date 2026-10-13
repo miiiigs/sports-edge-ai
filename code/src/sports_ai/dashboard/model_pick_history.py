@@ -8,6 +8,11 @@ A MODEL PICK is a model reference line (not a bookmaker line, not a value bet).
 Open picks are classified as ``UPCOMING`` (kickoff in the future) or
 ``RESULT_PENDING`` (kickoff passed, no verified final sporting truth) and are
 never treated as losses.
+
+Only FORWARD picks (ledger row written strictly before kickoff) feed the headline
+``summary``, ``by_market`` and daily history. Retrospective backfills and rows
+with unknown timing are retained and counted in ``by_issuance_timing`` for
+audit, but no success rate is ever computed from them.
 """
 
 from __future__ import annotations
@@ -81,7 +86,7 @@ def _weighted(fw: int, hw: int, hl: int, fl: int) -> float | None:
     return round((fw + 0.5 * hw) / decisive, 4) if decisive else None
 
 
-def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _aggregate(rows: Sequence[Mapping[str, Any]], *, with_rate: bool = True) -> dict[str, Any]:
     counts = dict.fromkeys(_FINAL_STATES, 0)
     open_count = 0
     for row in rows:
@@ -101,7 +106,18 @@ def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "full_losses": counts[STATE_FULL_LOSS],
         "weighted_success_rate": _weighted(
             counts[STATE_FULL_WIN], counts[STATE_HALF_WIN], counts[STATE_HALF_LOSS], counts[STATE_FULL_LOSS]
-        ),
+        )
+        if with_rate
+        else None,
+    }
+
+
+def _timing_cohorts(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        timing: _aggregate(
+            [r for r in rows if issuance_timing(r) == timing], with_rate=timing == ISSUANCE_TIMING_FORWARD
+        )
+        for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
     }
 
 
@@ -128,6 +144,7 @@ def _display_row(row: Mapping[str, Any], *, now: datetime, tz: ZoneInfo) -> dict
         "result_state": state,
         "record_origin": row.get("record_origin"),
         "issuance_timing": issuance_timing(row),
+        "forward_issued": issuance_timing(row) == ISSUANCE_TIMING_FORWARD,
         "prediction_generated_at": row.get("prediction_generated_at"),
     }
 
@@ -187,11 +204,10 @@ def build_model_pick_history_payload(
         "policy": {"policy_id": POLICY_ID, "policy_version": POLICY_VERSION},
         "summary": _aggregate([]),
         "by_market": {m: _aggregate([]) for m in MARKETS},
-        "by_issuance_timing": {
-            timing: _aggregate([])
-            for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
-        },
+        "headline_cohort": ISSUANCE_TIMING_FORWARD,
+        "by_issuance_timing": _timing_cohorts([]),
         "forward_by_market": {m: _aggregate([]) for m in MARKETS},
+        "excluded_from_headline": 0,
         "labels": {
             "latest_model_pick_issued_day": None,
             "latest_model_pick_scheduled_kickoff_day": None,
@@ -222,18 +238,14 @@ def build_model_pick_history_payload(
         conn.close()
 
     payload["available"] = True
-    ah = [r for r in rows if r.get("market") == MARKET_ASIAN_HANDICAP]
-    corners = [r for r in rows if r.get("market") == MARKET_CORNER_TOTAL]
-    payload["summary"] = _aggregate(rows)
+    forward = [r for r in rows if issuance_timing(r) == ISSUANCE_TIMING_FORWARD]
+    ah = [r for r in forward if r.get("market") == MARKET_ASIAN_HANDICAP]
+    corners = [r for r in forward if r.get("market") == MARKET_CORNER_TOTAL]
+    payload["summary"] = _aggregate(forward)
     payload["by_market"] = {MARKET_ASIAN_HANDICAP: _aggregate(ah), MARKET_CORNER_TOTAL: _aggregate(corners)}
-    payload["by_issuance_timing"] = {
-        timing: _aggregate([r for r in rows if issuance_timing(r) == timing])
-        for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
-    }
-    payload["forward_by_market"] = {
-        market: _aggregate([r for r in subset if issuance_timing(r) == ISSUANCE_TIMING_FORWARD])
-        for market, subset in ((MARKET_ASIAN_HANDICAP, ah), (MARKET_CORNER_TOTAL, corners))
-    }
+    payload["by_issuance_timing"] = _timing_cohorts(rows)
+    payload["forward_by_market"] = payload["by_market"]
+    payload["excluded_from_headline"] = len(rows) - len(forward)
 
     issued_days = [d for d in (_local_day(r.get("prediction_generated_at"), tz) for r in rows) if d]
     kickoff_days = [d for d in (_local_day(r.get("kickoff_utc"), tz) for r in rows) if d]
@@ -246,7 +258,7 @@ def build_model_pick_history_payload(
         "latest_settled_corners_fixture_day": max(settled_corner_days, default=None),
     }
 
-    payload["recent_days"] = _recent_days(rows, now=resolved_now, tz=tz)
+    payload["recent_days"] = _recent_days(forward, now=resolved_now, tz=tz)
     settled = sorted(
         (r for r in rows if normalize_state(r.get("trade_state"))),
         key=lambda r: str(r.get("kickoff_utc") or ""),

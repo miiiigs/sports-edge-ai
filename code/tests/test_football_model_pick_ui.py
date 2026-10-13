@@ -16,7 +16,7 @@ _ENV = Environment(loader=FileSystemLoader(str(_TEMPLATES)), autoescape=select_a
 _COLUMNS = (
     "model_pick_id, fixture_id, canonical_fixture_id, competition_id, competition_name, home_team_name, "
     "away_team_name, kickoff_utc, market, selection, line, model_probability, model_fair_price, record_origin, "
-    "prediction_generated_at, trade_state"
+    "prediction_generated_at, trade_state, created_at"
 )
 
 
@@ -27,6 +27,7 @@ def _row(**over):
         "kickoff_utc": "2026-09-20T15:00:00+00:00", "market": "asian_handicap", "selection": "HOME", "line": -0.25,
         "model_probability": 0.564, "model_fair_price": 1.77, "record_origin": "LIVE_ISSUED",
         "prediction_generated_at": "2026-09-19T10:00:00+00:00", "trade_state": None,
+        "created_at": "2026-08-01T00:00:00+00:00",
     }
     base.update(over)
     return base
@@ -45,7 +46,7 @@ def _payload(tmp_path):
             f"INSERT INTO football_model_pick_entries ({_COLUMNS}) VALUES "
             "(:model_pick_id,:fixture_id,:canonical_fixture_id,:competition_id,:competition_name,:home_team_name,"
             ":away_team_name,:kickoff_utc,:market,:selection,:line,:model_probability,:model_fair_price,"
-            ":record_origin,:prediction_generated_at,:trade_state)",
+            ":record_origin,:prediction_generated_at,:trade_state,:created_at)",
             row,
         )
     conn.commit()
