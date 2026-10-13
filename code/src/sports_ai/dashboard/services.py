@@ -147,7 +147,7 @@ from .prediction_service import (
     attach_edge_desk_shadow_bundle,
     build_prediction_for_fixture,
 )
-from .provider_budget import QUOTA_EXHAUSTED, ProviderRequestBudget
+from .provider_budget import QUOTA_EXHAUSTED, QUOTA_HEALTHY, ProviderRequestBudget
 from .runtime_paths import (
     ensure_operational_data_dir,
     resolve_dashboard_operational_paths,
@@ -5434,6 +5434,15 @@ class DashboardServices:
         backlog_days = resolve_result_sync_backlog_lookback_days(
             getattr(self.config, "result_sync_backlog_lookback_days", 0)
         )
+        # Backlog recovery is optional catch-up work: it only spends quota while the
+        # governor is HEALTHY. Any other state (including UNKNOWN before the day's
+        # allowance is known) pauses it; the recent 72h window is unaffected.
+        backlog_paused_reason: str | None = None
+        if backlog_days > 0:
+            quota_state = self._provider_budget.quota_state()
+            if quota_state != QUOTA_HEALTHY:
+                backlog_paused_reason = f"QUOTA_{quota_state}"
+                backlog_days = 0
         batch_size = resolve_result_sync_status_batch_size(
             getattr(self.config, "result_sync_status_batch_size", 0)
         )
@@ -5636,6 +5645,7 @@ class DashboardServices:
                 "result_sync_corner_selected_last_cycle": list(corner_selected_ids),
                 "result_sync_backlog_selected_last_cycle": list(backlog_selected_ids),
                 "result_sync_backlog_lookback_days": backlog_days,
+                "result_sync_backlog_paused_reason": backlog_paused_reason,
                 "result_sync_status_batch_size": batch_size if batching else 1,
                 "result_sync_status_batches_last_cycle": status_batches_issued,
                 "result_sync_provider_mismatch_last_cycle": provider_mismatch,
@@ -5653,6 +5663,7 @@ class DashboardServices:
             "selected": status_selected_ids,
             "corner_selected": corner_selected_ids,
             "backlog_selected": backlog_selected_ids,
+            "backlog_paused_reason": backlog_paused_reason,
             "status_batches": status_batches_issued,
             "results_updated": results_updated,
             "corners_updated": corners_updated,
@@ -8326,6 +8337,7 @@ class DashboardServices:
             ),
             "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
             "provider_budget_quota_state": self._provider_budget.quota_state(),
+            "provider_budget_quota_alert": self._provider_budget.quota_alert_level(),
             "settlement_queue_count": int(self._market_runtime_state.get("settlement_queue_count") or 0),
             "prediction_snapshot_ready": snapshot_ready,
             "dashboard_db_reachable": storage_state["dashboard_db_reachable"],

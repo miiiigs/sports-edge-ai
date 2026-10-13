@@ -116,12 +116,13 @@ class BatchFakeProvider(FakeFixtureProvider):
         return {fid: self._fixtures[fid] for fid in fixture_ids if fid in self._fixtures}
 
 
-def _services(tmp_path, monkeypatch, fixtures, provider, stats=None, **cfg):
+def _services(tmp_path, monkeypatch, fixtures, provider, stats=None, quota_state="HEALTHY", **cfg):
     config = replace(_config(tmp_path), **cfg)
     for f in fixtures:
         _seed_fixture(config, f)
     services = DashboardServices(config, fixture_provider=provider, market_provider=NotConfiguredMarketProvider(), statistics_provider=stats or FakeStatsProvider({}))
     monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: _rows_for(fixtures))
+    monkeypatch.setattr(services._provider_budget, "quota_state", lambda: quota_state)
     return config, services
 
 
@@ -149,6 +150,43 @@ def test_backlog_enabled_recovers_stale_pre_match_fixture(tmp_path, monkeypatch)
     with storage.connect(config.dashboard_db_path) as conn:
         row = storage.fetch_fixture(conn, fid, initialize_schema=False)
     assert (row["status"], row["home_score"], row["away_score"]) == ("FINISHED", 2, 2)
+
+
+@pytest.mark.parametrize("quota_state", ["UNKNOWN", "CONSERVE", "LOW", "CRITICAL", "EXHAUSTED"])
+def test_backlog_pauses_unless_quota_is_healthy(tmp_path, monkeypatch, quota_state):
+    old_fid, recent_fid = "api-football:9010", "api-football:9011"
+    stale = _normalized(old_fid, status="PRE_MATCH", home_score=None, away_score=None, kickoff=_ago(days=10))
+    recent = _normalized(recent_fid, status="PRE_MATCH", home_score=None, away_score=None, kickoff=_ago(hours=3))
+    provider = BatchFakeProvider({
+        old_fid: replace(stale, status="FINISHED", home_score=1, away_score=0),
+        recent_fid: replace(recent, status="FINISHED", home_score=0, away_score=0),
+    })
+    config, services = _services(
+        tmp_path, monkeypatch, [stale, recent], provider, quota_state=quota_state,
+        result_sync_backlog_lookback_days=45, result_sync_status_batch_size=20,
+    )
+    _seed_pick(config.model_pick_db_path, old_fid)
+    _seed_pick(config.model_pick_db_path, recent_fid)
+    result = services.run_current_result_sync_cycle()
+    assert result["backlog_paused_reason"] == f"QUOTA_{quota_state}"
+    assert result["backlog_selected"] == []
+    assert old_fid not in [fid for call in provider.batch_calls for fid in call]
+    if quota_state != "EXHAUSTED":
+        assert result["selected"] == [recent_fid]  # the recent 72h window keeps running
+    assert services._result_sync_runtime_state["result_sync_backlog_paused_reason"] == f"QUOTA_{quota_state}"
+
+
+def test_backlog_not_paused_when_quota_healthy(tmp_path, monkeypatch):
+    fid = "api-football:9012"
+    stale = _normalized(fid, status="PRE_MATCH", home_score=None, away_score=None, kickoff=_ago(days=10))
+    provider = BatchFakeProvider({fid: replace(stale, status="FINISHED", home_score=1, away_score=0)})
+    config, services = _services(
+        tmp_path, monkeypatch, [stale], provider, result_sync_backlog_lookback_days=45, result_sync_status_batch_size=20,
+    )
+    _seed_pick(config.model_pick_db_path, fid)
+    result = services.run_current_result_sync_cycle()
+    assert result["backlog_paused_reason"] is None
+    assert result["backlog_selected"] == [fid]
 
 
 def test_backlog_beyond_window_and_settled_picks_are_ignored(tmp_path, monkeypatch):
