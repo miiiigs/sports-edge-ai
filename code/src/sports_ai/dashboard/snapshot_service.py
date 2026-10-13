@@ -318,11 +318,27 @@ def _load_alias_catalog(repo_root: Path) -> dict[str, dict[str, str]]:
             normalize_text_key("Wolverhampton Wanderers"): normalize_text_key("Wolves"),
             normalize_text_key("Newcastle United"): normalize_text_key("Newcastle"),
             normalize_text_key("West Bromwich Albion"): normalize_text_key("West Brom"),
+            # API-Football team id 65 "Nottingham Forest" (production
+            # dashboard_team_mappings, ENG1).  football-data.co.uk E0 names the
+            # club "Nott'm Forest" in every ENG1 season 2022/23-2025/26 and it is
+            # the only ENG1 research club containing "Nott"/"Forest" (Notts
+            # County / Forest Green are ENG4/ENG3 only).  Not a 2026/27
+            # transition club, so it stays in ENG1.
+            normalize_text_key("Nottingham Forest"): normalize_text_key("Nott'm Forest"),
         },
         "ENG2": {
             normalize_text_key("West Bromwich Albion"): normalize_text_key("West Brom"),
+            # API-Football team id 75 "Stoke City" (production, ENG2).  E1 names
+            # the club "Stoke" in every ENG2 season 2021/22-2025/26; the only ENG2
+            # research club containing "Stoke"; not a 2026/27 transition club.
+            normalize_text_key("Stoke City"): normalize_text_key("Stoke"),
         },
         "ENG3": {
+            # API-Football team id 1374 "Mansfield Town" (production, ENG3).  E2
+            # names the club "Mansfield" in ENG3 2024/25 and 2025/26 (ENG4 before
+            # promotion); the only research club containing "Mansfield"; not a
+            # 2026/27 transition club, so it stays in ENG3.
+            normalize_text_key("Mansfield Town"): normalize_text_key("Mansfield"),
             normalize_text_key("Stockport County"): normalize_text_key("Stockport"),
             normalize_text_key("Peterborough"): normalize_text_key("Peterboro"),
             normalize_text_key("Peterborough United"): normalize_text_key("Peterboro"),
