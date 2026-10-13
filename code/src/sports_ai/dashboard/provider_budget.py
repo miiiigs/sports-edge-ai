@@ -15,6 +15,7 @@ ever persisted.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -27,6 +28,8 @@ from typing import Any, Mapping
 
 from ..locking import canonical_hash
 from .models import parse_iso_datetime, utc_now_iso
+
+logger = logging.getLogger(__name__)
 
 PROVIDER_API_FOOTBALL = "api-football"
 
@@ -67,6 +70,16 @@ ACTION_BLOCKED_RATE = "RATE_LIMIT_DEFERRED"
 ACTION_BLOCKED_RESET_PROBE = "RESET_PROBE_PENDING"
 
 # Quota governor thresholds (fraction of the daily allowance remaining)
+QUOTA_ALERT_NONE = "NONE"
+QUOTA_ALERT_WARNING = "WARNING"
+QUOTA_ALERT_CRITICAL = "CRITICAL"
+QUOTA_ALERT_LEVELS = {
+    QUOTA_CONSERVE: QUOTA_ALERT_WARNING,
+    QUOTA_LOW: QUOTA_ALERT_WARNING,
+    QUOTA_CRITICAL: QUOTA_ALERT_CRITICAL,
+    QUOTA_EXHAUSTED: QUOTA_ALERT_CRITICAL,
+}
+
 QUOTA_CONSERVE_THRESHOLD = 0.40
 QUOTA_LOW_THRESHOLD = 0.20
 QUOTA_CRITICAL_THRESHOLD = 0.10
@@ -323,6 +336,7 @@ class ProviderRequestBudget:
         self._inflight: dict[str, dict[str, Any]] = {}
         self._rate_lock = threading.Lock()
         self._rate_times: deque[float] = deque()
+        self._alerted_quota_state: str | None = None
         self._ensure_schema()
 
     # ------------------------------------------------------------------ state
@@ -570,6 +584,35 @@ class ProviderRequestBudget:
         return snapshot
 
     def quota_state(self) -> str:
+        state = self._compute_quota_state()
+        self._alert_on_quota_transition(state)
+        return state
+
+    def quota_alert_level(self) -> str:
+        """``NONE`` | ``WARNING`` (CONSERVE/LOW) | ``CRITICAL`` (CRITICAL/EXHAUSTED)."""
+        return QUOTA_ALERT_LEVELS.get(self.quota_state(), QUOTA_ALERT_NONE)
+
+    def _alert_on_quota_transition(self, state: str) -> None:
+        """Log once per transition so a degrading quota is visible in Railway logs."""
+        if state == QUOTA_UNKNOWN or state == self._alerted_quota_state:
+            return
+        previous, self._alerted_quota_state = self._alerted_quota_state, state
+        level = QUOTA_ALERT_LEVELS.get(state, QUOTA_ALERT_NONE)
+        if level == QUOTA_ALERT_NONE:
+            if previous is not None:
+                logger.info("provider quota recovered: state=%s previous=%s", state, previous)
+            return
+        log = logger.error if level == QUOTA_ALERT_CRITICAL else logger.warning
+        log(
+            "provider quota alert: level=%s state=%s previous=%s effective_remaining=%s effective_limit=%s",
+            level,
+            state,
+            previous,
+            self.effective_remaining(),
+            self._effective_quota_limit(),
+        )
+
+    def _compute_quota_state(self) -> str:
         snapshot = self._quota_snapshot()
         self._quota_day_reset_if_needed(snapshot)
         if not self._provider_allowance_known(snapshot):
