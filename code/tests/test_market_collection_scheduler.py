@@ -436,3 +436,132 @@ def test_no_historical_or_fixture_endpoints_in_scheduler_sources():
         source = inspect.getsource(module)
         assert "?date=" not in source
         assert "odds?date" not in source
+
+
+# ----------------------------------------------- attempt recency / starvation
+class _ClockedMarketProvider(FakeMarketProvider):
+    """Returns snapshots captured 'now' (per a shared fake clock); [] for empty fixtures."""
+
+    def __init__(self, kickoffs, *, empty_fixture_ids, clock):
+        super().__init__({})
+        self._kickoffs = kickoffs
+        self._empty = set(empty_fixture_ids)
+        self._clock = clock
+
+    def get_market_snapshot(self, fixture_id, *, fixture_context=None):
+        self.calls += 1
+        self.called_fixture_ids.append(fixture_id)
+        if fixture_id in self._empty:
+            return []
+        captured = self._clock()
+        return [
+            replace(snapshot, captured_at=captured)
+            for snapshot in _snapshots_for(fixture_id, self._kickoffs[fixture_id])
+        ]
+
+
+def _fake_clock(monkeypatch):
+    base = datetime(2026, 10, 12, 10, 0, tzinfo=timezone.utc)
+    ticks = {"n": 0}
+
+    def now_iso() -> str:
+        ticks["n"] += 1
+        return (base + timedelta(seconds=ticks["n"])).isoformat(timespec="seconds")
+
+    monkeypatch.setattr(services_mod, "utc_now_iso", now_iso)
+    return now_iso
+
+
+def test_fixture_without_odds_does_not_permanently_hold_a_slot(tmp_path, monkeypatch):
+    # Regression: an attempt that writes no snapshot rows used to leave the
+    # fixture "never attempted", so it was re-selected FIRST every cycle and
+    # permanently consumed one of the bounded slots (fixtures=2 matched=1).
+    clock = _fake_clock(monkeypatch)
+    config = _config(tmp_path, scheduler_enabled=True, max_fixtures=2)
+    fixture_ids = ["api-football:1", "api-football:2", "api-football:3"]
+    kickoffs = {fid: _kickoff(n) for n, fid in enumerate(fixture_ids, start=1)}
+    _seed_live_issued_picks(config.model_pick_db_path, fixture_ids)
+    market = _ClockedMarketProvider(kickoffs, empty_fixture_ids={"api-football:1"}, clock=clock)
+    services = _services(config, market)
+    rows = [_row(fid, ko) for fid, ko in kickoffs.items()]
+
+    for _ in range(3):
+        services._run_collection_only_market_cycle(rows, dashboard_conn=None)
+
+    assert market.calls == 6  # never more than the per-cycle cap
+    assert market.called_fixture_ids.count("api-football:1") < 3
+    assert set(market.called_fixture_ids) == set(fixture_ids)
+    attempts = services._market_runtime_state["market_collection_attempts"]
+    assert set(attempts) == set(fixture_ids)
+
+
+def test_attempt_recency_is_persisted_and_restored(tmp_path, monkeypatch):
+    clock = _fake_clock(monkeypatch)
+    config = _config(tmp_path, scheduler_enabled=True, max_fixtures=1)
+    kickoffs = {"api-football:1": _kickoff(1), "api-football:2": _kickoff(2)}
+    _seed_live_issued_picks(config.model_pick_db_path, list(kickoffs))
+    market = _ClockedMarketProvider(kickoffs, empty_fixture_ids={"api-football:1"}, clock=clock)
+    services = _services(config, market)
+    rows = [_row(fid, ko) for fid, ko in kickoffs.items()]
+    monkeypatch.setattr(services, "_all_fixtures_with_predictions", lambda: rows)
+    services.run_market_collection_only_cycle()
+    assert market.called_fixture_ids == ["api-football:1"]
+
+    # A fresh process (container wake) must restore attempt recency from the DB.
+    market2 = _ClockedMarketProvider(kickoffs, empty_fixture_ids={"api-football:1"}, clock=clock)
+    services2 = _services(config, market2)
+    from sports_ai.dashboard import storage as dash_storage
+
+    with dash_storage.connect(config.dashboard_db_path) as conn:
+        services2._load_runtime_state(conn)  # what initialize() does on startup
+    monkeypatch.setattr(services2, "_all_fixtures_with_predictions", lambda: rows)
+    services2.run_market_collection_only_cycle()
+    assert market2.called_fixture_ids == ["api-football:2"]
+
+
+def test_merge_and_prune_attempt_recency():
+    merged = policy.merge_attempt_recency(
+        {"a": "2026-10-12T10:00:00+00:00", "b": None},
+        {"a": "2026-10-12T09:00:00+00:00", "b": "2026-10-12T11:00:00+00:00", "c": "garbage", "d": 5},
+    )
+    assert merged == {"a": "2026-10-12T10:00:00+00:00", "b": "2026-10-12T11:00:00+00:00"}
+    pruned = policy.prune_attempt_recency(
+        {"a": "2026-10-12T10:00:00+00:00", "gone": "2026-10-12T10:00:00+00:00"}, keep_fixture_ids=["a"]
+    )
+    assert pruned == {"a": "2026-10-12T10:00:00+00:00"}
+
+
+# ------------------------------------------------------ closing-window tier
+def _cand(fid, kickoff, observed=None):
+    return policy.CollectionCandidate(
+        fixture_id=fid, provider_fixture_id=fid, kickoff_utc=kickoff,
+        has_live_issued_pick=True, last_observed_at=observed,
+    )
+
+
+def test_closing_window_disabled_by_default_keeps_rotation_order():
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+    near = _cand("near", "2026-10-12T12:30:00+00:00", observed="2026-10-12T11:30:00+00:00")
+    far = _cand("far", "2026-10-15T12:00:00+00:00", observed="2026-10-12T11:00:00+00:00")
+    assert policy.resolve_closing_window_minutes(None) == 0
+    assert policy.resolve_closing_window_minutes(-5) == 0
+    assert policy.resolve_closing_window_minutes(10_000) == policy.HARD_MAX_CLOSING_WINDOW_MINUTES
+    selected = policy.select_collection_fixtures([near, far], max_fixtures=1, now_utc=now)
+    assert [c.fixture_id for c in selected] == ["far"]  # oldest observation first
+
+
+def test_closing_window_prioritizes_near_kickoff_within_same_cap():
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+    near = _cand("near", "2026-10-12T12:30:00+00:00", observed="2026-10-12T11:30:00+00:00")
+    nearer_recent = _cand("recent", "2026-10-12T12:10:00+00:00", observed="2026-10-12T11:55:00+00:00")
+    started = _cand("started", "2026-10-12T11:59:00+00:00")
+    far = _cand("far", "2026-10-15T12:00:00+00:00")  # never attempted
+    selected = policy.select_collection_fixtures(
+        [far, started, nearer_recent, near], max_fixtures=1, now_utc=now, closing_window_minutes=60
+    )
+    # 'recent' was observed 5 min ago (< refresh floor) and 'started' is past kickoff.
+    assert [c.fixture_id for c in selected] == ["near"]
+    selected2 = policy.select_collection_fixtures(
+        [far, nearer_recent, near], max_fixtures=2, now_utc=now, closing_window_minutes=60
+    )
+    assert [c.fixture_id for c in selected2] == ["near", "far"]  # cap unchanged

@@ -400,3 +400,56 @@ def test_ah_underround_same_book_pair_fails_closed(tmp_path):
     result = services.run_value_bet_evaluation_dry_run()
     assert result["counts"].get(fv.VALUE_BET) is None
     assert result["counts"].get(fv.MARKET_EVIDENCE_INVALID) == 1
+
+
+# ------------------------------------------- staleness / kickoff / v2 gates
+def test_stale_corner_offer_is_market_stale():
+    rows = [
+        _row("corner_total", "OVER", 9.5, 1.95, "Pinnacle"),
+        _row("corner_total", "UNDER", 9.5, 1.90, "Pinnacle"),
+        _row("corner_total", "OVER", 9.5, 3.20, "Betfair", snapshot_id=2),
+    ]
+    for row in rows:  # 241 minutes old at NOW
+        row["captured_at"] = "2026-10-08T07:59:00+00:00"
+        row["provider_timestamp"] = "2026-10-08T07:59:00+00:00"
+    assert _ev(_pick("corner_total", "OVER", 9.5), rows).state == fv.MARKET_STALE
+
+
+def test_captured_at_or_after_kickoff_never_fresh():
+    # A row captured at/after the (current) kickoff is never pre-match evidence,
+    # even if evaluation time is somehow still before kickoff (e.g. reschedule).
+    rows = _complete_ah(other=3.0)
+    for row in rows:
+        row["captured_at"] = KICKOFF
+        row["provider_timestamp"] = None
+    assert _ev(_pick("asian_handicap", "HOME", -0.5), rows).state == fv.MARKET_STALE
+
+
+def test_unknown_api_football_ah_version_fails_closed_and_v2_required():
+    base = {"market": "asian_handicap", "provider": "api-football"}
+    assert fv.snapshot_is_value_eligible({**base, "ingestion_version": "api_football_current_market_provider_v2"})
+    assert not fv.snapshot_is_value_eligible({**base, "ingestion_version": "api_football_current_market_provider_v1"})
+    assert not fv.snapshot_is_value_eligible({**base, "ingestion_version": ""})
+    assert not fv.snapshot_is_value_eligible({**base, "ingestion_version": "api_football_current_market_provider_v3"})
+    # Corners are not subject to the AH boundary.
+    assert fv.snapshot_is_value_eligible({"market": "corner_total", "provider": "api-football", "ingestion_version": "x"})
+
+
+def test_max_age_is_resolved_per_row_provider(monkeypatch):
+    # Mixed-provider rows: the api-football window (240m) must NOT be applied to
+    # a provider without an approved window (fails closed) or a shorter window.
+    monkeypatch.delenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", raising=False)
+    monkeypatch.delenv("SPORTS_AI_API_FOOTBALL_MARKET_MAX_AGE_MINUTES", raising=False)
+    aged = "2026-10-08T10:00:00+00:00"  # 120 minutes old at NOW
+    rows = [
+        _row("asian_handicap", "HOME", -0.5, 2.10, "Pinnacle", captured=aged, source=aged),
+        _row("asian_handicap", "AWAY", -0.5, 1.80, "Pinnacle", captured=aged, source=aged),
+        _row("asian_handicap", "HOME", -0.5, 3.00, "Bet365", captured=aged, source=aged,
+             snapshot_id=2, provider="5dollar-football-api"),
+    ]
+    result = _ev(_pick("asian_handicap", "HOME", -0.5), rows)
+    # The 3.00 Bet365 quote has no approved window -> stale; only Pinnacle 2.10 is usable.
+    assert result.state != fv.VALUE_BET or result.best_price != 3.00
+    monkeypatch.setenv("SPORTS_AI_MARKET_MAX_AGE_MINUTES", "60")
+    result = _ev(_pick("asian_handicap", "HOME", -0.5), rows)
+    assert result.state != fv.VALUE_BET or result.best_price != 3.00
