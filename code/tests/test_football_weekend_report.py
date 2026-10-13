@@ -17,12 +17,14 @@ def _database(tmp_path, rows):
     conn.execute(
         "CREATE TABLE football_model_pick_entries ("
         "model_pick_id TEXT, fixture_id TEXT, market TEXT, record_origin TEXT,"
-        "kickoff_utc TEXT, trade_state TEXT, updated_at TEXT)"
+        "kickoff_utc TEXT, trade_state TEXT, updated_at TEXT, created_at TEXT)"
     )
     conn.executemany(
-        "INSERT INTO football_model_pick_entries VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [(ident, ident, market, origin, kickoff, state, "2026-10-12T01:00:00+00:00")
-         for ident, market, origin, kickoff, state in rows],
+        "INSERT INTO football_model_pick_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [(ident, ident, market, origin, kickoff, state, "2026-10-12T01:00:00+00:00",
+          created_at)
+         for ident, market, origin, kickoff, state, *rest in rows
+         for created_at in [rest[0] if rest else "2026-10-09T00:00:00+00:00"]],
     )
     conn.commit()
     conn.close()
@@ -83,3 +85,35 @@ def test_weekend_report_never_writes_and_fails_closed_on_bad_kickoff(tmp_path):
     assert report["unparseable_live_issued_kickoffs"] == 1
     assert report["complete_kickoff_population"] is False
     assert path.read_bytes() == before
+
+
+def test_weekend_report_excludes_live_issued_rows_created_at_or_after_kickoff(tmp_path):
+    path = _database(tmp_path, [
+        ("forward", "asian_handicap", "LIVE_ISSUED", "2026-10-10T15:00:00+00:00", "FULL_WIN"),
+        ("late", "asian_handicap", "LIVE_ISSUED", "2026-10-10T15:00:00+00:00", "FULL_WIN",
+         "2026-10-10T16:00:00+00:00"),
+        ("at_kickoff", "corner_total", "LIVE_ISSUED", "2026-10-11T12:30:00+00:00", "FULL_LOSS",
+         "2026-10-11T12:30:00+00:00"),
+        ("unknown", "corner_total", "LIVE_ISSUED", "2026-10-11T12:30:00+00:00", "FULL_LOSS", None),
+    ])
+    report = build_weekend_model_pick_report(
+        db_path=path, start_date=date(2026, 10, 10), end_date=date(2026, 10, 11),
+    )
+    assert report["issuance_timing"] == "FORWARD"
+    assert report["summary"]["issued"] == 1
+    assert report["summary"]["weighted_success_rate"] == 1.0
+    assert report["excluded_not_forward"] == {"RETROSPECTIVE_BACKFILL": 2, "UNKNOWN": 1}
+
+
+def test_weekend_report_reports_zero_not_a_rate_when_no_forward_picks(tmp_path):
+    path = _database(tmp_path, [
+        ("late", "asian_handicap", "LIVE_ISSUED", "2026-10-10T15:00:00+00:00", "FULL_WIN",
+         "2026-10-10T18:00:00+00:00"),
+    ])
+    report = build_weekend_model_pick_report(
+        db_path=path, start_date=date(2026, 10, 10), end_date=date(2026, 10, 11),
+    )
+    assert report["summary"]["issued"] == 0
+    assert report["decisive_count"] == 0
+    assert report["summary"]["weighted_success_rate"] is None
+    assert report["summary"]["stake_weighted_win_share"] is None

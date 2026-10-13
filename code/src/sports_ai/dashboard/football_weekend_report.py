@@ -2,6 +2,11 @@
 
 The report is kickoff-date based and reports model accuracy, NOT betting ROI.
 It never queries providers, rewrites sporting truth, or mixes replay picks.
+
+Only genuinely forward picks count: ``record_origin = LIVE_ISSUED`` *and*
+``created_at`` strictly before kickoff. Early manual CLI runs labelled picks for
+already-kicked-off fixtures ``LIVE_ISSUED``; those are reported separately as
+``excluded_retrospective`` and never enter the headline.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from datetime import date
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from ..storage.football_model_pick_ledger import ISSUANCE_TIMING_FORWARD, issuance_timing
 from .model_pick_history import _aggregate, _parse, _connect_readonly
 
 MARKETS = ("asian_handicap", "corner_total")
@@ -38,6 +44,7 @@ def build_weekend_model_pick_report(
 
     selected: list[dict[str, object]] = []
     excluded_bad_kickoff = 0
+    excluded_timing: dict[str, int] = {}
     seen_ids: set[str] = set()
     for row in raw_rows:
         kickoff = _parse(row.get("kickoff_utc"))
@@ -51,6 +58,10 @@ def build_weekend_model_pick_report(
         if not identity or identity in seen_ids:
             raise ValueError("duplicate or missing model_pick_id in weekend LIVE_ISSUED ledger")
         seen_ids.add(identity)
+        timing = issuance_timing(row)
+        if timing != ISSUANCE_TIMING_FORWARD:
+            excluded_timing[timing] = excluded_timing.get(timing, 0) + 1
+            continue
         selected.append(row)
 
     total = _aggregate(selected)
@@ -65,6 +76,7 @@ def build_weekend_model_pick_report(
     return {
         "source": "football_model_pick_entries",
         "record_origin": "LIVE_ISSUED",
+        "issuance_timing": ISSUANCE_TIMING_FORWARD,
         "basis": "kickoff_local_day",
         "timezone": timezone_name,
         "start_date": start_date.isoformat(),
@@ -74,6 +86,7 @@ def build_weekend_model_pick_report(
         "decisive_count": decisive,
         "summary": total,
         "by_market": by_market,
+        "excluded_not_forward": excluded_timing,
         "unparseable_live_issued_kickoffs": excluded_bad_kickoff,
         "complete_kickoff_population": excluded_bad_kickoff == 0,
         "excludes": ["CURRENT_SYSTEM_REPLAY", "VALUE_BETS", "PAPER_POSITIONS"],
