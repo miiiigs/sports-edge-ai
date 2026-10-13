@@ -52,12 +52,16 @@ from .fixture_provider import (
 )
 from .market_collection_policy import (
     COLLECTION_MARKETS,
+    MARKET_COLLECTION_CLOSING_WINDOW_ENV_VAR,
     MARKET_COLLECTION_INTERVAL_ENV_VAR,
     MARKET_COLLECTION_ONLY_ENV_VAR,
     MARKET_COLLECTION_SCHEDULER_ENV_VAR,
     MARKET_COLLECTOR_MAX_FIXTURES_ENV_VAR,
     CollectionCandidate,
     latest_observation_by_fixture,
+    merge_attempt_recency,
+    prune_attempt_recency,
+    resolve_closing_window_minutes,
     resolve_collection_only_max_fixtures,
     resolve_market_collection_interval_seconds,
     select_collection_fixtures,
@@ -244,6 +248,29 @@ CLIENT_MATCH_CARD_MARKET_ORDER = {
     market_family: index
     for index, (market_family, _label) in enumerate(CLIENT_MATCH_CARD_MARKETS)
 }
+
+
+CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF_ENV_VAR = "SPORTS_AI_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF"
+DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF = 60
+HARD_MAX_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF = 360
+
+
+def resolve_closing_odds_max_minutes_before_kickoff() -> int:
+    """Max distance (minutes) before kickoff for a closing quote.
+
+    Unset/invalid/non-positive fails safe to the 60-minute default; values are
+    clamped to 360 so a closing quote can never be a day-old capture.
+    """
+    raw = os.environ.get(CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF_ENV_VAR, "").strip()
+    if not raw:
+        return DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF
+    if value <= 0:
+        return DEFAULT_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF
+    return min(value, HARD_MAX_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF)
 
 
 def _fixture_sort_key(row: dict[str, Any]) -> tuple[str, str]:
@@ -655,6 +682,9 @@ class DashboardConfig:
     market_collection_only: bool = False
     # 0 = unbounded (legacy). Collection-only mode clamps to a small safe bound.
     market_collector_max_fixtures_per_cycle: int = 0
+    # Optional closing-window priority tier for collection-only selection.
+    # 0 = disabled (default). Reorders the same bounded selection only.
+    market_collection_closing_window_minutes: int = 0
     # Dedicated recurring market-collection scheduler. Independent of the global
     # automated fixture/prediction scheduler (enable_scheduler).
     enable_market_collection_scheduler: bool = False
@@ -724,6 +754,9 @@ class DashboardConfig:
             enable_odds_sync=_env_bool(DEFAULT_ENABLE_ODDS_SYNC_ENV_VAR, False),
             market_collection_only=_env_bool(MARKET_COLLECTION_ONLY_ENV_VAR, False),
             market_collector_max_fixtures_per_cycle=_env_int(MARKET_COLLECTOR_MAX_FIXTURES_ENV_VAR, 0),
+            market_collection_closing_window_minutes=resolve_closing_window_minutes(
+                _env_int(MARKET_COLLECTION_CLOSING_WINDOW_ENV_VAR, 0)
+            ),
             enable_market_collection_scheduler=_env_bool(MARKET_COLLECTION_SCHEDULER_ENV_VAR, False),
             market_collection_interval_seconds=resolve_market_collection_interval_seconds(
                 _env_int(MARKET_COLLECTION_INTERVAL_ENV_VAR, 0)
@@ -3779,16 +3812,36 @@ class DashboardServices:
         line: float | None,
         kickoff_utc: str,
     ) -> dict[str, Any] | None:
+        """Latest eligible pre-match closing quote, or ``None`` (CLV stays null).
+
+        Eligible: same market/selection/line, pre-match, ``captured_at <= kickoff``
+        AND within ``SPORTS_AI_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF`` (default
+        60) of kickoff, and value-eligible evidence (legacy v1 / unknown-version
+        API-Football AH is never closing evidence). There is no fallback to an
+        older capture. Only used for NEW closing selections; already stored
+        closing_odds / clv_pct values are never rewritten by the caller.
+        """
         kickoff = parse_iso_datetime(kickoff_utc)
-        candidates = [
-            row
-            for row in snapshot_rows
-            if str(row["market"]) == market
-            and str(row["selection"]) == selection
-            and ((line is None and row.get("line") is None) or row.get("line") == line)
-            and bool(row.get("is_pre_match"))
-            and parse_iso_datetime(str(row["captured_at"])) <= kickoff
-        ]
+        max_minutes = resolve_closing_odds_max_minutes_before_kickoff()
+        earliest = kickoff - timedelta(minutes=max_minutes)
+        candidates = []
+        for row in snapshot_rows:
+            if not (
+                str(row["market"]) == market
+                and str(row["selection"]) == selection
+                and ((line is None and row.get("line") is None) or row.get("line") == line)
+                and bool(row.get("is_pre_match"))
+            ):
+                continue
+            try:
+                captured = parse_iso_datetime(str(row["captured_at"]))
+            except (TypeError, ValueError):
+                continue
+            if captured > kickoff or captured < earliest:
+                continue
+            if not snapshot_is_value_eligible(dict(row)):
+                continue
+            candidates.append(row)
         if not candidates:
             return None
         return sorted(candidates, key=lambda row: (row["captured_at"], int(row["snapshot_id"])))[-1]
@@ -4940,8 +4993,11 @@ class DashboardServices:
             selected = self._select_collection_only_fixtures(future_rows, conn)
             selected_count = len(selected)
             selected_fixture_ids = [str(row.get("fixture_id") or "") for row in selected]
+            attempts = dict(self._market_runtime_state.get("market_collection_attempts") or {})
             for row in selected:
                 fixture_id = str(row.get("fixture_id") or "")
+                attempts[fixture_id] = utc_now_iso()
+                self._market_runtime_state["market_collection_attempts"] = attempts
                 try:
                     snapshots = list(
                         self.market_provider.get_market_snapshot(fixture_id, fixture_context=row)
@@ -5151,7 +5207,17 @@ class DashboardServices:
         max_fixtures = resolve_collection_only_max_fixtures(self.config.market_collector_max_fixtures_per_cycle)
         live_issued_fixture_ids = self._live_issued_collection_fixture_ids()
         candidate_ids = [str(row.get("fixture_id") or "") for row in future_rows]
-        observation = self._latest_collection_observation(conn, candidate_ids)
+        # Attempts that wrote no snapshot rows still count as recency so an
+        # unavailable/unresolved fixture cannot hold a bounded slot forever.
+        attempts = prune_attempt_recency(
+            self._market_runtime_state.get("market_collection_attempts"),
+            keep_fixture_ids=candidate_ids,
+        )
+        self._market_runtime_state["market_collection_attempts"] = attempts
+        observation = merge_attempt_recency(
+            self._latest_collection_observation(conn, candidate_ids),
+            attempts,
+        )
         candidates = [
             CollectionCandidate(
                 fixture_id=str(row.get("fixture_id") or ""),
@@ -5162,7 +5228,14 @@ class DashboardServices:
             )
             for row in future_rows
         ]
-        selected = select_collection_fixtures(candidates, max_fixtures=max_fixtures)
+        selected = select_collection_fixtures(
+            candidates,
+            max_fixtures=max_fixtures,
+            now_utc=datetime.now(timezone.utc),
+            closing_window_minutes=resolve_closing_window_minutes(
+                getattr(self.config, "market_collection_closing_window_minutes", 0)
+            ),
+        )
         by_fixture_id = {str(row.get("fixture_id") or ""): row for row in future_rows}
         return [by_fixture_id[candidate.fixture_id] for candidate in selected if candidate.fixture_id in by_fixture_id]
 
