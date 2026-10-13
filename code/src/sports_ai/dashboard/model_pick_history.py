@@ -54,6 +54,10 @@ STATE_RESULT_PENDING = "RESULT_PENDING"
 
 LABEL_WEIGHTED_SUCCESS = "Weighted Success"
 WEIGHTED_SUCCESS_NOTE = "Full win = 1.0, half win = 0.5; pushes excluded."
+STAKE_WEIGHTED_NOTE = (
+    "Stake-weighted win share = (full wins + half of half wins) / (that + full losses + half of half losses); "
+    "pushes excluded. Same basis as the model's win probability (1 / fair price)."
+)
 
 
 def _parse(value: Any) -> datetime | None:
@@ -86,6 +90,23 @@ def _weighted(fw: int, hw: int, hl: int, fl: int) -> float | None:
     return round((fw + 0.5 * hw) / decisive, 4) if decisive else None
 
 
+def _stake_weighted(fw: int, hw: int, hl: int, fl: int) -> float | None:
+    won = fw + 0.5 * hw
+    lost = fl + 0.5 * hl
+    return round(won / (won + lost), 4) if (won + lost) else None
+
+
+def win_probability_ex_push(model_fair_price: Any) -> float | None:
+    """Push-excluded win probability implied by the model fair price (q = 1 / fair)."""
+    try:
+        fair = float(model_fair_price)
+    except (TypeError, ValueError):
+        return None
+    if not fair > 1.0 or fair == float("inf"):
+        return None
+    return 1.0 / fair
+
+
 def _aggregate(rows: Sequence[Mapping[str, Any]], *, with_rate: bool = True) -> dict[str, Any]:
     counts = dict.fromkeys(_FINAL_STATES, 0)
     open_count = 0
@@ -105,6 +126,11 @@ def _aggregate(rows: Sequence[Mapping[str, Any]], *, with_rate: bool = True) -> 
         "half_losses": counts[STATE_HALF_LOSS],
         "full_losses": counts[STATE_FULL_LOSS],
         "weighted_success_rate": _weighted(
+            counts[STATE_FULL_WIN], counts[STATE_HALF_WIN], counts[STATE_HALF_LOSS], counts[STATE_FULL_LOSS]
+        )
+        if with_rate
+        else None,
+        "stake_weighted_win_share": _stake_weighted(
             counts[STATE_FULL_WIN], counts[STATE_HALF_WIN], counts[STATE_HALF_LOSS], counts[STATE_FULL_LOSS]
         )
         if with_rate
@@ -140,6 +166,7 @@ def _display_row(row: Mapping[str, Any], *, now: datetime, tz: ZoneInfo) -> dict
         "line": row.get("line"),
         "line_source": "model_reference_line",
         "model_probability": row.get("model_probability"),
+        "win_probability_ex_push": win_probability_ex_push(row.get("model_fair_price")),
         "model_fair_price": row.get("model_fair_price"),
         "result_state": state,
         "record_origin": row.get("record_origin"),
@@ -216,6 +243,7 @@ def build_model_pick_history_payload(
         },
         "weighted_success_label": LABEL_WEIGHTED_SUCCESS,
         "weighted_success_note": WEIGHTED_SUCCESS_NOTE,
+        "stake_weighted_note": STAKE_WEIGHTED_NOTE,
         "recent_days": [],
         "recent_settled": [],
         "result_pending": [],

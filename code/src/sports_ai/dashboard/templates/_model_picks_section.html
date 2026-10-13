@@ -47,17 +47,17 @@
   {% for key, label in [('asian_handicap', 'Asian Handicap'), ('corner_total', 'Corners')] %}
     {% set m = mp.by_market[key] %}
     <div class="mp-cards">
-      <article class="clean-stat clean-stat--primary"><span class="clean-stat__label">{{ label }}</span><strong class="clean-stat__value">{{ m.weighted_success_rate if m.weighted_success_rate is not none else 'N/A' }}</strong><span class="clean-stat__note">Weighted Success</span></article>
+      <article class="clean-stat clean-stat--primary"><span class="clean-stat__label">{{ label }}</span><strong class="clean-stat__value">{{ m.weighted_success_rate if m.weighted_success_rate is not none else 'N/A' }}</strong><span class="clean-stat__note">Weighted Success &middot; stake-weighted {{ m.stake_weighted_win_share if m.stake_weighted_win_share is not none else 'N/A' }}</span></article>
       <article class="clean-stat"><span class="clean-stat__label">{{ label }} Issued</span><strong class="clean-stat__value">{{ m.issued }}</strong><span class="clean-stat__note">{{ m.settled }} settled &middot; {{ m.open }} pending/upcoming</span></article>
       <article class="clean-stat"><span class="clean-stat__label">{{ label }} Results</span><strong class="clean-stat__value">{{ m.full_wins }}W {{ m.half_wins }}HW {{ m.pushes }}P {{ m.half_losses }}HL {{ m.full_losses }}L</strong><span class="clean-stat__note">FW / HW / P / HL / FL</span></article>
     </div>
   {% endfor %}
-  <p class="mp-ref">{{ mp.weighted_success_note }}</p>
+  <p class="mp-ref">{{ mp.weighted_success_note }} {{ mp.stake_weighted_note }}</p>
 
   <h3>Recent Model Results</h3>
   {% if mp.recent_settled %}
   <div class="mp-scroll"><table class="mp-rows">
-    <thead><tr><th>Kickoff</th><th>Competition</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Model prob</th><th>Fair price</th><th>Issued</th><th>Result</th></tr></thead>
+    <thead><tr><th>Kickoff</th><th>Competition</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Win prob (excl. push)</th><th>Fair price</th><th>Issued</th><th>Result</th></tr></thead>
     <tbody>
     {% for r in mp.recent_settled[:20] %}
       <tr>
@@ -66,7 +66,7 @@
         <td>{{ r.home_team_name }} vs {{ r.away_team_name }}</td>
         <td>{{ 'Asian Handicap' if r.market == 'asian_handicap' else 'Corners' }}</td>
         <td>{{ r.selection }} {{ r.line }}</td>
-        <td>{% if r.model_probability is not none %}{{ "%.1f"|format(r.model_probability|float * 100) }}%{% endif %}</td>
+        <td>{% if r.win_probability_ex_push is not none %}{{ "%.1f"|format(r.win_probability_ex_push|float * 100) }}%{% endif %}</td>
         <td>{% if r.model_fair_price is not none %}{{ "%.2f"|format(r.model_fair_price|float) }}{% endif %}</td>
         <td>{{ mp_timing(r) }}</td>
         <td>{{ mp_badge(r.result_state) }}</td>
@@ -80,12 +80,12 @@
   <p class="mp-ref">Awaiting verified final sporting result. These are model predictions, never losses.</p>
   {% if mp.result_pending %}
   <div class="mp-scroll"><table class="mp-rows">
-    <thead><tr><th>Kickoff</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Model prob</th><th>Fair price</th><th>Issued</th><th>Status</th></tr></thead>
+    <thead><tr><th>Kickoff</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Win prob (excl. push)</th><th>Fair price</th><th>Issued</th><th>Status</th></tr></thead>
     <tbody>
     {% for r in mp.result_pending[:20] %}
       <tr><td>{{ r.kickoff_utc[:10] if r.kickoff_utc else '' }}</td><td>{{ r.home_team_name }} vs {{ r.away_team_name }}</td>
       <td>{{ 'Asian Handicap' if r.market == 'asian_handicap' else 'Corners' }}</td><td>{{ r.selection }} {{ r.line }}</td>
-      <td>{% if r.model_probability is not none %}{{ "%.1f"|format(r.model_probability|float * 100) }}%{% endif %}</td>
+      <td>{% if r.win_probability_ex_push is not none %}{{ "%.1f"|format(r.win_probability_ex_push|float * 100) }}%{% endif %}</td>
       <td>{% if r.model_fair_price is not none %}{{ "%.2f"|format(r.model_fair_price|float) }}{% endif %}</td>
       <td>{{ mp_timing(r) }}</td><td>{{ mp_badge('RESULT_PENDING') }}</td></tr>
     {% endfor %}
@@ -96,12 +96,12 @@
   <h3>Upcoming</h3>
   {% if mp.upcoming %}
   <div class="mp-scroll"><table class="mp-rows">
-    <thead><tr><th>Kickoff</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Model prob</th><th>Fair price</th><th>Issued</th><th>Status</th></tr></thead>
+    <thead><tr><th>Kickoff</th><th>Fixture</th><th>Market</th><th>Selection (model reference line)</th><th>Win prob (excl. push)</th><th>Fair price</th><th>Issued</th><th>Status</th></tr></thead>
     <tbody>
     {% for r in mp.upcoming[:20] %}
       <tr><td>{{ r.kickoff_utc[:10] if r.kickoff_utc else '' }}</td><td>{{ r.home_team_name }} vs {{ r.away_team_name }}</td>
       <td>{{ 'Asian Handicap' if r.market == 'asian_handicap' else 'Corners' }}</td><td>{{ r.selection }} {{ r.line }}</td>
-      <td>{% if r.model_probability is not none %}{{ "%.1f"|format(r.model_probability|float * 100) }}%{% endif %}</td>
+      <td>{% if r.win_probability_ex_push is not none %}{{ "%.1f"|format(r.win_probability_ex_push|float * 100) }}%{% endif %}</td>
       <td>{% if r.model_fair_price is not none %}{{ "%.2f"|format(r.model_fair_price|float) }}{% endif %}</td>
       <td>{{ mp_timing(r) }}</td><td>{{ mp_badge('UPCOMING') }}</td></tr>
     {% endfor %}
