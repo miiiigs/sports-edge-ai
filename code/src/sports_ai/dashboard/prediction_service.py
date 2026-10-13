@@ -51,6 +51,27 @@ class PredictionContext:
     snapshot: CurrentFootballModelSnapshot
 
 
+# How the live snapshot fits its parameters. The replay (#116) uses prior-fold fits
+# and out-of-sample rho; the live snapshot refits on the expanding window of every
+# completed research match, all of which predate any fixture it prices.
+MODEL_PARAMETER_FIT_PROTOCOL = "expanding_window_all_completed_research_matches_v1"
+
+
+def _model_parameters(snapshot: CurrentFootballModelSnapshot, competition_id: str, *, rho: float, xi: float) -> dict[str, Any]:
+    """Reproducibility record of the exact fitted parameters used for this prediction."""
+    return {
+        "fit_protocol": MODEL_PARAMETER_FIT_PROTOCOL,
+        "research_cutoff": snapshot.model_as_of,
+        "model_snapshot_id": snapshot.snapshot_id,
+        "conversion_coefficients": snapshot.conversion_coefficients[competition_id],
+        "rho": rho,
+        "rho_source": "in_sample_mle_expanding_window",
+        "xi": xi,
+        "xi_source": "day9_manifest",
+        "corner_model": dict(snapshot.corner_models.get(competition_id) or {}),
+    }
+
+
 def _top_scorelines(matrix: list[list[float]], *, limit: int = 5) -> list[dict[str, Any]]:
     scorelines = [
         {
@@ -551,6 +572,7 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
         "kickoff_utc": fixture.kickoff_utc,
         "lock_state": lock_state,
         "model_versions": pricing_input["model_versions"],
+        "model_parameters": _model_parameters(snapshot, fixture.competition_id, rho=rho, xi=xi),
         "team_resolution": {
             "home": home_resolution.to_dict(),
             "away": away_resolution.to_dict(),
