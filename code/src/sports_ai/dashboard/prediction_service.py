@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -55,6 +56,35 @@ class PredictionContext:
 # and out-of-sample rho; the live snapshot refits on the expanding window of every
 # completed research match, all of which predate any fixture it prices.
 MODEL_PARAMETER_FIT_PROTOCOL = "expanding_window_all_completed_research_matches_v1"
+
+# Minimum prior venue matches (home team at home, away team away, within the
+# competition) before a prediction is READY. 1 keeps the historical behaviour.
+# Evidence (docs/FOOTBALL_POINT_IN_TIME_PARITY.md section 3): exactly one venue
+# match is badly calibrated on AH (selection ECE 0.067); >= 2 is calibrated.
+MIN_VENUE_HISTORY_ENV_VAR = "SPORTS_AI_FOOTBALL_MIN_VENUE_HISTORY_MATCHES"
+DEFAULT_MIN_VENUE_HISTORY_MATCHES = 1
+MAX_MIN_VENUE_HISTORY_MATCHES = 10
+
+
+def resolve_min_venue_history_matches(value: Any = None) -> int:
+    raw = os.environ.get(MIN_VENUE_HISTORY_ENV_VAR) if value is None else value
+    try:
+        n = int(str(raw).strip()) if raw not in (None, "") else DEFAULT_MIN_VENUE_HISTORY_MATCHES
+    except (TypeError, ValueError):
+        return DEFAULT_MIN_VENUE_HISTORY_MATCHES
+    return min(max(n, DEFAULT_MIN_VENUE_HISTORY_MATCHES), MAX_MIN_VENUE_HISTORY_MATCHES)
+
+
+def model_state_predates_kickoff(model_as_of: str | None, kickoff_utc: str) -> bool:
+    """True only when every research match in the model state is from before the kickoff date.
+
+    ``model_as_of`` is the end of the latest research match day. A state from the
+    kickoff day itself (or later) could contain the fixture or later information,
+    so it fails closed even when the same-day match kicked off earlier.
+    """
+    if not model_as_of:
+        return False
+    return str(model_as_of)[:10] < str(kickoff_utc)[:10]
 
 
 def _model_parameters(snapshot: CurrentFootballModelSnapshot, competition_id: str, *, rho: float, xi: float) -> dict[str, Any]:
@@ -302,6 +332,17 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
     snapshot = context.snapshot
     generated_at = utc_now_iso()
 
+    if not model_state_predates_kickoff(snapshot.model_as_of, fixture.kickoff_utc):
+        return attach_edge_desk_shadow_bundle(
+            _blocked_prediction(
+                fixture=fixture,
+                generated_at=generated_at,
+                blocker_reason="MODEL_STATE_NOT_BEFORE_KICKOFF",
+            ),
+            fixture=fixture,
+            snapshot=snapshot,
+        )
+
     if fixture.competition_id not in snapshot.supported_competitions:
         return attach_edge_desk_shadow_bundle(
             _blocked_prediction(
@@ -357,12 +398,27 @@ def build_prediction_for_fixture(context: PredictionContext) -> dict[str, Any]:
         canonical_team_id=str(away_resolution.canonical_team_id),
         venue="away",
     )
-    if not home_history["available"] or not away_history["available"]:
+    min_venue_matches = resolve_min_venue_history_matches()
+
+    def _insufficient(history: dict[str, Any]) -> bool:
+        counts = history.get("matches_observed_by_statistic") or {}
+        return history["available"] and min(counts.values(), default=0) < min_venue_matches
+
+    if (
+        not home_history["available"]
+        or not away_history["available"]
+        or _insufficient(home_history)
+        or _insufficient(away_history)
+    ):
         blockers = []
         if not home_history["available"]:
             blockers.append("HOME_MODEL_HISTORY_MISSING")
+        elif _insufficient(home_history):
+            blockers.append("HOME_MODEL_HISTORY_INSUFFICIENT")
         if not away_history["available"]:
             blockers.append("AWAY_MODEL_HISTORY_MISSING")
+        elif _insufficient(away_history):
+            blockers.append("AWAY_MODEL_HISTORY_INSUFFICIENT")
         return attach_edge_desk_shadow_bundle(
             {
                 **_blocked_prediction(
