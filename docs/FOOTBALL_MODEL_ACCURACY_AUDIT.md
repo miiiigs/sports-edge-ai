@@ -202,3 +202,47 @@ Holdout ECE falls from 0.026 to **0.011** and log loss from 0.6805 to 0.6786.
 - **The 1X2 benchmark is the only market-relative test,** and the model loses to the market there.
 - **The replay uses walk-forward fits, not the live in-sample fits** (gap 3).
 - **Production depends on M1** (always-on, forward issuance, fresh research) for any forward data to accumulate.
+
+## 9. High-confidence AH lane vs market (Phase C, 2026-10-13)
+
+Command:
+
+```
+python -m sports_ai.experiments.football_high_confidence_benchmark --day10-prices <jsonl> --research-db <sqlite> --output <json>
+```
+
+Evidence: `research/product_outputs/football/model_pick_confidence/football_high_confidence_benchmark_2026-10-13.json`.
+
+**Market baseline.** Independent Poisson means are solved per fixture to the de-vigged Pinnacle closing 1X2. Every AH catalog line is then priced through the paper settlement engine. This is an approximation of a real AH market, because no historical AH prices exist. It is itself well calibrated: holdout ECE 0.0077.
+
+**Holdout 2024/25–2025/26** (4,832 fixtures; Pinnacle available for 3,417). One pick per fixture, threshold 0.70 pre-registered:
+
+| Lane | Picks | Coverage | Win share | 95% CI | Mean q (own) | Mean market q | Mean fair |
+|---|---|---|---|---|---|---|---|
+| **MODEL_HC** (q ≥ 0.70, ≥ 2 venue matches) | 4,738 | 98% | **74.8%** | 73.5–76.1 | 72.7% | 73.7% | 1.38 |
+| MARKET_HC (market q ≥ 0.70) | 3,417 | 71% | 73.3% | 71.7–74.9 | 73.2% | 73.2% | 1.37 |
+| FAVOURITE_DNB (market favourite, AH 0.0) | 3,417 | 71% | 67.6% | 65.8–69.4 | – | 66.4% | 1.55 |
+| FAVOURITE_WIN (market favourite, AH −0.5) | 3,417 | 71% | 50.1% | 48.4–51.7 | – | 49.3% | 2.12 |
+| BALANCED (production Model Pick) | 4,832 | 100% | 52.5% | 51.0–54.0 | 52.1% | 52.4% | 1.92 |
+
+The 2022/23–2023/24 selection seasons agree: MODEL_HC 71.8%, MARKET_HC 72.6%, FAVOURITE_DNB 67.5%.
+
+**Paired test on identical bets.** On MODEL_HC's own (fixture, line, side), n = 3,323 with market prices:
+- model log loss 0.5625 vs market 0.5408;
+- difference **+0.0217, 95% CI [+0.0146, +0.0288]**, cluster bootstrap by match date.
+
+Selection seasons: +0.0318 [+0.0263, +0.0375]. **The market prices the model's high-confidence bets significantly better than the model does.** It also rates them more likely (73.7% vs 72.7%), so real offered prices will be shorter than model fair.
+
+**By league (holdout MODEL_HC):** ENG1 75.4%, ENG2 74.3%, ENG3 73.7%, ENG4 74.9%, ESP1 76.4%. No league departs from the pooled result.
+
+**Exploratory thresholds** (4 extra; not used for any decision): MODEL_HC holdout
+- 0.60 → 63.8%
+- 0.65 → 68.7%
+- 0.75 → 79.5%
+- 0.80 → 84.5%
+
+At every threshold the win share is about the same as the market lane's. It tracks the threshold, not skill.
+
+**Earlier frozen model versions.** No earlier version has AH outputs. Day 10 v1 is the only priced replay. Route A was rejected, and legacy Poisson v1–v4 is 1X2-only. This comparison is therefore not possible without re-running Days 8–10 on an alternative configuration.
+
+**Conclusion.** A 70% high-confidence AH lane is reproducible (≈ 72–75%), but a model-free market lane matches it, and the market is the better-calibrated probability on the same bets. Treat the lane as accuracy tracking only. A value claim needs real accepted prices showing offered odds above model fair, and the evidence predicts the opposite.
