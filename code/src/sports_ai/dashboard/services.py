@@ -7774,6 +7774,10 @@ class DashboardServices:
                     "market_evidence_quarantined_by_market",
                     "market_evidence_quarantine_applied",
                     "market_evidence_quarantine_reason",
+                    "disputed_result_quarantined_positions",
+                    "disputed_result_quarantined_by_market",
+                    "disputed_result_fixture_ids",
+                    "disputed_result_quarantine_reason",
                 )
             },
             "portfolio_window_rows": self._performance_windows(portfolio_context["selected_rows"]),
