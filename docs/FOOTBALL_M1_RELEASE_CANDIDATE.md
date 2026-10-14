@@ -14,6 +14,9 @@ Companion documents:
 - `docs/FOOTBALL_MONITORING_API.md`: the read-only monitoring contract for the
   unified dashboard.
 - `docs/FOOTBALL_HIGH_CONFIDENCE_SHADOW.md`: shadow lane protocol and gates.
+- `docs/FOOTBALL_M1_ACTIVATION_READINESS.md`: min-history coverage, model
+  freshness, scheduler/sleep requirements and the result backlog inventory
+  (2026-10-14).
 
 ## 1. Why a new candidate instead of #115
 
@@ -46,7 +49,8 @@ Commits added on top of the merges:
 |---|---|---|
 | weekend report | Counts only picks with `created_at < kickoff`, not just `record_origin = LIVE_ISSUED`. Early CLI runs labelled kicked-off fixtures LIVE_ISSUED. | n/a (read-only CLI) |
 | shadow hook | The worker runs the #121 lane on the issuance cadence. | OFF (`SPORTS_AI_ENABLE_HIGH_CONFIDENCE_SHADOW`) |
-| monitoring | `GET/HEAD /api/monitoring/football`, also on the read-only token allowlist. | Endpoint live once deployed; token path closed until `SPORTS_EDGE_CLIENT_API_TOKEN` is set |
+| monitoring | `GET/HEAD /api/monitoring/football`, also on the read-only token allowlist. Owner session or token only; guests get 403. 60 s cache. | Endpoint live once deployed; token path closed until `SPORTS_EDGE_CLIENT_API_TOKEN` is set |
+| final QA (2026-10-14) | Issuance re-checks `model_pick_id` and the canonical holder under `BEGIN IMMEDIATE`. Same-process overlapping cycles are skipped. CLI `--apply-live-issued` skips matches already held under another provider id. The closing-quote window uses `last_observed_at`. Adds the unified-card adapter contract plus golden files. | n/a (safety fixes) |
 
 ## 2. Feature flags in this candidate
 
@@ -63,13 +67,21 @@ These stay unset: Value Bet issuance, the lifecycle scheduler, publication, real
 
 ## 3. Behaviour that changes on deploy with every flag OFF
 
-These ship with the code. Each one has been disclosed before and is listed here so approval is explicit:
+These ship with the code. None of them is zero-behaviour, and each needs explicit approval. The independent review on 2026-10-14 verified the list:
 
-1. **#120 `MODEL_STATE_NOT_BEFORE_KICKOFF`** (always on, fail-closed). A prediction is BLOCKED when the model state's latest research day is not strictly before the kickoff date. The 2026-10-12 production snapshot had 0 such predictions, so no READY prediction is expected to change.
-2. **#109:** the paper headline drops to 820 counted positions (791 legacy AH quarantined).
-3. **#110 / #118:** the Model Pick headline is forward-only. Retrospective rows are disclosed, and the display shows push-excluded q and stake-weighted win share.
-4. **#110:** CLI `--apply-live-issued` refuses fixtures at or after kickoff.
-5. **New:** `/api/monitoring/football` is served. It is session-protected like every other `/api/` route, and token-readable only once the token is configured.
+1. **#120 `MODEL_STATE_NOT_BEFORE_KICKOFF`** (always on, fail-closed). A prediction is BLOCKED when the model state's latest research day is not strictly before the kickoff date. The 2026-10-12 and 2026-10-13 snapshots had 0 such predictions.
+2. **#109:** the paper headline drops to 820 counted positions, with 791 legacy AH positions quarantined. This applies on every reporting surface, including fixture detail, and adds new `market_evidence_quarantine*` keys.
+3. **#110 / #118:** the Model Pick headline, `by_market` and daily history are forward-only. The UI label becomes "Forward Model Picks". The probability column shows push-excluded q (1/fair) in place of `model_probability`.
+4. **#110:** CLI `--apply-live-issued` refuses fixtures at or after kickoff, and fixtures whose latest prediction is not READY. **New:** it also skips matches already held under another provider id. A `--expected-manifest-hash` can go stale if a fixture kicks off between dry-run and apply.
+5. **#113 CLV closing quote** (always on, `SPORTS_AI_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF` = 60). For positions whose `closing_odds` is still null, the quote must have been observed within 60 min before kickoff and be value-eligible; there is no fallback to older quotes. Stored values are never rewritten. **New:** "observed" uses `last_observed_at`. Without that, a price that stayed unchanged into the window (de-duplicated) left CLV null forever.
+6. **#113 collection-only mode:** attempts are recorded and change the rotation order. They are exposed in `/api/system/status`.
+7. **#111 result sync:** non-API-Football fixture ids are counted as `provider_mismatch` and no longer take a poll slot. Their provider already returned nothing for them, so no result changes.
+8. **API:**
+   - New `/api/monitoring/football` (owner session or token; guests get 403).
+   - HEAD is now served on `/api/candidates`, `/api/performance` and `/api/system/status`.
+   - `/api/system/status` and `/health` gain issuance, refresh, shadow, quota-alert and result-sync fields.
+   - A quota alert is logged on each quota-state transition.
+9. **Worker boot:** 3 new loops start, log "disabled" and exit. There are no new DB writes at boot.
 
 ## 4. Production datastore: backup and restore
 
@@ -96,6 +108,11 @@ Volume `sports-edge-ai-volume` is mounted at `/data`:
 
 ## 5. Activating minimum venue history = 2 (not done)
 
+**Coverage report done 2026-10-14:** `FOOTBALL_M1_ACTIVATION_READINESS.md` §1.
+- 2 is weakly supported: the history-1 AH slice runs about 10 pt below q in both periods.
+- 3 is rejected.
+- 0 READY fixtures are lost in the current window; about 1% per season is lost, all in August.
+
 - **Evidence for 2:** AH ECE was 0.067 with exactly one venue match, and 0.012 with two or more (`docs/FOOTBALL_POINT_IN_TIME_PARITY.md`).
 - **What to validate first:**
   - Coverage: with `SPORTS_AI_FOOTBALL_MIN_VENUE_HISTORY_MATCHES=2`, rebuild predictions for the next 7 days against a read-only snapshot. Report READY to BLOCKED transitions by competition. Early-season promoted teams are the expected losses.
@@ -104,23 +121,21 @@ Volume `sports-edge-ai-volume` is mounted at `/data`:
 
 ## 6. Rollout order
 
-This is #114 section 4, with this candidate's additions marked **new**.
+This is the reviewed release sequence. Each step must pass its check before the next starts. Strong Value Bets, Value Bet issuance, corner calibration (#117), publication and real-money betting stay OFF throughout.
 
-| Step | Action | Approval |
-|---|---|---|
-| 0 | Backup (section 4) | – |
-| 1 | Merge this candidate as **one** reviewed merge. The per-PR merges are inside it, so `git revert -m 1` of any single inner merge still works. Close #115. Mark #107–#114, #118 and #120 as included. | **merge approval** |
-| 2 | Verify flags-OFF deploy: logs `state=disabled` for issuance, refresh and **high-confidence shadow** (new). `/api/monitoring/football` returns 200 when signed in and 401 when anonymous. | – |
-| 3 | Generate `SPORTS_EDGE_CLIENT_API_TOKEN` and set it on Football and the Tennis host. Verify the 4 allowlisted paths with the token, 401 without it, and 401 on POST. | owner |
-| 4 | App sleeping OFF (≈ $6–8/month gross, #114 §2) | **cost approval** |
-| 5 | 24h baseline. `/api/monitoring/football` → `operational.alerts` reviewed. | – |
-| 5a | **new:** min venue history = 2, after the section 5 coverage report | owner |
-| 6 | Issuance ON, after the #114 model-freshness gate passes | owner |
-| 7 | Prediction refresh ON | owner (provider budget) |
-| 8 | Result-sync backlog settings | owner (provider budget) |
-| 9 | Closing window 90 min | owner (provider budget) |
-| 10 | **new:** high-confidence shadow ON. Writes only the shadow DB, publishes nothing. | owner |
-| 11 | Retire wakers after ≥ 7 days stable | owner |
+| # | Step | Exact action / check | Approval |
+|---|---|---|---|
+| 1 | Final PR #122 review | Independent review done 2026-10-14: no blocking defects. M1 (closing window), M2 (guest access, uncached scans) and L1 (overlap) were fixed in this branch. Remaining low items: L2 mixed `Z` / `+00:00` timestamp sort; L3 UTC vs UK date at 23:00–24:00 kickoffs. | – |
+| 2 | CI and security | GitHub `football-ci` and GitGuardian green on the **final** head. The token allowlist is unchanged at 4 paths. Monitoring tests prove there is no error text or path in the payload, and that guests get 403. | – |
+| 3 | `/data` backup and restore readiness | Section 4: Railway volume backup plus an independent `mode=ro` logical copy. `PRAGMA integrity_check` and row counts recorded locally **before** step 4. | owner runs the backup |
+| 4 | Code-only merge and deploy | One merge of #122. Close #115, mark #107–#114, #118 and #120 as included. Railway auto-deploys **with every flag unset**. | **merge/deploy approval** |
+| 5 | Production health and ledger checks | `/health`: issuance, refresh and shadow report `disabled`. `RAILWAY_GIT_COMMIT_SHA` equals the merge SHA. Row counts in all 4 DBs equal the step 3 counts (no writes from the deploy). Paper headline is 820. The Model Pick headline is forward-only. `/api/monitoring/football` returns 200 signed in, 401 anonymous, 403 guest. | – |
+| 6 | Model freshness | `/api/monitoring/football` `operational` plus `model_snapshot_state`: every supported competition is FRESH, and `model_as_of` is ≥ the last completed matchday. 0 `MODEL_STATE_NOT_BEFORE_KICKOFF` blocks for upcoming fixtures. READY rate ≥ 80% of fixtures in the next 72 h. | – |
+| 7 | Provider budget | Confirm the API-Football quota (7,500/day; 4,500 operational cap) against planned use: collection, refresh, about 120 one-off backlog requests, closing window. Set `SPORTS_AI_RESULT_SYNC_BACKLOG_LOOKBACK_DAYS` and `…_STATUS_BATCH_SIZE` only with this approval. | **budget approval** |
+| 8 | Always-awake cost | Railway app sleeping OFF (≈ $6–8/month gross). The alternative is in readiness §3. Check: no `Stopping Container` for 24 h, and each scheduler logs `started` exactly once. | **cost approval** |
+| 9 | Controlled scheduler activation | In order, with 24 h between each: (a) optional `SPORTS_AI_FOOTBALL_MIN_VENUE_HISTORY_MATCHES=2` (readiness §1); (b) `SPORTS_AI_ENABLE_MODEL_PICK_ISSUANCE_SCHEDULER=1`; (c) `SPORTS_AI_ENABLE_PREDICTION_REFRESH_SCHEDULER=1`; (d) backlog settings; (e) `SPORTS_AI_MARKET_COLLECTION_CLOSING_WINDOW_MINUTES=90`. | owner, per flag |
+| 10 | Forward-issued prediction acceptance | Over the first full matchweek, every new pick has `created_at < kickoff_utc`. `excluded_from_headline.live_issued_not_forward` does not grow. `canonical_duplicates` and `conflicts` are 0. `READY_FIXTURES_WITHOUT_PICK` is not raised after a cycle. Volume is about 80–100 picks per week. | owner sign-off |
+| 11 | Optional high-confidence shadow | `SPORTS_AI_ENABLE_HIGH_CONFIDENCE_SHADOW=1` only after step 10 is accepted. It writes only the shadow DB and publishes nothing. Retire the wakers ≥ 7 days after step 8. | owner |
 
 ## 7. Rollback
 
@@ -137,7 +152,8 @@ This is #114 section 4, with this candidate's additions marked **new**.
 
 - [x] Clean merge of every M1 PR onto `6c67200`; no conflict hunks
 - [x] Focused suites: issuance, lifecycle, backlog, token (incl. production composition), quarantine, PIT guard, shadow + hook, monitoring, weekend report
-- [ ] Full CI-equivalent suite on the candidate. Results are in the PR description.
-- [ ] GitHub `football-ci` green on the PR
-- [ ] `/security-review` of the token allowlist change (new path `/api/monitoring/football`)
-- [ ] Owner approval for section 3 items 1–5
+- [x] Full CI-equivalent suite on the candidate. Results are in the PR description.
+- [x] GitHub `football-ci` green on the PR (re-check on the final head)
+- [x] Independent review of the token allowlist and monitoring route (2026-10-14). Guests get 403; there is no error text or path leakage.
+- [x] Min-history coverage report, model-freshness and backlog inventory (`FOOTBALL_M1_ACTIVATION_READINESS.md`)
+- [ ] Owner approval for section 3 items 1–9
