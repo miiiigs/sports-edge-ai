@@ -17,6 +17,8 @@ Companion documents:
 - `docs/FOOTBALL_M1_ACTIVATION_READINESS.md`: min-history coverage, model
   freshness, scheduler/sleep requirements and the result backlog inventory
   (2026-10-14).
+- `docs/FOOTBALL_M1_BACKUP_RUNBOOK.md`: `/data` backup, verification, storage
+  and restore (release step 3).
 
 ## 1. Why a new candidate instead of #115
 
@@ -50,6 +52,7 @@ Commits added on top of the merges:
 | weekend report | Counts only picks with `created_at < kickoff`, not just `record_origin = LIVE_ISSUED`. Early CLI runs labelled kicked-off fixtures LIVE_ISSUED. | n/a (read-only CLI) |
 | shadow hook | The worker runs the #121 lane on the issuance cadence. | OFF (`SPORTS_AI_ENABLE_HIGH_CONFIDENCE_SHADOW`) |
 | monitoring | `GET/HEAD /api/monitoring/football`, also on the read-only token allowlist. Owner session or token only; guests get 403. 60 s cache. | Endpoint live once deployed; token path closed until `SPORTS_EDGE_CLIENT_API_TOKEN` is set |
+| corrective pass (2026-10-14) | The monitoring route is genuinely read-only. `get_monitoring_runtime_status()` plus `ProviderRequestBudget.read_only_view()` never persist the quota-day/operational reset, never reopen a circuit, and open every DB `mode=ro`. The monitoring document now exposes circuit state and raises `PROVIDER_CIRCUIT_OPEN`, `PROVIDER_STATE_UNKNOWN` and `SOURCE_UNAVAILABLE`, so unknown state can never be GREEN. Mixed `Z` / `+00:00` `generated_at` ordering is fixed. The PIT guard compares the kickoff's UK date. Adds the `football_sqlite_backup` tool and runbook. | n/a (safety fixes) |
 | final QA (2026-10-14) | Issuance re-checks `model_pick_id` and the canonical holder under `BEGIN IMMEDIATE`. Same-process overlapping cycles are skipped. CLI `--apply-live-issued` skips matches already held under another provider id. The closing-quote window uses `last_observed_at`. Adds the unified-card adapter contract plus golden files. | n/a (safety fixes) |
 
 ## 2. Feature flags in this candidate
@@ -69,7 +72,7 @@ These stay unset: Value Bet issuance, the lifecycle scheduler, publication, real
 
 These ship with the code. None of them is zero-behaviour, and each needs explicit approval. The independent review on 2026-10-14 verified the list:
 
-1. **#120 `MODEL_STATE_NOT_BEFORE_KICKOFF`** (always on, fail-closed). A prediction is BLOCKED when the model state's latest research day is not strictly before the kickoff date. The 2026-10-12 and 2026-10-13 snapshots had 0 such predictions.
+1. **#120 `MODEL_STATE_NOT_BEFORE_KICKOFF`** (always on, fail-closed). A prediction is BLOCKED when the model state's latest research day is not strictly before the kickoff's **UK** date (research dates are UK dates; unparseable kickoffs fail closed). The 2026-10-12 and 2026-10-13 snapshots had 0 such predictions.
 2. **#109:** the paper headline drops to 820 counted positions, with 791 legacy AH positions quarantined. This applies on every reporting surface, including fixture detail, and adds new `market_evidence_quarantine*` keys.
 3. **#110 / #118:** the Model Pick headline, `by_market` and daily history are forward-only. The UI label becomes "Forward Model Picks". The probability column shows push-excluded q (1/fair) in place of `model_probability`.
 4. **#110:** CLI `--apply-live-issued` refuses fixtures at or after kickoff, and fixtures whose latest prediction is not READY. **New:** it also skips matches already held under another provider id. A `--expected-manifest-hash` can go stale if a fixture kicks off between dry-run and apply.
@@ -95,10 +98,10 @@ Volume `sports-edge-ai-volume` is mounted at `/data`:
 | `sports_edge_auth.sqlite` | users and sessions | web |
 | `football_high_confidence_shadow.sqlite` | shadow lane (created only when enabled) | shadow hook |
 
-**Backup (before step 1, and before each flag step).**
-1. Take a Railway volume backup of `sports-edge-ai-volume` (Railway UI → service → Volume → Backups). Record its timestamp.
-2. Take an independent logical copy that does not write inside the container. Run a `python -c` one-liner over `railway ssh`. For each DB it opens `file:/data/<db>?mode=ro`, calls `sqlite3.Connection.backup()` into an in-memory DB, then `iterdump()`s it gzip+base64 to stdout. Decode locally. This is the same pattern as the 2026-10-12 read-only snapshot. Store the files outside the repo.
-3. Verify the copy locally. Run `PRAGMA integrity_check` on each file, then record row counts for `football_model_pick_entries`, `paper_trade_entries`, `paper_trade_updates`, `market_snapshots`, `dashboard_predictions` and `dashboard_fixtures`.
+**Backup (before step 4, and before each flag step).** The exact procedure is `docs/FOOTBALL_M1_BACKUP_RUNBOOK.md`:
+1. Railway volume backup, taken while the service is SLEEPING. **Blocker:** manual backups are capped at 50% of volume size, and `/data` is at 1003 / 2000 MB. Grow the volume or enable a scheduled backup first; both need owner approval.
+2. Independent logical copy with `sports_ai.diagnostics.football_sqlite_backup`: online backup API from `mode=ro` sources, integrity check, row counts and sha256 manifest. Stored off-repo, encrypted, owner-only.
+3. `verify` passes, and the counts are recorded in runbook §5.
 
 **Restore** (corruption only, never to "undo" valid forward records):
 1. Turn issuance, refresh and shadow OFF, then redeploy so no loop writes.
@@ -125,9 +128,9 @@ This is the reviewed release sequence. Each step must pass its check before the 
 
 | # | Step | Exact action / check | Approval |
 |---|---|---|---|
-| 1 | Final PR #122 review | Independent review done 2026-10-14: no blocking defects. M1 (closing window), M2 (guest access, uncached scans) and L1 (overlap) were fixed in this branch. Remaining low items: L2 mixed `Z` / `+00:00` timestamp sort; L3 UTC vs UK date at 23:00–24:00 kickoffs. | – |
+| 1 | Final PR #122 review | Independent review done 2026-10-14: no blocking defects. M1 (closing window), M2 (guest access, uncached scans) and L1 (overlap) were fixed in this branch. L2 (mixed `Z` / `+00:00` sort) and L3 (UK date at 23:00–24:00 UTC kickoffs) were fixed in the corrective pass. The monitoring read-side quota reset found by the second review is fixed and pinned by tests. | – |
 | 2 | CI and security | GitHub `football-ci` and GitGuardian green on the **final** head. The token allowlist is unchanged at 4 paths. Monitoring tests prove there is no error text or path in the payload, and that guests get 403. | – |
-| 3 | `/data` backup and restore readiness | Section 4: Railway volume backup plus an independent `mode=ro` logical copy. `PRAGMA integrity_check` and row counts recorded locally **before** step 4. | owner runs the backup |
+| 3 | `/data` backup and restore readiness | `FOOTBALL_M1_BACKUP_RUNBOOK.md`: Railway volume backup (resolve the 50% manual-backup cap first) plus the logical copy. `verify` ok, and counts recorded **before** step 4. A written procedure is not a backup. | **owner runs the backup** (volume growth/schedule needs approval) |
 | 4 | Code-only merge and deploy | One merge of #122. Close #115, mark #107–#114, #118 and #120 as included. Railway auto-deploys **with every flag unset**. | **merge/deploy approval** |
 | 5 | Production health and ledger checks | `/health`: issuance, refresh and shadow report `disabled`. `RAILWAY_GIT_COMMIT_SHA` equals the merge SHA. Row counts in all 4 DBs equal the step 3 counts (no writes from the deploy). Paper headline is 820. The Model Pick headline is forward-only. `/api/monitoring/football` returns 200 signed in, 401 anonymous, 403 guest. | – |
 | 6 | Model freshness | `/api/monitoring/football` `operational` plus `model_snapshot_state`: every supported competition is FRESH, and `model_as_of` is ≥ the last completed matchday. 0 `MODEL_STATE_NOT_BEFORE_KICKOFF` blocks for upcoming fixtures. READY rate ≥ 80% of fixtures in the next 72 h. | – |
@@ -156,4 +159,8 @@ This is the reviewed release sequence. Each step must pass its check before the 
 - [x] GitHub `football-ci` green on the PR (re-check on the final head)
 - [x] Independent review of the token allowlist and monitoring route (2026-10-14). Guests get 403; there is no error text or path leakage.
 - [x] Min-history coverage report, model-freshness and backlog inventory (`FOOTBALL_M1_ACTIVATION_READINESS.md`)
+- [x] Monitoring route performs no writes (quota reset/circuit), pinned under boundary, exhausted, open-circuit, absent-metadata, repeated and concurrent reads (2026-10-14 corrective pass)
+- [x] L2/L3 timestamp and UK-date fixes with GMT/BST, midnight and year-end tests
+- [x] Backup tool and runbook tested locally (WAL content, concurrent writer, tamper detection)
+- [ ] Production backup taken and verified (runbook §5)
 - [ ] Owner approval for section 3 items 1–9
