@@ -1,0 +1,382 @@
+{
+  "deployed_commit": "0000000000000000000000000000000000000000",
+  "generated_at": "2026-10-13T12:00:00+00:00",
+  "high_confidence_shadow": {
+    "available": false,
+    "enabled": false,
+    "policy_id": "football_high_confidence_ah_shadow_v1"
+  },
+  "model_performance": {
+    "excluded_from_headline": {
+      "current_system_replay": 1,
+      "live_issued_not_forward": 1
+    },
+    "forward": {
+      "calibration_gap": 0.0889,
+      "ci95": [
+        0.2567,
+        0.9476
+      ],
+      "decisive_stake_units": 3.5,
+      "insufficient_sample": true,
+      "issued": 6,
+      "mean_q": 0.6254,
+      "min_sample": 100,
+      "open": 1,
+      "settled": 5,
+      "states": {
+        "FULL_LOSS": 1,
+        "FULL_WIN": 2,
+        "HALF_LOSS": 0,
+        "HALF_WIN": 1,
+        "PUSH": 1
+      },
+      "win_share_stake_weighted": 0.7143
+    },
+    "forward_by_competition": {
+      "ENG1": {
+        "calibration_gap": -0.0533,
+        "ci95": [
+          0.1533,
+          0.9255
+        ],
+        "decisive_stake_units": 2.5,
+        "insufficient_sample": true,
+        "issued": 5,
+        "mean_q": 0.6533,
+        "min_sample": 30,
+        "open": 1,
+        "settled": 4,
+        "states": {
+          "FULL_LOSS": 1,
+          "FULL_WIN": 1,
+          "HALF_LOSS": 0,
+          "HALF_WIN": 1,
+          "PUSH": 1
+        },
+        "win_share_stake_weighted": 0.6
+      },
+      "ESP1": {
+        "calibration_gap": 0.4444,
+        "ci95": [
+          0.2065,
+          1.0
+        ],
+        "decisive_stake_units": 1.0,
+        "insufficient_sample": true,
+        "issued": 1,
+        "mean_q": 0.5556,
+        "min_sample": 30,
+        "open": 0,
+        "settled": 1,
+        "states": {
+          "FULL_LOSS": 0,
+          "FULL_WIN": 1,
+          "HALF_LOSS": 0,
+          "HALF_WIN": 0,
+          "PUSH": 0
+        },
+        "win_share_stake_weighted": 1.0
+      }
+    },
+    "forward_by_confidence_band": {
+      "0.55-0.60": {
+        "calibration_gap": 0.4444,
+        "ci95": [
+          0.3942,
+          1.0
+        ],
+        "decisive_stake_units": 2.5,
+        "insufficient_sample": true,
+        "issued": 5,
+        "mean_q": 0.5556,
+        "min_sample": 30,
+        "open": 1,
+        "settled": 4,
+        "states": {
+          "FULL_LOSS": 0,
+          "FULL_WIN": 2,
+          "HALF_LOSS": 0,
+          "HALF_WIN": 1,
+          "PUSH": 1
+        },
+        "win_share_stake_weighted": 1.0
+      },
+      "q>=0.70": {
+        "calibration_gap": -0.8,
+        "ci95": [
+          0.0,
+          0.7935
+        ],
+        "decisive_stake_units": 1.0,
+        "insufficient_sample": true,
+        "issued": 1,
+        "mean_q": 0.8,
+        "min_sample": 30,
+        "open": 0,
+        "settled": 1,
+        "states": {
+          "FULL_LOSS": 1,
+          "FULL_WIN": 0,
+          "HALF_LOSS": 0,
+          "HALF_WIN": 0,
+          "PUSH": 0
+        },
+        "win_share_stake_weighted": 0.0
+      }
+    },
+    "forward_by_market": {
+      "asian_handicap": {
+        "calibration_gap": -0.0533,
+        "ci95": [
+          0.1533,
+          0.9255
+        ],
+        "decisive_stake_units": 2.5,
+        "insufficient_sample": true,
+        "issued": 5,
+        "mean_q": 0.6533,
+        "min_sample": 30,
+        "open": 1,
+        "settled": 4,
+        "states": {
+          "FULL_LOSS": 1,
+          "FULL_WIN": 1,
+          "HALF_LOSS": 0,
+          "HALF_WIN": 1,
+          "PUSH": 1
+        },
+        "win_share_stake_weighted": 0.6
+      },
+      "corner_total": {
+        "calibration_gap": 0.4444,
+        "ci95": [
+          0.2065,
+          1.0
+        ],
+        "decisive_stake_units": 1.0,
+        "insufficient_sample": true,
+        "issued": 1,
+        "mean_q": 0.5556,
+        "min_sample": 30,
+        "open": 0,
+        "settled": 1,
+        "states": {
+          "FULL_LOSS": 0,
+          "FULL_WIN": 1,
+          "HALF_LOSS": 0,
+          "HALF_WIN": 0,
+          "PUSH": 0
+        },
+        "win_share_stake_weighted": 1.0
+      }
+    },
+    "forward_by_model_version": {
+      "m1": {
+        "calibration_gap": 0.0889,
+        "ci95": [
+          0.2567,
+          0.9476
+        ],
+        "decisive_stake_units": 3.5,
+        "insufficient_sample": true,
+        "issued": 6,
+        "mean_q": 0.6254,
+        "min_sample": 30,
+        "open": 1,
+        "settled": 5,
+        "states": {
+          "FULL_LOSS": 1,
+          "FULL_WIN": 2,
+          "HALF_LOSS": 0,
+          "HALF_WIN": 1,
+          "PUSH": 1
+        },
+        "win_share_stake_weighted": 0.7143
+      }
+    },
+    "headline_cohort": "LIVE_ISSUED_FORWARD",
+    "headline_definition": "record_origin LIVE_ISSUED and created_at strictly before kickoff",
+    "high_confidence_misses": [
+      {
+        "competition_id": "ENG1",
+        "fixture_id": "fx-l1",
+        "kickoff_utc": "2026-10-10T15:00:00+00:00",
+        "line": 0.0,
+        "market": "asian_handicap",
+        "model_pick_id": "l1",
+        "model_version": "m1",
+        "q": 0.8,
+        "selection": "HOME"
+      }
+    ],
+    "historical_replay": {
+      "calibration_gap": 0.4444,
+      "ci95": [
+        0.2065,
+        1.0
+      ],
+      "decisive_stake_units": 1.0,
+      "insufficient_sample": true,
+      "issued": 1,
+      "mean_q": 0.5556,
+      "min_sample": 30,
+      "open": 0,
+      "settled": 1,
+      "states": {
+        "FULL_LOSS": 0,
+        "FULL_WIN": 1,
+        "HALF_LOSS": 0,
+        "HALF_WIN": 0,
+        "PUSH": 0
+      },
+      "win_share_stake_weighted": 1.0
+    },
+    "market_benchmark": {
+      "forward_available": false,
+      "reason": "Forward closing prices are not yet linked to Model Picks; see docs/FOOTBALL_MODEL_ACCURACY_AUDIT.md for the holdout model-vs-market benchmark."
+    }
+  },
+  "operational": {
+    "alerts": [
+      {
+        "code": "SCHEDULER_STALE",
+        "hours_since_success": 60.0,
+        "scheduler": "model_pick_issuance"
+      },
+      {
+        "code": "READY_FIXTURES_WITHOUT_PICK",
+        "count": 1
+      },
+      {
+        "code": "SETTLEMENT_LAG",
+        "count": 1,
+        "oldest_kickoff_utc": "2026-10-12T15:00:00+00:00"
+      },
+      {
+        "code": "ALL_ODDS_STALE",
+        "threshold_minutes": 180
+      }
+    ],
+    "last_issuance_cycle": {
+      "canonical_duplicates": null,
+      "conflicts": null,
+      "written": null
+    },
+    "latest_forward_model_pick_issued_at": "2026-10-12T09:00:00+00:00",
+    "latest_prediction_generated_at": "2026-10-13T08:00:00+00:00",
+    "odds_freshness": [
+      {
+        "age_minutes": 360.0,
+        "latest_captured_at": "2026-10-13T06:00:00+00:00",
+        "market": "asian_handicap",
+        "provider": "api_football",
+        "snapshots_24h": 1,
+        "stale": true
+      }
+    ],
+    "prediction_coverage": {
+      "latest_not_ready_by_status": {
+        "BLOCKED": 1
+      },
+      "latest_ready": 1,
+      "ready_rate": 0.3333,
+      "ready_without_model_pick": 1,
+      "upcoming_fixtures": 3,
+      "window_hours": 72,
+      "with_prediction": 2
+    },
+    "providers": {
+      "fixture_provider_state": "CONNECTED",
+      "market_sync_state": null,
+      "provider_budget_quota_state": null
+    },
+    "schedulers": {
+      "high_confidence_shadow": {
+        "enabled": null,
+        "hours_since_success": null,
+        "last_error_present": false,
+        "stale": false
+      },
+      "market_collection": {
+        "enabled": null,
+        "hours_since_success": null,
+        "last_error_present": false,
+        "stale": false
+      },
+      "model_pick_issuance": {
+        "enabled": true,
+        "hours_since_success": 60.0,
+        "last_error_present": false,
+        "last_success_at": "2026-10-11T00:00:00+00:00",
+        "stale": true
+      },
+      "model_pick_settlement": {
+        "enabled": null,
+        "hours_since_success": null,
+        "last_error_present": false,
+        "stale": false
+      },
+      "prediction_refresh": {
+        "enabled": null,
+        "hours_since_success": null,
+        "last_error_present": false,
+        "stale": false
+      },
+      "result_sync": {
+        "enabled": true,
+        "hours_since_success": 0.17,
+        "last_error_present": false,
+        "last_success_at": "2026-10-13T11:50:00+00:00",
+        "stale": false
+      },
+      "value_evaluation": {
+        "enabled": null,
+        "hours_since_success": null,
+        "last_error_present": false,
+        "stale": false
+      }
+    },
+    "settlement_backlog": {
+      "lag_threshold_hours": 3,
+      "max_lag_hours": 21.0,
+      "oldest_kickoff_utc": "2026-10-12T15:00:00+00:00",
+      "open_past_kickoff": 1
+    }
+  },
+  "qualified_betting": {
+    "available": true,
+    "average_clv": null,
+    "by_bookmaker": {},
+    "clv_state": "UNAVAILABLE",
+    "definition": "Frozen value-pipeline Value Bets only (value_pipeline_version set). Model Picks and legacy paper positions are not qualified bets.",
+    "insufficient_sample": true,
+    "legacy_paper_positions_excluded": 0,
+    "max_drawdown": 0.0,
+    "max_suggested_stake_fraction": null,
+    "min_sample": 100,
+    "open": 0,
+    "open_exposure_stake_fraction": 0,
+    "profitability_claim": "NONE",
+    "quarantined_value_bets": 0,
+    "roi": null,
+    "settled": 0,
+    "stake_cap_breaches": 0,
+    "staking_policy": {
+      "kelly_fraction": 0.25,
+      "max_stake_fraction": 0.02,
+      "rule": "QUARTER_KELLY_CAP_2_V1"
+    },
+    "units_net": 0,
+    "value_bet_issuance_enabled": false,
+    "value_bets": 0
+  },
+  "read_only": true,
+  "schema_version": "football_monitoring_v1",
+  "sources": {
+    "dashboard_db": true,
+    "model_pick_db": true,
+    "paper_db": true
+  },
+  "sport": "football"
+}

@@ -175,6 +175,84 @@ def test_qualified_betting_counts_value_pipeline_rows_only(paths):
     assert qb["value_bet_issuance_enabled"] is False
 
 
+# --------------------------------------------------------------------------- unified-dashboard adapter contract
+CONTRACT_DIR = Path(__file__).resolve().parents[2] / "docs" / "contracts"
+GOLDEN_STATUS = {
+    "model_pick_issuance_scheduler_enabled": True,
+    "model_pick_issuance_last_success_at": "2026-10-11T00:00:00+00:00",
+    "result_sync_scheduler_enabled": True,
+    "result_sync_last_success_at": "2026-10-13T11:50:00+00:00",
+    "fixture_provider_state": "CONNECTED",
+}
+_JSON_TYPES = {
+    "string": str, "boolean": bool, "array": list, "object": dict, "null": type(None),
+    "integer": int, "number": (int, float),
+}
+
+
+def _is_type(value, name):
+    if name in ("integer", "number") and isinstance(value, bool):
+        return False
+    return isinstance(value, _JSON_TYPES[name])
+
+
+def _golden(paths):
+    return _build(paths, GOLDEN_STATUS, deployed_commit="0000000000000000000000000000000000000000")
+
+
+def test_payload_satisfies_consumed_field_contract(paths, tmp_path):
+    empty = mon.build_football_monitoring_payload(
+        dashboard_db_path=tmp_path / "nope.sqlite", paper_db_path=None, model_pick_db_path=None, shadow_db_path=None, now=NOW,
+    )
+    for payload in (_golden(paths), empty):
+        for dotted, types in mon.CONSUMED_FIELDS.items():
+            value = mon._get(payload, dotted)
+            assert any(_is_type(value, t) for t in types), (dotted, value)
+
+
+def test_golden_contract_files_are_current(paths):
+    """docs/contracts/*.json are the fixtures the Tennis adapter tests against.
+
+    Regenerate with SPORTS_AI_UPDATE_MONITORING_GOLDEN=1 after an intended change.
+    """
+    import os
+
+    payload = json.loads(json.dumps(_golden(paths)))
+    card = mon.to_unified_card(payload)
+    files = {
+        "football_monitoring_v1.example.json": payload,
+        "football_monitoring_v1.unified_card.expected.json": card,
+        "football_monitoring_v1.consumed_fields.json": {k: list(v) for k, v in mon.CONSUMED_FIELDS.items()},
+    }
+    if os.environ.get("SPORTS_AI_UPDATE_MONITORING_GOLDEN") == "1":
+        CONTRACT_DIR.mkdir(parents=True, exist_ok=True)
+        for name, doc in files.items():
+            (CONTRACT_DIR / name).write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for name, doc in files.items():
+        assert json.loads((CONTRACT_DIR / name).read_text(encoding="utf-8")) == doc, name
+
+
+def test_unified_card_semantics(paths):
+    card = mon.to_unified_card(_golden(paths))
+    mp = card["model_picks"]
+    assert card["card_schema_version"] == "sports_edge_monitoring_card_v1"
+    assert card["health"] == "RED"  # issuance heartbeat is stale and settlement lags
+    assert {"SCHEDULER_STALE", "SETTLEMENT_LAG"} <= set(card["alerts"])
+    # forward only: 6 issued, 5 settled incl. 1 push -> 4 scored; retro/replay excluded
+    assert (mp["picks"], mp["scored"], mp["pushes"], mp["pending"]) == (6, 4, 1, 1)
+    assert mp["hit_rate_basis"] == "STAKE_WEIGHTED_PUSH_EXCLUDED"
+    assert mp["excluded_from_headline"] == {"live_issued_not_forward": 1, "current_system_replay": 1}
+    assert card["value_bets"]["profitability_claim"] == "NONE"
+    assert card["value_bets"]["issuance_enabled"] is False
+
+    empty = mon.to_unified_card(mon.build_football_monitoring_payload(
+        dashboard_db_path=Path("missing.sqlite"), paper_db_path=None, model_pick_db_path=None, shadow_db_path=None, now=NOW,
+    ))
+    assert empty["initialized"] is False and empty["health"] == "UNAVAILABLE"
+    assert empty["model_picks"]["observed_hit_rate"] is None  # never rendered as 0%
+    assert mon.to_unified_card({"schema_version": "football_monitoring_v2"})["initialized"] is False
+
+
 def test_never_writes_and_degrades_when_dbs_missing(paths, tmp_path):
     before = {k: Path(v).read_bytes() for k, v in paths.items() if Path(v).exists()}
     payload = _build(paths)

@@ -477,10 +477,143 @@ def build_football_monitoring_payload(
                 conn.close()
 
 
+# ------------------------------------------------------------------ unified-dashboard adapter contract
+# The Tennis-hosted dashboard renders one card per sport. This is the reference
+# mapping from football_monitoring_v1 to that card; the Tennis host ports it and
+# proves parity against docs/contracts/football_monitoring_v1.*.json.
+UNIFIED_CARD_SCHEMA_VERSION = "sports_edge_monitoring_card_v1"
+CRITICAL_ALERTS = frozenset({"SCHEDULER_STALE", "FIXTURE_PROVIDER_NOT_CONNECTED", "SETTLEMENT_LAG"})
+
+# Every field the adapter reads, with its JSON type(s). Additive fields are free;
+# removing or retyping one of these is a breaking change (bump SCHEMA_VERSION).
+CONSUMED_FIELDS: dict[str, tuple[str, ...]] = {
+    "schema_version": ("string",),
+    "sport": ("string",),
+    "generated_at": ("string",),
+    "read_only": ("boolean",),
+    "deployed_commit": ("string", "null"),
+    "sources.model_pick_db": ("boolean",),
+    "operational.alerts": ("array",),
+    "operational.schedulers": ("object",),
+    "operational.prediction_coverage.upcoming_fixtures": ("integer",),
+    "operational.prediction_coverage.latest_ready": ("integer",),
+    "operational.settlement_backlog.open_past_kickoff": ("integer",),
+    "model_performance.forward.issued": ("integer",),
+    "model_performance.forward.settled": ("integer",),
+    "model_performance.forward.open": ("integer",),
+    "model_performance.forward.states": ("object",),
+    "model_performance.forward.win_share_stake_weighted": ("number", "null"),
+    "model_performance.forward.ci95": ("array",),
+    "model_performance.forward.mean_q": ("number", "null"),
+    "model_performance.forward.calibration_gap": ("number", "null"),
+    "model_performance.forward.insufficient_sample": ("boolean",),
+    "model_performance.forward.min_sample": ("integer",),
+    "model_performance.excluded_from_headline": ("object",),
+    "qualified_betting.available": ("boolean",),
+    "qualified_betting.profitability_claim": ("string",),
+    "high_confidence_shadow.available": ("boolean",),
+    "high_confidence_shadow.enabled": ("boolean",),
+}
+
+
+def _get(payload: Mapping[str, Any], dotted: str) -> Any:
+    node: Any = payload
+    for part in dotted.split("."):
+        if not isinstance(node, Mapping) or part not in node:
+            raise KeyError(dotted)
+        node = node[part]
+    return node
+
+
+def to_unified_card(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Reference football_monitoring_v1 -> sports_edge_monitoring_card_v1 mapping.
+
+    Field names follow the Tennis calibration-health summary (``picks``,
+    ``scored``, ``pending``, ``voids``, ``observed_hit_rate``,
+    ``average_displayed``, ``calibration_gap``) so one card renders both sports.
+    Football's hit rate is stake-weighted with pushes excluded (half results
+    count half), so ``hit_rate_basis`` says so and the card must show it.
+    """
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        return {"card_schema_version": UNIFIED_CARD_SCHEMA_VERSION, "sport": "football", "initialized": False,
+                "reason": f"unsupported schema_version {payload.get('schema_version')!r}"}
+    fwd = payload["model_performance"]["forward"]
+    states = fwd["states"]
+    alerts = sorted({str(a.get("code")) for a in payload["operational"]["alerts"]})
+    initialized = bool(payload["sources"]["model_pick_db"])
+    if not initialized:
+        health = "UNAVAILABLE"
+    elif CRITICAL_ALERTS & set(alerts):
+        health = "RED"
+    elif alerts or fwd["insufficient_sample"]:
+        health = "AMBER"
+    else:
+        health = "GREEN"
+    qb = payload["qualified_betting"]
+    shadow = payload["high_confidence_shadow"]
+    return {
+        "card_schema_version": UNIFIED_CARD_SCHEMA_VERSION,
+        "sport": "football",
+        "source_schema_version": SCHEMA_VERSION,
+        "initialized": initialized,
+        "reason": None if initialized else "model pick ledger unavailable",
+        "generated_at": payload["generated_at"],
+        "deployed_commit": payload["deployed_commit"],
+        "health": health,
+        "alerts": alerts,
+        "model_picks": {
+            "label": "Forward Model Picks (issued before kickoff)",
+            "picks": fwd["issued"],
+            "scored": fwd["settled"] - int(states.get("PUSH", 0)),
+            "pushes": int(states.get("PUSH", 0)),
+            "pending": fwd["open"],
+            "voids": int(states.get("VOID", 0)),
+            "observed_hit_rate": fwd["win_share_stake_weighted"],
+            "hit_rate_basis": "STAKE_WEIGHTED_PUSH_EXCLUDED",
+            "ci95": list(fwd["ci95"]),
+            "average_displayed": fwd["mean_q"],
+            "calibration_gap": fwd["calibration_gap"],
+            "insufficient_sample": fwd["insufficient_sample"],
+            "min_sample": fwd["min_sample"],
+            "excluded_from_headline": dict(payload["model_performance"]["excluded_from_headline"]),
+        },
+        "value_bets": {
+            "available": qb["available"],
+            "value_bets": qb.get("value_bets", 0),
+            "settled": qb.get("settled", 0),
+            "open": qb.get("open", 0),
+            "roi": qb.get("roi"),
+            "average_clv": qb.get("average_clv"),
+            "insufficient_sample": qb.get("insufficient_sample", True),
+            "issuance_enabled": bool(qb.get("value_bet_issuance_enabled", False)),
+            "profitability_claim": qb["profitability_claim"],
+        },
+        "coverage": {
+            "upcoming_fixtures": payload["operational"]["prediction_coverage"]["upcoming_fixtures"],
+            "ready": payload["operational"]["prediction_coverage"]["latest_ready"],
+            "settlement_backlog": payload["operational"]["settlement_backlog"]["open_past_kickoff"],
+        },
+        "schedulers": {
+            name: {"enabled": bool(hb.get("enabled")), "stale": bool(hb.get("stale")), "last_success_at": hb.get("last_success_at")}
+            for name, hb in sorted(payload["operational"]["schedulers"].items())
+        },
+        "shadow": {
+            "available": shadow["available"],
+            "enabled": shadow["enabled"],
+            "issued": shadow.get("issued"),
+            "settled": shadow.get("settled"),
+            "win_share": shadow.get("win_share_stake_weighted"),
+        },
+    }
+
+
 __all__ = [
     "CONFIDENCE_BANDS",
+    "CONSUMED_FIELDS",
     "SCHEMA_VERSION",
+    "UNIFIED_CARD_SCHEMA_VERSION",
     "accuracy_cohort",
     "build_football_monitoring_payload",
+    "to_unified_card",
     "wilson_interval",
 ]

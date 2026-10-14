@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, Query, Request
@@ -25,6 +27,7 @@ from .services import DashboardConfig, DashboardServices
 
 GUEST_COOKIE_NAME = "sports_edge_guest"
 GUEST_COOKIE_VALUE = "1"
+MONITORING_CACHE_SECONDS = 60.0
 
 
 def _template_directory() -> Path:
@@ -552,10 +555,17 @@ def create_app(
         return JSONResponse(resolved_services.get_system_status())
 
     # On the read-only client token allowlist (client_api_token.py): aggregate, DB-only.
+    # Owner session or server token only; guests get 403. Cached briefly because
+    # each build scans the ledgers and market snapshots on the web process.
+    monitoring_cache: dict[str, Any] = {"at": 0.0, "payload": None}
+
     @app.api_route("/api/monitoring/football", methods=["GET", "HEAD"])
-    def api_football_monitoring():
-        return JSONResponse(
-            build_football_monitoring_payload(
+    def api_football_monitoring(request: Request):
+        if getattr(request.state, "guest", False) and not getattr(request.state, "read_only_client", False):
+            return JSONResponse({"detail": "Sign in required"}, status_code=403)
+        now = time.monotonic()
+        if monitoring_cache["payload"] is None or now - monitoring_cache["at"] >= MONITORING_CACHE_SECONDS:
+            monitoring_cache["payload"] = build_football_monitoring_payload(
                 dashboard_db_path=resolved_services.config.dashboard_db_path,
                 paper_db_path=resolved_services.config.paper_trading_db_path,
                 model_pick_db_path=_model_pick_db_path(),
@@ -564,7 +574,8 @@ def create_app(
                 value_bet_issuance_enabled=bool(resolved_services.config.enable_value_bet_issuance),
                 deployed_commit=os.environ.get("RAILWAY_GIT_COMMIT_SHA"),
             )
-        )
+            monitoring_cache["at"] = now
+        return JSONResponse(monitoring_cache["payload"])
 
     @app.get("/api/reconciliation/report")
     def api_reconciliation_report():

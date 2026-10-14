@@ -308,6 +308,15 @@ def test_guest_cookie_get_access_unchanged(tmp_path, monkeypatch):
         assert client.post("/api/fixtures/refresh").status_code == 403
 
 
+def test_guest_cannot_read_monitoring_but_token_can(tmp_path, monkeypatch):
+    app = _app_with_auth(tmp_path, monkeypatch, TOKEN)
+    with TestClient(app, follow_redirects=False) as client:
+        client.cookies.set("sports_edge_guest", "1")
+        assert client.get("/api/monitoring/football").status_code == 403
+        assert client.head("/api/monitoring/football").status_code == 403
+        assert client.get("/api/monitoring/football", headers=_bearer()).status_code == 200
+
+
 def test_query_parameters_never_authenticate(tmp_path, monkeypatch):
     app = _app_with_auth(tmp_path, monkeypatch, TOKEN)
     with TestClient(app, follow_redirects=False) as client:
