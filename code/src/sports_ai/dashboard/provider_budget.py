@@ -58,6 +58,8 @@ CIRCUIT_RATE_LIMITED = "RATE_LIMITED"
 CIRCUIT_QUOTA_EXHAUSTED = "QUOTA_EXHAUSTED"
 CIRCUIT_AUTH_ERROR = "AUTH_ERROR"
 CIRCUIT_PROVIDER_ERROR = "PROVIDER_ERROR"
+# Reported only by read_only_view() when the circuit table cannot be read.
+CIRCUIT_UNKNOWN = "UNKNOWN"
 
 # Decision actions returned by ProviderRequestBudget.issue()
 ACTION_CACHE_HIT = "CACHE_HIT"
@@ -397,6 +399,26 @@ class ProviderRequestBudget:
         except (TypeError, ValueError):
             return {}
 
+    def _read_only_fetchone(self, sql: str, params: tuple[Any, ...]) -> tuple[bool, sqlite3.Row | None]:
+        """Run one SELECT over a ``mode=ro`` connection.
+
+        Returns ``(readable, row)``. ``readable`` is False when the database
+        file or table is absent or unreadable; nothing is ever created.
+        """
+        if not self._db_path.exists():
+            return False, None
+        try:
+            conn = sqlite3.connect(f"{self._db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        except sqlite3.Error:
+            return False, None
+        try:
+            conn.row_factory = sqlite3.Row
+            return True, conn.execute(sql, params).fetchone()
+        except sqlite3.Error:
+            return False, None
+        finally:
+            conn.close()
+
     def _persist_quota(self, snapshot: dict[str, Any]) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -450,7 +472,7 @@ class ProviderRequestBudget:
                 (CIRCUIT_CLOSED, now_iso, PROVIDER_API_FOOTBALL),
             )
 
-    def _quota_day_reset_if_needed(self, snapshot: dict[str, Any]) -> None:
+    def _quota_day_reset_if_needed(self, snapshot: dict[str, Any], *, persist: bool = True) -> None:
         """Invalidate provider quota captured for a previous quota day.
 
         When the configured UTC reset boundary has passed, the captured
@@ -463,6 +485,9 @@ class ProviderRequestBudget:
         The operational counter resets at its own boundary independently, so a
         past ``operational_reset_at`` resets usage even while the provider quota
         for the current day is already known.
+
+        With ``persist=False`` the transition is applied to ``snapshot`` only:
+        nothing is written and no circuit is reopened (monitoring reads).
         """
         now_utc = datetime.now(timezone.utc)
         provider_day_passed = False
@@ -473,7 +498,7 @@ class ProviderRequestBudget:
             except ValueError:
                 provider_day_passed = False
         # The operational counter resets at the same UTC boundary.
-        self._operational_reset_if_needed(snapshot)
+        self._operational_reset_if_needed(snapshot, persist=persist)
         if not provider_day_passed:
             return
         for field in ("daily_limit", "daily_remaining", "minute_limit", "minute_remaining", "captured_at"):
@@ -481,6 +506,8 @@ class ProviderRequestBudget:
         snapshot.pop("probe_started_at", None)
         snapshot["quota_reset_at"] = self._compute_quota_reset_at(now_utc)
         snapshot["reset_transition_at"] = utc_now_iso()
+        if not persist:
+            return
         self._persist_quota(snapshot)
         self._reopen_quota_exhausted_circuit()
 
@@ -517,7 +544,7 @@ class ProviderRequestBudget:
                 self._persist_quota(snapshot)
 
     # ------------------------------------------------------- operational cap
-    def _operational_reset_if_needed(self, snapshot: dict[str, Any]) -> None:
+    def _operational_reset_if_needed(self, snapshot: dict[str, Any], *, persist: bool = True) -> None:
         """Reset the persistent operational counter at the configured UTC boundary.
 
         The operational counter lives in the persisted quota state so it
@@ -538,12 +565,16 @@ class ProviderRequestBudget:
         snapshot["operational_reset_at"] = self._compute_quota_reset_at(datetime.now(timezone.utc))
         if int(snapshot.get("operational_used") or 0) != 0:
             snapshot["operational_used"] = 0
-        self._persist_quota(snapshot)
+        if persist:
+            self._persist_quota(snapshot)
 
     def effective_remaining(self) -> int | None:
         """Effective usable daily quota = min(provider remaining, operational cap remaining)."""
         snapshot = self._quota_snapshot()
         self._quota_day_reset_if_needed(snapshot)
+        return self._effective_remaining_from(snapshot)
+
+    def _effective_remaining_from(self, snapshot: dict[str, Any]) -> int | None:
         provider_remaining = snapshot.get("daily_remaining")
         provider_limit = snapshot.get("daily_limit")
         if provider_remaining is None and provider_limit is None and self._daily_budget:
@@ -567,7 +598,9 @@ class ProviderRequestBudget:
         return str(self.circuit_snapshot().get("state") or CIRCUIT_CLOSED)
 
     def _effective_quota_limit(self) -> int | None:
-        snapshot = self._quota_snapshot()
+        return self._effective_limit_from(self._quota_snapshot())
+
+    def _effective_limit_from(self, snapshot: dict[str, Any]) -> int | None:
         provider_limit = snapshot.get("daily_limit")
         if provider_limit is None and self._daily_budget:
             provider_limit = self._daily_budget
@@ -592,6 +625,44 @@ class ProviderRequestBudget:
         """``NONE`` | ``WARNING`` (CONSERVE/LOW) | ``CRITICAL`` (CRITICAL/EXHAUSTED)."""
         return QUOTA_ALERT_LEVELS.get(self.quota_state(), QUOTA_ALERT_NONE)
 
+    def read_only_view(self) -> dict[str, Any]:
+        """Quota and circuit state for monitoring reads, with no side effects.
+
+        The quota-day and operational-cap rollover is applied to an in-memory
+        copy only. Nothing is persisted, a QUOTA_EXHAUSTED circuit is not
+        reopened, no transition alert is logged, and the database is opened
+        ``mode=ro``. The governor performs the real transition on its next
+        request, so ``transition_pending`` reports that one is due.
+        """
+        readable, row = self._read_only_fetchone(
+            "SELECT state_json FROM provider_quota_state WHERE provider = ?",
+            (PROVIDER_API_FOOTBALL,),
+        )
+        snapshot: dict[str, Any] = {}
+        if row is not None:
+            try:
+                snapshot = json.loads(str(row["state_json"]))
+            except (TypeError, ValueError):
+                snapshot = {}
+        before = json.dumps(snapshot, sort_keys=True)
+        state = self._compute_quota_state(snapshot, persist=False) if readable else QUOTA_UNKNOWN
+        transition_pending = readable and json.dumps(snapshot, sort_keys=True) != before
+        circuit_readable, circuit = self._read_only_fetchone(
+            "SELECT current_state FROM provider_circuit_state WHERE provider = ?",
+            (PROVIDER_API_FOOTBALL,),
+        )
+        if circuit is not None:
+            circuit_state = str(circuit["current_state"])
+        else:
+            circuit_state = CIRCUIT_CLOSED if circuit_readable else CIRCUIT_UNKNOWN
+        return {
+            "quota_state": state,
+            "quota_alert": QUOTA_ALERT_LEVELS.get(state, QUOTA_ALERT_NONE),
+            "quota_metadata_present": row is not None,
+            "transition_pending": bool(transition_pending),
+            "circuit_state": circuit_state,
+        }
+
     def _alert_on_quota_transition(self, state: str) -> None:
         """Log once per transition so a degrading quota is visible in Railway logs."""
         if state == QUOTA_UNKNOWN or state == self._alerted_quota_state:
@@ -612,16 +683,21 @@ class ProviderRequestBudget:
             self._effective_quota_limit(),
         )
 
-    def _compute_quota_state(self) -> str:
-        snapshot = self._quota_snapshot()
-        self._quota_day_reset_if_needed(snapshot)
+    def _compute_quota_state(self, snapshot: dict[str, Any] | None = None, *, persist: bool = True) -> str:
+        if snapshot is None:
+            snapshot = self._quota_snapshot()
+        self._quota_day_reset_if_needed(snapshot, persist=persist)
         if not self._provider_allowance_known(snapshot):
             # The current quota day's provider allowance has not been captured
             # yet (fresh start or just past the reset boundary). Do not let a
             # previous day's remaining count govern today's requests.
             return QUOTA_UNKNOWN
-        effective_remaining = self.effective_remaining()
-        effective_limit = self._effective_quota_limit()
+        if persist:
+            effective_remaining = self.effective_remaining()
+            effective_limit = self._effective_quota_limit()
+        else:
+            effective_remaining = self._effective_remaining_from(snapshot)
+            effective_limit = self._effective_limit_from(snapshot)
         if effective_remaining is None:
             return QUOTA_UNKNOWN
         try:

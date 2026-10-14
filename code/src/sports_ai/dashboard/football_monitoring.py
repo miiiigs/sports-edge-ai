@@ -197,11 +197,19 @@ def _scheduler_heartbeats(status: Mapping[str, Any], now: datetime) -> dict[str,
     return out
 
 
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _instant(value: Any) -> datetime:
+    """Parsed instant for ordering; mixed ``Z``/``+00:00``/offset forms compare correctly."""
+    return _parse(value) or _EPOCH
+
+
 def _latest_predictions(dash: sqlite3.Connection | None) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for row in _rows(dash, "SELECT prediction_id, fixture_id, status, generated_at FROM dashboard_predictions"):
         fid = str(row["fixture_id"])
-        if fid not in latest or str(row.get("generated_at") or "") > str(latest[fid].get("generated_at") or ""):
+        if fid not in latest or _instant(row.get("generated_at")) > _instant(latest[fid].get("generated_at")):
             latest[fid] = row
     return latest
 
@@ -285,11 +293,27 @@ def _operational(
     quota_state = str(status.get("provider_budget_quota_state") or "").upper()
     if quota_state and quota_state not in {"HEALTHY", "UNKNOWN"}:
         alerts.append({"code": "PROVIDER_QUOTA_NOT_HEALTHY", "state": quota_state})
+    circuit_state = str(status.get("provider_budget_circuit_state") or "").upper()
+    if circuit_state and circuit_state not in {"CLOSED", "UNKNOWN"}:
+        alerts.append({"code": "PROVIDER_CIRCUIT_OPEN", "state": circuit_state})
+    # Unknown or missing provider state must never read as healthy.
+    unknown = [
+        name
+        for name, value in (
+            ("fixture_provider_state", fixture_provider_state),
+            ("provider_budget_quota_state", quota_state),
+        )
+        if value in {"", "UNKNOWN"}
+    ]
+    if circuit_state == "UNKNOWN":
+        unknown.append("provider_budget_circuit_state")
+    if unknown:
+        alerts.append({"code": "PROVIDER_STATE_UNKNOWN", "fields": unknown})
 
     return {
         "schedulers": heartbeats,
         "latest_forward_model_pick_issued_at": _iso(latest_forward),
-        "latest_prediction_generated_at": max((str(p.get("generated_at")) for p in latest.values() if p.get("generated_at")), default=None),
+        "latest_prediction_generated_at": _iso(max((_parse(p.get("generated_at")) for p in latest.values() if _parse(p.get("generated_at"))), default=None)),
         "prediction_coverage": {
             "window_hours": UPCOMING_WINDOW_HOURS,
             "upcoming_fixtures": len(upcoming),
@@ -308,6 +332,7 @@ def _operational(
         "providers": {
             "fixture_provider_state": status.get("fixture_provider_state"),
             "provider_budget_quota_state": status.get("provider_budget_quota_state"),
+            "provider_budget_circuit_state": status.get("provider_budget_circuit_state"),
             "market_sync_state": status.get("market_sync_state"),
         },
         "last_issuance_cycle": {
@@ -455,18 +480,23 @@ def build_football_monitoring_payload(
     ledger = _connect_ro(model_pick_db_path)
     try:
         picks = _rows(ledger, "SELECT * FROM football_model_pick_entries")
+        sources = {
+            "dashboard_db": dash is not None,
+            "paper_db": paper is not None,
+            "model_pick_db": ledger is not None,
+        }
+        operational = _operational(dash=dash, paper=paper, picks=picks, status=status, now=now)
+        missing = sorted(name for name, present in sources.items() if not present)
+        if missing:
+            operational["alerts"].append({"code": "SOURCE_UNAVAILABLE", "sources": missing})
         return {
             "schema_version": SCHEMA_VERSION,
             "sport": "football",
             "generated_at": _iso(now),
             "read_only": True,
             "deployed_commit": deployed_commit,
-            "sources": {
-                "dashboard_db": dash is not None,
-                "paper_db": paper is not None,
-                "model_pick_db": ledger is not None,
-            },
-            "operational": _operational(dash=dash, paper=paper, picks=picks, status=status, now=now),
+            "sources": sources,
+            "operational": operational,
             "model_performance": _model_performance(picks),
             "qualified_betting": _qualified_betting(paper, value_bet_issuance_enabled=value_bet_issuance_enabled),
             "high_confidence_shadow": _shadow(shadow_db_path),
@@ -482,7 +512,9 @@ def build_football_monitoring_payload(
 # mapping from football_monitoring_v1 to that card; the Tennis host ports it and
 # proves parity against docs/contracts/football_monitoring_v1.*.json.
 UNIFIED_CARD_SCHEMA_VERSION = "sports_edge_monitoring_card_v1"
-CRITICAL_ALERTS = frozenset({"SCHEDULER_STALE", "FIXTURE_PROVIDER_NOT_CONNECTED", "SETTLEMENT_LAG"})
+CRITICAL_ALERTS = frozenset(
+    {"SCHEDULER_STALE", "FIXTURE_PROVIDER_NOT_CONNECTED", "SETTLEMENT_LAG", "PROVIDER_CIRCUIT_OPEN"}
+)
 
 # Every field the adapter reads, with its JSON type(s). Additive fields are free;
 # removing or retyping one of these is a breaking change (bump SCHEMA_VERSION).

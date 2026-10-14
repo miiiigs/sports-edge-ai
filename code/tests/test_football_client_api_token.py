@@ -62,6 +62,9 @@ class _StubServices:
     def get_health_payload(self) -> dict:
         return {"status": "ok"}
 
+    def get_monitoring_runtime_status(self) -> dict:
+        return {"status": "ok"}
+
     def high_confidence_shadow_db_path(self):
         return None
 
@@ -355,3 +358,22 @@ def test_service_token_not_persisted_in_auth_sqlite(tmp_path, monkeypatch):
         for table in tables:
             for row in conn.execute(f"SELECT * FROM {table}"):
                 assert TOKEN not in " ".join(str(value) for value in row)
+
+
+def test_auth_matrix_on_every_allowlisted_path(tmp_path, monkeypatch):
+    app = _app_with_auth(tmp_path, monkeypatch, TOKEN)
+    with TestClient(app, follow_redirects=False) as client:
+        for path in ALLOWED_PATHS:
+            for method in ("GET", "HEAD"):
+                assert client.request(method, path, headers=_bearer()).status_code == 200, (method, path)
+                assert client.request(method, path).status_code == 401, (method, path)
+                assert client.request(method, path, headers=_bearer("x" * 64)).status_code == 401, (method, path)
+            for method in ("POST", "PUT", "PATCH", "DELETE"):
+                assert client.request(method, path, headers=_bearer()).status_code in {401, 403, 405}, (method, path)
+        # The shared guest cookie keeps its existing read access to the three
+        # pre-existing paths but never reaches the monitoring document.
+        client.cookies.set("sports_edge_guest", "1")
+        for path in ALLOWED_PATHS:
+            expected = 403 if path == "/api/monitoring/football" else 200
+            assert client.get(path).status_code == expected, path
+            assert client.post(path).status_code in {401, 403, 405}, path

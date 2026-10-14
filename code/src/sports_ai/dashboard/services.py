@@ -8597,6 +8597,47 @@ class DashboardServices:
 
     def get_health_payload(self) -> dict[str, Any]:
         self._refresh_persisted_runtime_state_for_web()
+        return self._runtime_status_payload(
+            quota_state=self._provider_budget.quota_state(),
+            quota_alert=self._provider_budget.quota_alert_level(),
+        )
+
+    def get_monitoring_runtime_status(self) -> dict[str, Any]:
+        """Runtime status for /api/monitoring/football with no persistent side effects.
+
+        Unlike ``get_health_payload`` this never runs the provider-budget
+        quota-day or operational-cap transition, never reopens a circuit, and
+        never opens an operational database for writing: persisted runtime
+        state is read ``mode=ro`` and quota state comes from
+        ``ProviderRequestBudget.read_only_view``.
+        """
+        self._refresh_persisted_runtime_state_read_only()
+        budget = self._provider_budget.read_only_view()
+        payload = self._runtime_status_payload(quota_state=budget["quota_state"], quota_alert=budget["quota_alert"])
+        payload["provider_budget_circuit_state"] = budget["circuit_state"]
+        payload["provider_budget_quota_metadata_present"] = budget["quota_metadata_present"]
+        payload["provider_budget_transition_pending"] = budget["transition_pending"]
+        return payload
+
+    def _refresh_persisted_runtime_state_read_only(self) -> None:
+        if self.config.runtime_role != RUNTIME_ROLE_WEB:
+            return
+        path = Path(self.config.dashboard_db_path)
+        if not path.exists():
+            return
+        try:
+            conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        except sqlite3.Error:
+            return
+        try:
+            conn.row_factory = sqlite3.Row
+            self._load_runtime_state(conn)
+        except sqlite3.Error:
+            return
+        finally:
+            conn.close()
+
+    def _runtime_status_payload(self, *, quota_state: str, quota_alert: str) -> dict[str, Any]:
         storage_state = self._storage_status()
         snapshot_ready = self.snapshot is not None
         startup_sync_task_running = self._startup_sync_task is not None and not self._startup_sync_task.done()
@@ -8744,8 +8785,8 @@ class DashboardServices:
                 self._value_evaluation_runtime_state.get("value_evaluation_value_bets_last_cycle") or 0
             ),
             "paid_provider_calls_allowed": "YES" if self.config.allow_paid_provider_calls else "NO",
-            "provider_budget_quota_state": self._provider_budget.quota_state(),
-            "provider_budget_quota_alert": self._provider_budget.quota_alert_level(),
+            "provider_budget_quota_state": quota_state,
+            "provider_budget_quota_alert": quota_alert,
             "settlement_queue_count": int(self._market_runtime_state.get("settlement_queue_count") or 0),
             "prediction_snapshot_ready": snapshot_ready,
             "dashboard_db_reachable": storage_state["dashboard_db_reachable"],

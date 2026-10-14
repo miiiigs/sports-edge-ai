@@ -557,6 +557,8 @@ def create_app(
     # On the read-only client token allowlist (client_api_token.py): aggregate, DB-only.
     # Owner session or server token only; guests get 403. Cached briefly because
     # each build scans the ledgers and market snapshots on the web process.
+    # Never get_health_payload(): that runs the provider-budget quota-day
+    # transition. get_monitoring_runtime_status() reads everything mode=ro.
     monitoring_cache: dict[str, Any] = {"at": 0.0, "payload": None}
 
     @app.api_route("/api/monitoring/football", methods=["GET", "HEAD"])
@@ -570,7 +572,7 @@ def create_app(
                 paper_db_path=resolved_services.config.paper_trading_db_path,
                 model_pick_db_path=_model_pick_db_path(),
                 shadow_db_path=resolved_services.high_confidence_shadow_db_path(),
-                runtime_status=resolved_services.get_health_payload(),
+                runtime_status=resolved_services.get_monitoring_runtime_status(),
                 value_bet_issuance_enabled=bool(resolved_services.config.enable_value_bet_issuance),
                 deployed_commit=os.environ.get("RAILWAY_GIT_COMMIT_SHA"),
             )

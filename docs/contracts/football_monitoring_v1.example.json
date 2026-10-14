@@ -256,6 +256,12 @@
       {
         "code": "ALL_ODDS_STALE",
         "threshold_minutes": 180
+      },
+      {
+        "code": "PROVIDER_STATE_UNKNOWN",
+        "fields": [
+          "provider_budget_quota_state"
+        ]
       }
     ],
     "last_issuance_cycle": {
@@ -289,6 +295,7 @@
     "providers": {
       "fixture_provider_state": "CONNECTED",
       "market_sync_state": null,
+      "provider_budget_circuit_state": null,
       "provider_budget_quota_state": null
     },
     "schedulers": {

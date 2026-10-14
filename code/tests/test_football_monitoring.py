@@ -269,3 +269,65 @@ def test_never_writes_and_degrades_when_dbs_missing(paths, tmp_path):
     assert empty["model_performance"]["forward"]["win_share_stake_weighted"] is None
     assert empty["qualified_betting"]["available"] is False
     assert not (tmp_path / "nope.sqlite").exists()
+
+
+def test_unknown_or_unavailable_provider_state_is_never_green(paths):
+    base = _golden(paths)
+    base["model_performance"]["forward"]["insufficient_sample"] = False
+    base["operational"]["alerts"] = []
+    assert mon.to_unified_card(base)["health"] == "GREEN"  # reachable when everything is known
+
+    known = {
+        "fixture_provider_state": "CONNECTED",
+        "provider_budget_quota_state": "HEALTHY",
+        "provider_budget_circuit_state": "CLOSED",
+    }
+    assert mon._operational(dash=None, paper=None, picks=[], status=known, now=NOW)["alerts"] == []
+    for change in (
+        {"fixture_provider_state": None},
+        {"provider_budget_quota_state": None},
+        {"provider_budget_quota_state": "UNKNOWN"},
+        {"provider_budget_circuit_state": "UNKNOWN"},
+        {"provider_budget_circuit_state": "PROVIDER_ERROR"},
+        {"provider_budget_circuit_state": "QUOTA_EXHAUSTED"},
+        {"fixture_provider_state": "NOT_CONFIGURED"},
+    ):
+        status = {**known, **change}
+        alerts = mon._operational(dash=None, paper=None, picks=[], status=status, now=NOW)["alerts"]
+        payload = json.loads(json.dumps(base))
+        payload["operational"]["alerts"] = alerts
+        assert alerts, change
+        assert mon.to_unified_card(payload)["health"] != "GREEN", change
+    open_circuit = {**known, "provider_budget_circuit_state": "RATE_LIMITED"}
+    payload = json.loads(json.dumps(base))
+    payload["operational"]["alerts"] = mon._operational(dash=None, paper=None, picks=[], status=open_circuit, now=NOW)["alerts"]
+    assert mon.to_unified_card(payload)["health"] == "RED"
+
+
+def test_missing_source_raises_alert(paths):
+    payload = mon.build_football_monitoring_payload(
+        dashboard_db_path=paths["dash"], paper_db_path=None, model_pick_db_path=paths["picks"],
+        shadow_db_path=None, runtime_status={"fixture_provider_state": "CONNECTED"}, now=NOW,
+    )
+    alerts = [a for a in payload["operational"]["alerts"] if a["code"] == "SOURCE_UNAVAILABLE"]
+    assert alerts == [{"code": "SOURCE_UNAVAILABLE", "sources": ["paper_db"]}]
+    assert mon.to_unified_card(payload)["health"] != "GREEN"
+
+
+def test_latest_prediction_orders_mixed_timestamp_forms():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE dashboard_predictions (prediction_id TEXT, fixture_id TEXT, status TEXT, generated_at TEXT)")
+    conn.executemany("INSERT INTO dashboard_predictions VALUES (?,?,?,?)", [
+        # As strings "...T10:00:00Z" > "...T10:30:00+00:00" and "...T12:00:00+02:00" sorts last.
+        ("a", "f1", "BLOCKED", "2026-10-13T10:30:00+00:00"),
+        ("b", "f1", "READY", "2026-10-13T10:45:00Z"),
+        ("c", "f1", "BLOCKED", "2026-10-13T12:00:00+02:00"),  # 10:00 UTC: oldest
+        ("d", "f2", "READY", "2026-10-13T09:00:00Z"),
+        ("e", "f2", "BLOCKED", "2026-10-13T09:00:01+00:00"),
+    ])
+    latest = mon._latest_predictions(conn)
+    assert latest["f1"]["prediction_id"] == "b"
+    assert latest["f2"]["prediction_id"] == "e"
+    out = mon._operational(dash=conn, paper=None, picks=[], status={}, now=NOW)
+    assert out["latest_prediction_generated_at"] == "2026-10-13T10:45:00+00:00"

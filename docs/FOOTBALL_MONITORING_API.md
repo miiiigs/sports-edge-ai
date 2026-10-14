@@ -11,7 +11,7 @@ Tennis consumes it server-side.
 | Route | `GET` / `HEAD` `/api/monitoring/football` |
 | Auth | Owner session cookie, **or** `Authorization: Bearer $SPORTS_EDGE_CLIENT_API_TOKEN` (server-to-server only). The guest cookie gets **403**, unlike the other read routes. |
 | Token scope | GET/HEAD on exactly 4 paths: `/api/candidates`, `/api/performance`, `/api/system/status`, `/api/monitoring/football`. All other routes, including every POST, return 401. |
-| Side effects | No ledger, settlement or betting writes, and no provider requests. Every DB is opened `mode=ro`. The embedded runtime status uses the same builder as `/health`, which may persist the provider-budget daily counter reset. That is the only write, and `/health` already does it. |
+| Side effects | **None.** No writes of any kind and no provider requests. Every DB is opened `mode=ro`, including the provider-budget quota and circuit state. The runtime status comes from `get_monitoring_runtime_status()`, not `/health`'s builder. The quota-day and operational-cap rollover is computed in memory only. A QUOTA_EXHAUSTED circuit is never reopened, and no quota-transition log is emitted. The provider governor still performs those transitions on its next real request, and `/health` keeps its existing behaviour. Pinned by `test_football_monitoring_read_only.py`: GET, HEAD, reset boundary, exhausted, circuit open, absent metadata, repeated and concurrent reads; database dumps unchanged. |
 | Caching | The document is cached in-process for 60 s (`MONITORING_CACHE_SECONDS`). Poll at most once a minute. |
 
 **Never expose the token to a browser.** The Tennis host must call Football from
@@ -45,9 +45,9 @@ any client-side env var (`NEXT_PUBLIC_*`, `VITE_*`, …), cookie or HTML.
 | `prediction_coverage` | Next 72h: `upcoming_fixtures`, `with_prediction`, `latest_ready`, `ready_without_model_pick`, `latest_not_ready_by_status`, `ready_rate` |
 | `settlement_backlog` | LIVE_ISSUED picks still open 3h after kickoff: count, oldest kickoff, max lag |
 | `last_issuance_cycle` | `written`, `canonical_duplicates`, `conflicts` from the last issuance cycle. `written: 0` with `ready_without_model_pick > 0` is an abnormal zero-pick cycle. |
-| `providers` | `fixture_provider_state`, `provider_budget_quota_state`, `market_sync_state` |
+| `providers` | `fixture_provider_state`, `provider_budget_quota_state`, `provider_budget_circuit_state` (`CLOSED`, an open state, or `UNKNOWN` when unreadable), `market_sync_state` |
 | `odds_freshness[]` | Per provider × market: `latest_captured_at`, `age_minutes`, `snapshots_24h`, `stale` (> 180 min) |
-| `alerts[]` | Codes: `SCHEDULER_STALE`, `SCHEDULER_LAST_CYCLE_ERROR`, `READY_FIXTURES_WITHOUT_PICK`, `NO_READY_PREDICTIONS_FOR_UPCOMING`, `SETTLEMENT_LAG`, `ALL_ODDS_STALE`, `FIXTURE_PROVIDER_NOT_CONNECTED`, `PROVIDER_QUOTA_NOT_HEALTHY` |
+| `alerts[]` | Codes: `SCHEDULER_STALE`, `SCHEDULER_LAST_CYCLE_ERROR`, `READY_FIXTURES_WITHOUT_PICK`, `NO_READY_PREDICTIONS_FOR_UPCOMING`, `SETTLEMENT_LAG`, `ALL_ODDS_STALE`, `FIXTURE_PROVIDER_NOT_CONNECTED`, `PROVIDER_QUOTA_NOT_HEALTHY`, `PROVIDER_CIRCUIT_OPEN`, `PROVIDER_STATE_UNKNOWN` (fixture provider, quota or circuit state missing or `UNKNOWN`), `SOURCE_UNAVAILABLE` (a database could not be opened) |
 
 ### `model_performance` — which predictions were right or wrong?
 
@@ -116,7 +116,7 @@ The Tennis host renders one card per sport. Football defines the mapping as code
 | Card field | From `football_monitoring_v1` | Notes |
 |---|---|---|
 | `initialized` / `reason` | `sources.model_pick_db` | Same envelope as the Tennis `{"initialized": false, "reason": …}` |
-| `health` | alerts + `forward.insufficient_sample` | `UNAVAILABLE` / `RED` (any of `SCHEDULER_STALE`, `FIXTURE_PROVIDER_NOT_CONNECTED`, `SETTLEMENT_LAG`) / `AMBER` (any other alert, or insufficient sample) / `GREEN` |
+| `health` | alerts + `forward.insufficient_sample` | `UNAVAILABLE` / `RED` (any of `SCHEDULER_STALE`, `FIXTURE_PROVIDER_NOT_CONNECTED`, `SETTLEMENT_LAG`, `PROVIDER_CIRCUIT_OPEN`) / `AMBER` (any other alert, including unknown provider state, or insufficient sample) / `GREEN`. Unknown or unavailable state can never be `GREEN`. |
 | `model_picks.picks` | `forward.issued` | Forward LIVE_ISSUED only |
 | `model_picks.scored` | `forward.settled − states.PUSH` | Pushes are not scored. They are reported in `pushes`. |
 | `model_picks.pending` / `voids` | `forward.open` / `states.VOID` (0 today) | |
