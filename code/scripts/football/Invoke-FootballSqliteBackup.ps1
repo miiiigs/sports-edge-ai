@@ -43,6 +43,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+trap { Write-Error $_ -ErrorAction Continue; exit 1 }  # non-zero exit for -File callers
 Set-StrictMode -Version 2.0
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
@@ -63,7 +64,7 @@ function Invoke-Remote {
         $exe = $BashExe
         $argLine = "-c `"$Command`""
     } else {
-        $exe = (Get-Command railway -ErrorAction Stop).Source
+        $exe = Get-RailwayExe
         $argLine = "ssh -s $Service `"$Command`""
     }
     $p = Start-Process -FilePath $exe -ArgumentList $argLine -NoNewWindow -PassThru `
@@ -71,6 +72,16 @@ function Invoke-Remote {
     $null = $p.Handle  # PS 5.1: keep the handle so ExitCode is populated
     $p.WaitForExit()
     return $p.ExitCode
+}
+
+function Get-RailwayExe {
+    # Start-Process needs a real PE file; npm installs `railway` as sh/.cmd/.ps1 shims around bin\railway.exe.
+    foreach ($c in @(Get-Command railway -All -ErrorAction SilentlyContinue)) {
+        if ($c.Source -like "*.exe") { return $c.Source }
+        $npmExe = Join-Path (Split-Path $c.Source -Parent) "node_modules\@railway\cli\bin\railway.exe"
+        if (Test-Path $npmExe) { return $npmExe }
+    }
+    throw "railway.exe not found (install the Railway CLI)"
 }
 
 function ConvertFrom-Base64File {
@@ -125,6 +136,9 @@ if ($LocalRehearsal) {
     $state = $svc.node.latestDeployment.status
     if ($state -eq "SLEEPING") {
         throw "service is SLEEPING; wait for a natural wake window (this script never wakes it)"
+    }
+    if ($state -ne "SUCCESS" -or @($svc.node.activeDeployments).Count -lt 1) {
+        throw "latest deployment is $state with no healthy active deployment; not touching production"
     }
     Write-Host "Railway deployment status: $state"
     $SourceDir = "/data"
