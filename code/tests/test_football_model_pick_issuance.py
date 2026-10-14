@@ -280,6 +280,120 @@ def test_one_conflicting_row_does_not_block_others(dbs):
     assert len(_rows(led)) == 4
 
 
+# --------------------------------------------------------------------------- overlapping issuers
+def _two_provider_ids_for_one_match(dash):
+    _add_fixture(dash, "football-data:1")
+    _add_fixture(dash, "api-football:9")
+    _add_prediction(dash, prediction_id="p_fd", fixture_id="football-data:1")
+    _add_prediction(dash, prediction_id="p_af", fixture_id="api-football:9")
+    dash.commit()
+
+
+def test_overlapping_issuer_with_stale_snapshot_never_duplicates(dbs, tmp_path, monkeypatch):
+    dash, led = dbs
+    _two_provider_ids_for_one_match(dash)
+    first = issuance.issue_forward_model_picks(dash, led, now=BEFORE_KICKOFF)
+    assert first["written"] == 2
+
+    # A second issuer read the ledger before the first one wrote (empty snapshot).
+    monkeypatch.setattr(issuance.ledger, "fetch_model_pick_rows", lambda *a, **k: [])
+    other = ledger.connect(tmp_path / "picks.sqlite")
+    try:
+        second = issuance.issue_forward_model_picks(dash, other, now="2026-10-16T09:00:01+00:00")
+    finally:
+        other.close()
+    monkeypatch.undo()
+
+    assert second["written"] == 0
+    assert second["skipped"] == {issuance.SKIP_ALREADY_ISSUED: 2, issuance.SKIP_CANONICAL_DUPLICATE: 2}
+    assert second["conflicts"] == []
+    rows = _rows(led)
+    assert len(rows) == 2
+    assert len({row["fixture_id"] for row in rows}) == 1
+
+
+def test_concurrent_cycles_write_each_pick_exactly_once(tmp_path):
+    import threading
+
+    dash = _dashboard(tmp_path / "dash.sqlite")
+    _two_provider_ids_for_one_match(dash)
+    for n in range(4):
+        _add_fixture(dash, f"fx{n}", home=f"Home{n}", away=f"Away{n}")
+        _add_prediction(dash, prediction_id=f"p{n}", fixture_id=f"fx{n}")
+    dash.commit()
+    dash.close()
+    ledger.ensure_schema(ledger.connect(tmp_path / "picks.sqlite"))
+
+    barrier = threading.Barrier(4)
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def worker():
+        d = sqlite3.connect(f"file:{(tmp_path / 'dash.sqlite').as_posix()}?mode=ro", uri=True)
+        d.row_factory = sqlite3.Row
+        led = ledger.connect(tmp_path / "picks.sqlite")
+        try:
+            barrier.wait()
+            results.append(issuance.issue_forward_model_picks(d, led, now=BEFORE_KICKOFF))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+        finally:
+            led.close()
+            d.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert errors == []
+    led = ledger.connect(tmp_path / "picks.sqlite")
+    rows = _rows(led)
+    led.close()
+    # 5 matches x (AH + corners); the two provider ids share one match.
+    assert len(rows) == 10
+    assert sum(r["written"] for r in results) == 10
+    assert all(r["conflicts"] == [] for r in results)
+    assert len({row["fixture_id"] for row in rows if row["fixture_id"] in ("football-data:1", "api-football:9")}) == 1
+
+
+def test_cli_apply_skips_match_already_held_by_another_provider_id(dbs):
+    dash, led = dbs
+    _add_fixture(dash, "football-data:1")
+    _add_prediction(dash, prediction_id="p_fd", fixture_id="football-data:1")
+    dash.commit()
+    issuance.issue_forward_model_picks(dash, led, now=BEFORE_KICKOFF)
+
+    # The provider switch republishes the same match under a new id.
+    _add_fixture(dash, "api-football:9")
+    _add_prediction(dash, prediction_id="p_af", fixture_id="api-football:9")
+    dash.commit()
+    applied = maintenance.apply_live_issued(dash, led, now="2026-10-16T10:00:00+00:00")
+
+    assert applied["rows_written"] == 0
+    assert len(applied["canonical_duplicates_skipped"]) == 2
+    assert {row["fixture_id"] for row in _rows(led)} == {"football-data:1"}
+
+
+def test_cold_start_creates_ledger_and_issues_once(tmp_path):
+    dash = _dashboard(tmp_path / "dash.sqlite")
+    _add_fixture(dash, "fx1", kickoff="2099-01-01T15:00:00+00:00")
+    _add_prediction(dash, prediction_id="p1", fixture_id="fx1")
+    dash.commit()
+    dash.close()
+    assert not (tmp_path / "picks.sqlite").exists()
+
+    services = _services(tmp_path)
+    assert services.run_model_pick_issuance_cycle()["written"] == 2
+    assert services.run_model_pick_issuance_cycle()["written"] == 0
+    led = ledger.connect(tmp_path / "picks.sqlite")
+    rows = _rows(led)
+    led.close()
+    assert len(rows) == 2
+    assert all(row["created_at"] < row["kickoff_utc"] for row in rows)
+
+
 # --------------------------------------------------------------------------- services
 def _services(tmp_path: Path, *, issuance_enabled=True, refresh_enabled=False, role=RUNTIME_ROLE_SCHEDULER, fixture_provider=None):
     config = replace(
@@ -321,6 +435,16 @@ def test_flags_default_off(monkeypatch, tmp_path):
     assert config.model_pick_issuance_interval_seconds == 600
     assert config.prediction_refresh_interval_seconds == 3600
     assert issuance.resolve_prediction_refresh_interval_seconds(60) == issuance.MIN_PREDICTION_REFRESH_INTERVAL_SECONDS
+
+
+def test_overlapping_cycle_in_same_process_is_skipped(tmp_path):
+    services = _services(tmp_path)
+    assert services._model_pick_issuance_lock.acquire(blocking=False)
+    try:
+        assert services.run_model_pick_issuance_cycle() == {"state": "SKIPPED_CYCLE_IN_PROGRESS", "written": 0}
+    finally:
+        services._model_pick_issuance_lock.release()
+    assert services.run_model_pick_issuance_cycle().get("state") != "SKIPPED_CYCLE_IN_PROGRESS"
 
 
 def test_web_role_never_issues(tmp_path):

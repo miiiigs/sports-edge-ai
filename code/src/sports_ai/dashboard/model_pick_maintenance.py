@@ -118,16 +118,41 @@ def apply_live_issued(
     if expected_manifest_hash is not None and expected_manifest_hash != digest:
         raise RuntimeError(f"MANIFEST_HASH_MISMATCH: expected={expected_manifest_hash} apply={digest}")
     ledger.ensure_schema(ledger_conn)
+    ledger_conn.commit()
     before = int(ledger_conn.execute("SELECT COUNT(*) FROM football_model_pick_entries").fetchone()[0])
-    # One explicit transaction: any immutable conflict rolls back the whole apply.
+    canonical_duplicates: list[dict[str, Any]] = []
+    # One explicit transaction under the write lock: any immutable conflict rolls
+    # back the whole apply, and a concurrent scheduler cycle cannot interleave.
     with ledger_conn:
+        ledger.begin_immediate(ledger_conn)
         for pick in proposed:
+            canonical = pick.get("canonical_fixture_id")
+            if canonical:
+                # Never a second pick for the same match under another provider id.
+                holder = ledger.canonical_pick_holder(
+                    ledger_conn,
+                    policy_id=str(pick["policy_id"]),
+                    canonical_fixture_id=str(canonical),
+                    market=str(pick["market"]),
+                    fixture_id=str(pick["fixture_id"]),
+                )
+                if holder is not None:
+                    canonical_duplicates.append(
+                        {
+                            "canonical_fixture_id": canonical,
+                            "market": pick["market"],
+                            "issued_fixture_id": holder,
+                            "skipped_fixture_id": str(pick["fixture_id"]),
+                        }
+                    )
+                    continue
             ledger.record_model_pick(ledger_conn, pick, now=issued_at, initialize_schema=False)
     after = int(ledger_conn.execute("SELECT COUNT(*) FROM football_model_pick_entries").fetchone()[0])
     return {
         **_summary(manifest),
         "dry_run": False,
         "rows_written": after - before,
+        "canonical_duplicates_skipped": canonical_duplicates,
     }
 
 

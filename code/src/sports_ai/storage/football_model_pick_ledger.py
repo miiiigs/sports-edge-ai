@@ -180,6 +180,28 @@ def model_pick_id(*, policy_id: str, fixture_id: str, market: str) -> str:
     return "model_pick_" + canonical_hash({"policy_id": policy_id, "fixture_id": fixture_id, "market": market})
 
 
+def canonical_pick_holder(
+    conn: sqlite3.Connection, *, policy_id: str, canonical_fixture_id: str, market: str, fixture_id: str
+) -> str | None:
+    """Fixture id of another provider row already holding this canonical match + market, if any.
+
+    Writers call this inside their write transaction (``BEGIN IMMEDIATE``) so two
+    concurrent issuers can never both pick the same match under different ids.
+    """
+    row = conn.execute(
+        "SELECT fixture_id FROM football_model_pick_entries WHERE policy_id = ? AND canonical_fixture_id = ? "
+        "AND market = ? AND fixture_id != ? ORDER BY created_at, fixture_id LIMIT 1",
+        (policy_id, canonical_fixture_id, market, fixture_id),
+    ).fetchone()
+    return None if row is None else str(row[0])
+
+
+def begin_immediate(conn: sqlite3.Connection) -> None:
+    """Take the SQLite write lock now, so checks made before the insert stay true."""
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+
+
 def normalize_settlement_state(state: str | None) -> str | None:
     if state is None:
         return None

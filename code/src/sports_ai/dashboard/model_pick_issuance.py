@@ -14,7 +14,8 @@ picks, and a late manual run labelled picks for already-kicked-off fixtures as
   never change or conflict with an issued pick.
 * No identity merging: when another provider fixture id already holds a pick
   for the same canonical match and market, the new id is skipped and reported
-  as a canonical duplicate. Neither row is changed.
+  as a canonical duplicate. Neither row is changed. Both checks are repeated
+  under the SQLite write lock, so overlapping issuers cannot both write.
 * DB-only: reads persisted predictions/fixtures and writes only the Model Pick
   ledger. Zero provider requests, zero paper-ledger writes, zero Value Bets.
 """
@@ -125,26 +126,52 @@ def issue_forward_model_picks(
             _skip(SKIP_KICKOFF_PASSED)
             continue
         canonical = pick.get("canonical_fixture_id")
+        holder = None
         if canonical:
             key = (str(pick["policy_id"]), str(canonical), str(pick["market"]))
             holder = canonical_holders.get(key)
-            if holder is not None and holder != str(pick["fixture_id"]):
-                _skip(SKIP_CANONICAL_DUPLICATE)
-                canonical_duplicates.append(
-                    {
-                        "canonical_fixture_id": canonical,
-                        "market": pick["market"],
-                        "issued_fixture_id": holder,
-                        "skipped_fixture_id": str(pick["fixture_id"]),
-                    }
-                )
+            if holder == str(pick["fixture_id"]):
+                holder = None
+        concurrent_issue = False
+        if holder is None:
+            try:
+                with ledger_conn:
+                    # Re-check under the write lock: another issuer (a second
+                    # process or a manual CLI run) may have written since the
+                    # snapshot above was read.
+                    ledger.begin_immediate(ledger_conn)
+                    if ledger_conn.execute(
+                        "SELECT 1 FROM football_model_pick_entries WHERE model_pick_id = ?", (pick_id,)
+                    ).fetchone():
+                        concurrent_issue = True
+                    elif canonical:
+                        holder = ledger.canonical_pick_holder(
+                            ledger_conn,
+                            policy_id=str(pick["policy_id"]),
+                            canonical_fixture_id=str(canonical),
+                            market=str(pick["market"]),
+                            fixture_id=str(pick["fixture_id"]),
+                        )
+                    if not concurrent_issue and holder is None:
+                        ledger.record_model_pick(ledger_conn, pick, now=issued_at, initialize_schema=False)
+            except sqlite3.IntegrityError as exc:
+                _skip(SKIP_IMMUTABLE_CONFLICT)
+                conflicts.append(str(exc))
                 continue
-        try:
-            with ledger_conn:
-                ledger.record_model_pick(ledger_conn, pick, now=issued_at, initialize_schema=False)
-        except sqlite3.IntegrityError as exc:
-            _skip(SKIP_IMMUTABLE_CONFLICT)
-            conflicts.append(str(exc))
+        if concurrent_issue:
+            existing_ids.add(pick_id)
+            _skip(SKIP_ALREADY_ISSUED)
+            continue
+        if holder is not None:
+            _skip(SKIP_CANONICAL_DUPLICATE)
+            canonical_duplicates.append(
+                {
+                    "canonical_fixture_id": canonical,
+                    "market": pick["market"],
+                    "issued_fixture_id": holder,
+                    "skipped_fixture_id": str(pick["fixture_id"]),
+                }
+            )
             continue
         existing_ids.add(pick_id)
         if canonical:
