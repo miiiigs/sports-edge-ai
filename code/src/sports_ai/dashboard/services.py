@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
@@ -962,6 +963,9 @@ class DashboardServices:
             "high_confidence_shadow_abstained_last_cycle": {},
             "high_confidence_shadow_settled_last_cycle": 0,
         }
+        # The issuance loop and the prediction refresh loop both run issuance
+        # cycles in worker threads; overlapping cycles are skipped, not raced.
+        self._model_pick_issuance_lock = threading.Lock()
         self._model_pick_issuance_runtime_state: dict[str, Any] = {
             "model_pick_issuance_scheduler_enabled": self.config.enable_model_pick_issuance_scheduler,
             "model_pick_issuance_interval_seconds": self.config.model_pick_issuance_interval_seconds,
@@ -3833,7 +3837,8 @@ class DashboardServices:
         """Latest eligible pre-match closing quote, or ``None`` (CLV stays null).
 
         Eligible: same market/selection/line, pre-match, ``captured_at <= kickoff``
-        AND within ``SPORTS_AI_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF`` (default
+        AND the price was observed (``last_observed_at``, else ``captured_at``)
+        within ``SPORTS_AI_CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF`` (default
         60) of kickoff, and value-eligible evidence (legacy v1 / unknown-version
         API-Football AH is never closing evidence). There is no fallback to an
         older capture. Only used for NEW closing selections; already stored
@@ -3853,16 +3858,19 @@ class DashboardServices:
                 continue
             try:
                 captured = parse_iso_datetime(str(row["captured_at"]))
+                # Identical re-observed quotes are de-duplicated: only
+                # last_observed_at advances, so the price was still in force then.
+                observed = parse_iso_datetime(str(row.get("last_observed_at") or row["captured_at"]))
             except (TypeError, ValueError):
                 continue
-            if captured > kickoff or captured < earliest:
+            if captured > kickoff or max(captured, observed) < earliest:
                 continue
             if not snapshot_is_value_eligible(dict(row)):
                 continue
-            candidates.append(row)
+            candidates.append((min(max(captured, observed), kickoff), row))
         if not candidates:
             return None
-        return sorted(candidates, key=lambda row: (row["captured_at"], int(row["snapshot_id"])))[-1]
+        return sorted(candidates, key=lambda item: (item[0], int(item[1]["snapshot_id"])))[-1][1]
 
     def _canonical_fixture_for_prediction(self, conn: Any, prediction: dict[str, Any]) -> str | None:
         """Resolve (and register) the canonical fixture for a prediction."""
@@ -5990,9 +5998,17 @@ class DashboardServices:
         DB-only: reads persisted predictions/fixtures, writes only the Model Pick
         ledger. Zero provider requests, zero paper-ledger writes, zero Value Bets.
         """
-        started_at = utc_now_iso()
         if not self.model_pick_issuance_scheduler_active():
             return {"state": "DISABLED", "written": 0}
+        if not self._model_pick_issuance_lock.acquire(blocking=False):
+            return {"state": "SKIPPED_CYCLE_IN_PROGRESS", "written": 0}
+        try:
+            return self._run_model_pick_issuance_cycle_locked()
+        finally:
+            self._model_pick_issuance_lock.release()
+
+    def _run_model_pick_issuance_cycle_locked(self) -> dict[str, Any]:
+        started_at = utc_now_iso()
         error: str | None = None
         result: dict[str, Any] = {}
         try:

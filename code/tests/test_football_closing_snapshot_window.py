@@ -87,6 +87,22 @@ def test_in_window_v2_accepted_and_latest_wins(tmp_path, monkeypatch):
     assert _closing(services, rows[:2])["snapshot_id"] == 2  # exactly 60m boundary
 
 
+def test_unchanged_quote_reobserved_in_window_is_closing(tmp_path, monkeypatch):
+    # Identical quotes are de-duplicated: one row captured at T-3h whose
+    # last_observed_at advanced to T-10m is the price in force near kickoff.
+    monkeypatch.delenv(services_mod.CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF_ENV_VAR, raising=False)
+    services = _services(tmp_path)
+    held = {**_snap(1, 180), "last_observed_at": _at(10)}
+    assert _closing(services, [held])["snapshot_id"] == 1
+    # Still observed only before the window -> rejected.
+    assert _closing(services, [{**_snap(1, 180), "last_observed_at": _at(90)}]) is None
+    # A newer price state captured at T-20m beats the older one last seen at T-30m.
+    newer = _snap(2, 20, odds=2.1)
+    assert _closing(services, [{**_snap(1, 180), "last_observed_at": _at(30)}, newer])["snapshot_id"] == 2
+    # Observation after kickoff does not make a post-kickoff capture eligible.
+    assert _closing(services, [{**_snap(1, -5), "last_observed_at": _at(-10)}]) is None
+
+
 def test_post_kickoff_and_in_play_rejected(tmp_path):
     services = _services(tmp_path)
     assert _closing(services, [_snap(1, -1)]) is None
