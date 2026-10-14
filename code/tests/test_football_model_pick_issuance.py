@@ -358,6 +358,95 @@ def test_concurrent_cycles_write_each_pick_exactly_once(tmp_path):
     assert len({row["fixture_id"] for row in rows if row["fixture_id"] in ("football-data:1", "api-football:9")}) == 1
 
 
+def test_alias_spellings_and_kickoff_forms_resolve_to_one_match(dbs):
+    dash, led = dbs
+    # Provider A: "Leeds", "Z" kickoff. Provider B: "Leeds United", "+00:00" kickoff.
+    _add_fixture(dash, "football-data:1", home="Leeds", kickoff=KICKOFF.replace("+00:00", "Z"))
+    _add_fixture(dash, "api-football:9", home="Leeds United")
+    _add_prediction(dash, prediction_id="p_fd", fixture_id="football-data:1")
+    _add_prediction(dash, prediction_id="p_af", fixture_id="api-football:9")
+    dash.commit()
+
+    result = issuance.issue_forward_model_picks(dash, led, now=BEFORE_KICKOFF)
+
+    assert result["written"] == 2
+    assert result["skipped"].get(issuance.SKIP_CANONICAL_DUPLICATE) == 2
+    assert len({row["fixture_id"] for row in _rows(led)}) == 1
+
+
+def test_team_rename_after_issuance_never_reissues_the_fixture(dbs):
+    """An alias/name change alters the canonical hash; the provider fixture id still holds the pick."""
+    dash, led = dbs
+    _add_fixture(dash, "api-football:9", home="Leeds")
+    _add_prediction(dash, prediction_id="p1", fixture_id="api-football:9")
+    dash.commit()
+    issuance.issue_forward_model_picks(dash, led, now=BEFORE_KICKOFF)
+    before = _rows(led)
+
+    dash.execute("UPDATE dashboard_fixtures SET home_team_name = 'Leeds AFC' WHERE fixture_id = 'api-football:9'")
+    _add_prediction(dash, prediction_id="p2", fixture_id="api-football:9", generated_at="2026-10-16T08:30:00+00:00",
+                    version_key="v2", line_shift=0.25)
+    dash.commit()
+    again = issuance.issue_forward_model_picks(dash, led, now="2026-10-16T09:30:00+00:00")
+    assert again["written"] == 0
+    assert again["skipped"].get(issuance.SKIP_ALREADY_ISSUED) == 2
+    # The operator CLI fails closed on the drifted version: whole apply rolled back.
+    with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
+        maintenance.apply_live_issued(dash, led, now="2026-10-16T09:31:00+00:00")
+    assert _rows(led) == before  # frozen: canonical id, prices and created_at unchanged
+
+
+def test_scheduler_and_cli_racing_on_separate_connections_write_once(tmp_path):
+    import threading
+
+    dash = _dashboard(tmp_path / "dash.sqlite")
+    _two_provider_ids_for_one_match(dash)
+    for n in range(3):
+        _add_fixture(dash, f"fx{n}", home=f"Home{n}", away=f"Away{n}")
+        _add_prediction(dash, prediction_id=f"p{n}", fixture_id=f"fx{n}")
+    dash.commit()
+    dash.close()
+    setup = ledger.connect(tmp_path / "picks.sqlite")
+    ledger.ensure_schema(setup)
+    setup.commit()
+    setup.close()
+
+    barrier = threading.Barrier(4)
+    errors: list[BaseException] = []
+
+    def worker(kind: str):
+        d = sqlite3.connect(f"file:{(tmp_path / 'dash.sqlite').as_posix()}?mode=ro", uri=True)
+        d.row_factory = sqlite3.Row
+        led = ledger.connect(tmp_path / "picks.sqlite")
+        try:
+            barrier.wait()
+            if kind == "scheduler":
+                issuance.issue_forward_model_picks(d, led, now=BEFORE_KICKOFF)
+            else:
+                maintenance.apply_live_issued(d, led, now=BEFORE_KICKOFF)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+        finally:
+            led.close()
+            d.close()
+
+    threads = [threading.Thread(target=worker, args=(k,)) for k in ("scheduler", "cli", "scheduler", "cli")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    assert errors == []
+    led = ledger.connect(tmp_path / "picks.sqlite")
+    rows = _rows(led)
+    led.close()
+    # 4 matches x (AH + corners); the two provider ids share one match.
+    assert len(rows) == 8
+    assert len({(r["fixture_id"], r["market"]) for r in rows}) == 8
+    assert len({(r["canonical_fixture_id"], r["market"]) for r in rows}) == 8
+    assert all(ledger.issuance_timing(r) == ledger.ISSUANCE_TIMING_FORWARD for r in rows)
+
+
 def test_cli_apply_skips_match_already_held_by_another_provider_id(dbs):
     dash, led = dbs
     _add_fixture(dash, "football-data:1")

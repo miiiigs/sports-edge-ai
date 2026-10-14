@@ -151,3 +151,25 @@ def test_stored_closing_values_never_rewritten(tmp_path, monkeypatch):
         pass
     assert calls["resolved"] == 1  # the stored row really reached the closing step
     assert calls["attach"] == 0 and calls["closing"] == 0
+
+
+def test_missing_market_evidence_stays_missing(tmp_path, monkeypatch):
+    monkeypatch.delenv(services_mod.CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF_ENV_VAR, raising=False)
+    services = _services(tmp_path)
+    assert _closing(services, []) is None
+    # Evidence for another selection or line never stands in for the missing one.
+    assert _closing(services, [_snap(1, 5, selection="AWAY"), _snap(2, 5, line=-0.25)]) is None
+    # Unparseable timestamps are not evidence.
+    assert _closing(services, [{**_snap(1, 5), "captured_at": "garbage", "last_observed_at": None}]) is None
+
+
+def test_closing_is_the_actual_offered_quote_unmodified(tmp_path, monkeypatch):
+    monkeypatch.delenv(services_mod.CLOSING_ODDS_MAX_MINUTES_BEFORE_KICKOFF_ENV_VAR, raising=False)
+    services = _services(tmp_path)
+    # A better price seen earlier (outside the window) is never preferred.
+    rows = [_snap(1, 240, odds=2.40), {**_snap(2, 120, odds=1.97), "last_observed_at": _at(8)}, _snap(3, 30, odds=2.02)]
+    chosen = _closing(services, rows)
+    assert chosen["snapshot_id"] == 2  # re-observed at T-8m: latest price in force
+    assert chosen["odds"] == 1.97
+    assert chosen["captured_at"] == _at(120)  # stored capture time is reported, not rewritten
+    assert rows[1] == {**_snap(2, 120, odds=1.97), "last_observed_at": _at(8)}  # input untouched
