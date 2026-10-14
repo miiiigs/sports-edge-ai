@@ -43,7 +43,7 @@ Blocker found 2026-10-14: Railway caps **manual** backups at 50% of the volume
 size. The volume is at 1003 / 2000 MB (50.2%), so a manual backup will most likely
 be refused. Choose one, with approval because both change production settings or cost:
 
-1. Grow the volume (e.g. to 5 GB) in Railway → service → Volume, then take a manual backup; or
+1. Grow the volume (e.g. to 3 GB) in Railway → project canvas → click the volume → **Live Resize** (Hobby/Pro, zero downtime, grow-only; the Railway CLI has no resize command). Then take a manual backup. Storage is billed on used GB, not provisioned GB; or
 2. Enable a **Daily** backup schedule (scheduled backups are not subject to the manual cap per Railway's docs; verify in the UI).
 
 Then:
@@ -75,7 +75,45 @@ railway ssh -s sports-edge-ai "tar -C /tmp -czf - fb-$TS | base64 -w0" > fb-$TS.
 railway ssh -s sports-edge-ai "rm -rf /tmp/fb-$TS"
 ```
 
-Locally, outside the repository:
+#### Windows PowerShell 5.1
+
+The Bash commands above do not work as written in Windows PowerShell 5.1. It
+re-encodes redirected native output as UTF-16, it strips embedded double quotes
+from native arguments, and some launchers truncate command lines at about 8 KB.
+`code/scripts/football/Invoke-FootballSqliteBackup.ps1` runs the same steps
+safely:
+
+- It refuses to start while the service is `SLEEPING` (it never wakes it).
+- It sends the module gzip+base64 inside a quote-free remote command
+  (`echo … | base64 -d | gunzip | python3 - backup …`). Nothing is uploaded, and
+  the copy goes to `/tmp/fb-<TS>`.
+- It streams the archive back through `Start-Process -RedirectStandardOutput`
+  (byte-exact) and decodes it locally in a stream, with whitespace tolerated.
+- It verifies locally: module `verify`, `Get-FileHash` against the manifest,
+  and the container manifest equal to the transferred one.
+- Only after verification passes does it remove `/tmp/fb-<TS>` and confirm
+  the directory is gone.
+- It refuses a destination inside any Git working tree. It writes to
+  `%USERPROFILE%\sports-edge-backups\football\<TS>\`, with the ACL reduced to the
+  current user.
+
+```powershell
+# From the repository root, with `railway` linked to sports-edge-football / production,
+# while `railway status --json` shows the service awake from a natural wake:
+.\code\scripts\football\Invoke-FootballSqliteBackup.ps1
+# Rehearsal on test databases (Git Bash plays the container; no Railway access):
+.\code\scripts\football\Invoke-FootballSqliteBackup.ps1 -LocalRehearsal `
+    -RehearsalSourceDir /c/path/to/test-data -DestRoot $env:TEMP\fb-rehearsal
+```
+
+It prints and writes `evidence.json`, which holds timestamps, integrity, sha256
+and the reconciled-table counts only. The auth database's tables are not counted
+in the evidence. Rehearsed 2026-10-14 against WAL-only test databases (every row
+still in `-wal`) and a 274 MB database: the counts matched, `.sqlite`/`-wal` were
+byte-identical afterwards (`-shm` changes, as expected), and the guards refused
+SLEEPING and an in-repo destination.
+
+Locally, outside the repository (Bash path):
 
 ```bash
 base64 -d fb-$TS.tgz.b64 > fb-$TS.tgz && tar -xzf fb-$TS.tgz
