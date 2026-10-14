@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ..agents.football.route_a_classifier import (
     ROUTE_A_AGENT_ID,
@@ -76,16 +77,31 @@ def resolve_min_venue_history_matches(value: Any = None) -> int:
     return min(max(n, DEFAULT_MIN_VENUE_HISTORY_MATCHES), MAX_MIN_VENUE_HISTORY_MATCHES)
 
 
+# Research match dates are UK calendar dates (see football_schedule_freshness).
+RESEARCH_DATE_TZ = ZoneInfo("Europe/London")
+
+
 def model_state_predates_kickoff(model_as_of: str | None, kickoff_utc: str) -> bool:
     """True only when every research match in the model state is from before the kickoff date.
 
-    ``model_as_of`` is the end of the latest research match day. A state from the
-    kickoff day itself (or later) could contain the fixture or later information,
-    so it fails closed even when the same-day match kicked off earlier.
+    ``model_as_of`` is the end of the latest research match day, a UK calendar
+    date, so the kickoff is compared on its UK date too (a 23:30 UTC kickoff in
+    BST is the next UK day). A state from the kickoff day itself (or later)
+    could contain the fixture or later information, so it fails closed even
+    when the same-day match kicked off earlier. Unparseable input fails closed.
     """
     if not model_as_of:
         return False
-    return str(model_as_of)[:10] < str(kickoff_utc)[:10]
+    text = str(kickoff_utc or "").strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        kickoff = datetime.fromisoformat(text)
+    except ValueError:
+        return False
+    if kickoff.tzinfo is None:
+        kickoff = kickoff.replace(tzinfo=timezone.utc)
+    return str(model_as_of)[:10] < kickoff.astimezone(RESEARCH_DATE_TZ).date().isoformat()
 
 
 def _model_parameters(snapshot: CurrentFootballModelSnapshot, competition_id: str, *, rho: float, xi: float) -> dict[str, Any]:

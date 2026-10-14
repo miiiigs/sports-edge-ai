@@ -136,6 +136,35 @@ def test_model_state_must_predate_kickoff_date(model_as_of, kickoff, expected):
     assert ps.model_state_predates_kickoff(model_as_of, kickoff) is expected
 
 
+@pytest.mark.parametrize(
+    "model_as_of,kickoff,expected",
+    [
+        # BST (UTC+1): 23:30 UTC is 00:30 next UK day, so an as-of-that-UTC-day state predates it.
+        ("2026-10-12T23:59:59", "2026-10-12T23:30:00+00:00", True),
+        ("2026-10-12T23:59:59", "2026-10-12T23:30:00Z", True),
+        ("2026-10-12T23:59:59", "2026-10-12T22:59:59+00:00", False),  # 23:59:59 BST, same UK day
+        ("2026-10-13T23:59:59", "2026-10-12T23:30:00+00:00", False),  # state from the UK kickoff day
+        # BST -> GMT switch (last Sunday of October 2026 is 25 Oct, 01:00 UTC).
+        ("2026-10-24T23:59:59", "2026-10-24T23:00:00+00:00", True),   # still BST: 00:00 on 25 Oct
+        ("2026-10-25T23:59:59", "2026-10-25T23:30:00+00:00", False),  # GMT: still 25 Oct in the UK
+        # GMT (UTC+0): UK date equals UTC date, including midnight and year end.
+        ("2026-12-31T23:59:59", "2026-12-31T23:59:59+00:00", False),
+        ("2026-12-31T23:59:59", "2027-01-01T00:00:00+00:00", True),
+        ("2027-01-01T23:59:59", "2027-01-01T00:00:00+00:00", False),
+        # GMT -> BST switch (29 Mar 2026, 01:00 UTC).
+        ("2026-03-28T23:59:59", "2026-03-28T23:30:00+00:00", False),  # GMT: still 28 Mar
+        ("2026-03-29T23:59:59", "2026-03-29T23:30:00+00:00", True),   # BST: 00:30 on 30 Mar
+        # Explicit offsets are honoured; naive kickoffs are UTC; unparseable fails closed.
+        ("2026-10-12T23:59:59", "2026-10-13T01:30:00+02:00", True),
+        ("2026-10-12T23:59:59", "2026-10-12T23:30:00", True),
+        ("2026-10-12T23:59:59", "not-a-time", False),
+        ("2026-10-12T23:59:59", "", False),
+    ],
+)
+def test_model_state_compares_uk_kickoff_date(model_as_of, kickoff, expected):
+    assert ps.model_state_predates_kickoff(model_as_of, kickoff) is expected
+
+
 def test_fixture_on_or_before_the_research_cutoff_is_blocked(snapshot):
     same_day = snapshot.model_as_of[:10] + "T20:00:00+00:00"
     prediction = build_prediction_for_fixture(PredictionContext(fixture=_fixture(kickoff=same_day), snapshot=snapshot))
