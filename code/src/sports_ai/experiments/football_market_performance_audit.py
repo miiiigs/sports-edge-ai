@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from sports_ai.dashboard.client_history import _representative_sort_key
+from sports_ai.dashboard.paper_market_evidence import partition_counted_paper_rows
 from sports_ai.dashboard.portfolio_selection import (
     PORTFOLIO_POLICY_ID_V1,
     PORTFOLIO_POLICY_VERSION_V1,
@@ -38,11 +39,7 @@ def _load_counted_rows(paper_db_path: Path) -> tuple[list[dict[str, Any]], Any]:
         conn,
         initialize_schema=False,
     )
-    counted = [
-        row
-        for row in rows
-        if str(row.get("paper_trade_id") or "") not in excluded
-    ]
+    counted, _ = partition_counted_paper_rows(rows, excluded)
     return counted, conn
 
 

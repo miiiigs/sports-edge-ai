@@ -22,6 +22,7 @@ from ..agents.football.route_a_classifier import (
 )
 from ..locking import canonical_hash
 from .models import TeamResolution, normalize_text_key, slugify, utc_now_iso
+from .football_transition_maturity import identify_transition_team
 from .team_aliases import classify_unresolved_team, resolve_provider_team_alias, suggest_canonical_candidates
 
 try:
@@ -121,6 +122,36 @@ class CurrentFootballModelSnapshot:
             model_history_reason=model_history_reason,
         )
 
+    def _catalog_name_for_alias_match(
+        self,
+        *,
+        competition_id: str,
+        provider_team_name: str,
+        canonical_team_name: str,
+    ) -> str:
+        """Map an approved transition identity onto the name the model state uses.
+
+        The transition baseline's display name can differ from the research
+        source's spelling (e.g. "Lincoln City" vs "Lincoln"). Without this, the
+        club resolves to an id with no model state and stays blocked with
+        MODEL_HISTORY_MISSING forever. Only the baseline's own approved aliases
+        are tried, in order, so no fuzzy matching is introduced.
+        """
+        candidates = self.team_catalog.get(competition_id, {})
+        if normalize_text_key(canonical_team_name) in candidates:
+            return canonical_team_name
+        transition_team = identify_transition_team(
+            competition_id=competition_id,
+            team_name=provider_team_name,
+        )
+        if transition_team is None:
+            return canonical_team_name
+        for name in (transition_team.canonical_name, *transition_team.aliases):
+            exact = candidates.get(normalize_text_key(name))
+            if exact is not None:
+                return str(exact["canonical_team_name"])
+        return canonical_team_name
+
     def resolve_team(
         self,
         *,
@@ -144,7 +175,11 @@ class CurrentFootballModelSnapshot:
                 provider_team_id=provider_team_id,
                 provider_team_name=provider_team_name,
                 normalized_team_name=normalized_team_name,
-                canonical_team_name=str(alias_match["canonical_team_name"]),
+                canonical_team_name=self._catalog_name_for_alias_match(
+                    competition_id=competition_id,
+                    provider_team_name=provider_team_name,
+                    canonical_team_name=str(alias_match["canonical_team_name"]),
+                ),
                 resolution_kind=str(alias_match["resolution_kind"]),
                 confidence=1.0,
                 reason=str(alias_match["reason"]),
@@ -318,11 +353,27 @@ def _load_alias_catalog(repo_root: Path) -> dict[str, dict[str, str]]:
             normalize_text_key("Wolverhampton Wanderers"): normalize_text_key("Wolves"),
             normalize_text_key("Newcastle United"): normalize_text_key("Newcastle"),
             normalize_text_key("West Bromwich Albion"): normalize_text_key("West Brom"),
+            # API-Football team id 65 "Nottingham Forest" (production
+            # dashboard_team_mappings, ENG1).  football-data.co.uk E0 names the
+            # club "Nott'm Forest" in every ENG1 season 2022/23-2025/26 and it is
+            # the only ENG1 research club containing "Nott"/"Forest" (Notts
+            # County / Forest Green are ENG4/ENG3 only).  Not a 2026/27
+            # transition club, so it stays in ENG1.
+            normalize_text_key("Nottingham Forest"): normalize_text_key("Nott'm Forest"),
         },
         "ENG2": {
             normalize_text_key("West Bromwich Albion"): normalize_text_key("West Brom"),
+            # API-Football team id 75 "Stoke City" (production, ENG2).  E1 names
+            # the club "Stoke" in every ENG2 season 2021/22-2025/26; the only ENG2
+            # research club containing "Stoke"; not a 2026/27 transition club.
+            normalize_text_key("Stoke City"): normalize_text_key("Stoke"),
         },
         "ENG3": {
+            # API-Football team id 1374 "Mansfield Town" (production, ENG3).  E2
+            # names the club "Mansfield" in ENG3 2024/25 and 2025/26 (ENG4 before
+            # promotion); the only research club containing "Mansfield"; not a
+            # 2026/27 transition club, so it stays in ENG3.
+            normalize_text_key("Mansfield Town"): normalize_text_key("Mansfield"),
             normalize_text_key("Stockport County"): normalize_text_key("Stockport"),
             normalize_text_key("Peterborough"): normalize_text_key("Peterboro"),
             normalize_text_key("Peterborough United"): normalize_text_key("Peterboro"),

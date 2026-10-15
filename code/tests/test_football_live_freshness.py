@@ -167,3 +167,69 @@ def test_production_initialize_primes_freshness_before_startup_sync(monkeypatch)
         "log",
         "persist",
     ]
+
+
+def _freshness_services(*, supported: tuple[str, ...] | None) -> ProductionDashboardServices:
+    services = ProductionDashboardServices.__new__(ProductionDashboardServices)
+    services.snapshot = None if supported is None else SimpleNamespace(supported_competitions=supported)
+    services._competition_model_freshness = {
+        "ENG1": {"latest_complete_match_date": "2026-10-12", "age_days": 2, "max_age_days": 21, "state": "FRESH"},
+        "FRA1": {"latest_complete_match_date": "2026-05-29", "age_days": 138, "max_age_days": 21, "state": "STALE"},
+    }
+    return services
+
+
+def test_unsupported_stale_competition_does_not_degrade_readiness() -> None:
+    services = _freshness_services(supported=("ENG1",))
+
+    summary = services._freshness_summary()
+
+    assert summary == {
+        "state": "READY",
+        "stale_competitions": [],
+        "unsupported_stale_competitions": ["FRA1"],
+    }
+
+
+def test_supported_stale_competition_still_degrades_readiness() -> None:
+    services = _freshness_services(supported=("ENG1", "FRA1"))
+
+    summary = services._freshness_summary()
+
+    assert summary["state"] == "DEGRADED"
+    assert summary["stale_competitions"] == ["FRA1"]
+    assert summary["unsupported_stale_competitions"] == []
+
+
+def test_freshness_fails_closed_without_snapshot_or_supported_rows() -> None:
+    assert _freshness_services(supported=None)._freshness_summary()["state"] == "DEGRADED"
+    assert _freshness_services(supported=("ESP1",))._freshness_summary() == {
+        "state": "DEGRADED",
+        "stale_competitions": [],
+        "unsupported_stale_competitions": ["FRA1"],
+    }
+
+
+def test_system_status_and_health_ignore_unsupported_stale_competition(monkeypatch) -> None:
+    services = _freshness_services(supported=("ENG1",))
+    services._research_refresh_state = {"state": "READY"}
+    services._context_mode = "off"
+    services._context_provider = None
+    monkeypatch.setattr(
+        DashboardServices,
+        "_build_system_status",
+        lambda self, **kwargs: {"current_prediction_pipeline_ready": "YES", "live_paper_pipeline_ready": "YES"},
+    )
+    monkeypatch.setattr(DashboardServices, "get_health_payload", lambda self: {"status": "ok"})
+
+    status = services._build_system_status()
+    health = services.get_health_payload()
+
+    assert status["current_prediction_pipeline_ready"] == "YES"
+    assert status["live_paper_pipeline_ready"] == "YES"
+    assert status["production_hardening"]["state"] == "READY"
+    assert status["production_hardening"]["unsupported_stale_competitions"] == ["FRA1"]
+    assert "FRA1" in status["production_hardening"]["competition_model_freshness"]
+    assert health["model_state_freshness"]["state"] == "READY"
+    assert health["model_state_freshness"]["stale_competitions"] == []
+    assert health["model_state_freshness"]["unsupported_stale_competitions"] == ["FRA1"]

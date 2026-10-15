@@ -92,6 +92,25 @@ HARD_MAX_RESULT_SYNC_INTERVAL_SECONDS = 86_400
 DEFAULT_RESULT_SYNC_MAX_FIXTURES = 2
 HARD_MAX_RESULT_SYNC_MAX_FIXTURES = 10
 
+# Backlog recovery (bounded, opt-in). Fixtures with an OPEN LIVE_ISSUED Model Pick
+# whose kickoff is older than the recent 72h window but younger than this many
+# days remain eligible for status/score and corner-truth sync at a LOWER priority
+# than every recent candidate. 0 (default) keeps the historical 72h-only behaviour.
+RESULT_SYNC_BACKLOG_LOOKBACK_DAYS_ENV_VAR = "SPORTS_AI_RESULT_SYNC_BACKLOG_LOOKBACK_DAYS"
+DEFAULT_RESULT_SYNC_BACKLOG_LOOKBACK_DAYS = 0
+HARD_MAX_RESULT_SYNC_BACKLOG_LOOKBACK_DAYS = 60
+# A backlog fixture is only considered once kickoff + this grace has elapsed.
+RESULT_SYNC_BACKLOG_GRACE_HOURS = 2
+
+# Status batching (opt-in). API-Football ``/fixtures?ids=a-b-c`` accepts up to 20
+# ids per request. 1 (default) keeps the historical one ``/fixtures?id=`` request
+# per selected fixture. When > 1, ONE batched request consumes ONE per-cycle slot.
+RESULT_SYNC_STATUS_BATCH_SIZE_ENV_VAR = "SPORTS_AI_RESULT_SYNC_STATUS_BATCH_SIZE"
+DEFAULT_RESULT_SYNC_STATUS_BATCH_SIZE = 1
+API_FOOTBALL_MAX_IDS_PER_REQUEST = 20
+
+API_FOOTBALL_FIXTURE_ID_PREFIX = "api-football:"
+
 
 def resolve_result_sync_interval_seconds(configured: int | None) -> int:
     if configured is None:
@@ -117,6 +136,44 @@ def resolve_result_sync_max_fixtures(configured: int | None) -> int:
     if value <= 0:
         return DEFAULT_RESULT_SYNC_MAX_FIXTURES
     return max(1, min(value, HARD_MAX_RESULT_SYNC_MAX_FIXTURES))
+
+
+def resolve_result_sync_backlog_lookback_days(configured: int | None) -> int:
+    """0 disables backlog recovery; otherwise clamp to [1, HARD_MAX]."""
+    if configured is None:
+        return DEFAULT_RESULT_SYNC_BACKLOG_LOOKBACK_DAYS
+    try:
+        value = int(configured)
+    except (TypeError, ValueError):
+        return DEFAULT_RESULT_SYNC_BACKLOG_LOOKBACK_DAYS
+    if value <= 0:
+        return 0
+    return min(value, HARD_MAX_RESULT_SYNC_BACKLOG_LOOKBACK_DAYS)
+
+
+def resolve_result_sync_status_batch_size(configured: int | None) -> int:
+    """1 keeps per-fixture requests; otherwise clamp to the API-Football ids limit."""
+    if configured is None:
+        return DEFAULT_RESULT_SYNC_STATUS_BATCH_SIZE
+    try:
+        value = int(configured)
+    except (TypeError, ValueError):
+        return DEFAULT_RESULT_SYNC_STATUS_BATCH_SIZE
+    if value <= 1:
+        return 1
+    return min(value, API_FOOTBALL_MAX_IDS_PER_REQUEST)
+
+
+def is_pollable_api_football_fixture_id(fixture_id: Any) -> bool:
+    """True only for ``api-football:<digits>`` ids that ``/fixtures?id(s)=`` can query.
+
+    football-data.org ids, generated ids and hash ids can never be resolved by the
+    API-Football fixtures endpoint, so they must not consume result-sync slots.
+    """
+    text = str(fixture_id or "").strip()
+    if not text.startswith(API_FOOTBALL_FIXTURE_ID_PREFIX):
+        return False
+    return text[len(API_FOOTBALL_FIXTURE_ID_PREFIX):].isdigit()
 
 
 def normalize_api_football_status(short: Any) -> str:
@@ -173,6 +230,25 @@ def within_result_lookback(*, kickoff_utc: Any, status: str, now_utc: datetime) 
     return (now_utc - kickoff).total_seconds() <= hours * 3600
 
 
+def within_backlog_lookback(*, kickoff_utc: Any, now_utc: datetime, backlog_days: int) -> bool:
+    """Backlog window: older than the recent window, younger than ``backlog_days``.
+
+    Disabled (always False) when ``backlog_days <= 0``. Future / unparsable
+    kickoffs and kickoffs within the grace period are never eligible.
+    """
+    if int(backlog_days or 0) <= 0:
+        return False
+    kickoff = _parse_kickoff(kickoff_utc)
+    if kickoff is None or kickoff > now_utc:
+        return False
+    age_seconds = (now_utc - kickoff).total_seconds()
+    if age_seconds < RESULT_SYNC_BACKLOG_GRACE_HOURS * 3600:
+        return False
+    if age_seconds <= RECENT_RESULT_LOOKBACK_HOURS * 3600:
+        return False  # still inside the recent window (handled at normal priority)
+    return age_seconds <= int(backlog_days) * 86_400
+
+
 def needs_result_sync(*, status: str, home_score: Any, away_score: Any) -> bool:
     """FOOTBALL RESULT track: True unless verified terminal / cancelled / abandoned.
 
@@ -215,6 +291,9 @@ class ResultFixtureCandidate:
     away_score: int | None
     has_live_issued_pick: bool
     last_result_sync_attempt_at: str | None = None
+    # True when the fixture is outside the recent window but inside the bounded
+    # backlog window (lower priority than every recent candidate).
+    backlog: bool = False
 
 
 def _priority_rank(status: str) -> int:
@@ -225,10 +304,28 @@ def _priority_rank(status: str) -> int:
     return 2
 
 
-def _sort_key(candidate: ResultFixtureCandidate) -> tuple[int, str, float, str]:
+def _backlog_order(kickoff_utc: str) -> float:
+    # Backlog drains OLDEST first: the oldest stuck picks are closest to falling out
+    # of the bounded backlog window, and API-Football keeps final results, so age
+    # does not reduce the chance of a verified answer. Never-attempted fixtures
+    # still go before re-attempts (last-attempt ordering precedes this key).
+    kickoff = _parse_kickoff(kickoff_utc)
+    return kickoff.timestamp() if kickoff is not None else float("inf")
+
+
+def _sort_key(candidate: ResultFixtureCandidate) -> tuple[int, int, str, float, str]:
+    if candidate.backlog:
+        return (
+            1,
+            _priority_rank(candidate.status),
+            candidate.last_result_sync_attempt_at or "",
+            _backlog_order(candidate.kickoff_utc),
+            candidate.fixture_id,
+        )
     kickoff = _parse_kickoff(candidate.kickoff_utc)
     recency = -kickoff.timestamp() if kickoff is not None else 0.0  # nearest recent first
     return (
+        0,
         _priority_rank(candidate.status),
         candidate.last_result_sync_attempt_at or "",
         recency,
@@ -266,12 +363,21 @@ class CornerFixtureCandidate:
     has_corner_pick: bool
     corner_result_present: bool
     last_corner_sync_attempt_at: str | None = None
+    backlog: bool = False
 
 
-def _corner_sort_key(candidate: CornerFixtureCandidate) -> tuple[str, float, str]:
+def _corner_sort_key(candidate: CornerFixtureCandidate) -> tuple[int, str, float, str]:
+    if candidate.backlog:
+        return (
+            1,
+            candidate.last_corner_sync_attempt_at or "",
+            _backlog_order(candidate.kickoff_utc),
+            candidate.fixture_id,
+        )
     kickoff = _parse_kickoff(candidate.kickoff_utc)
     recency = -kickoff.timestamp() if kickoff is not None else 0.0  # nearest recent first
     return (
+        0,
         candidate.last_corner_sync_attempt_at or "",
         recency,
         candidate.fixture_id,
@@ -296,6 +402,22 @@ def select_corner_sync_fixtures(
         )
     ]
     return sorted(eligible, key=_corner_sort_key)[: max(0, int(max_fixtures))]
+
+
+def chunk_status_batches(
+    candidates: Sequence[ResultFixtureCandidate],
+    *,
+    batch_size: int,
+    max_batches: int,
+) -> list[list[ResultFixtureCandidate]]:
+    """Split already-ordered candidates into at most ``max_batches`` batches of at
+    most ``batch_size`` (clamped to the API-Football ids limit). Non-pollable ids
+    (football-data.org / generated / hash) are dropped, never sent."""
+    size = max(1, min(int(batch_size), API_FOOTBALL_MAX_IDS_PER_REQUEST))
+    limit = max(0, int(max_batches))
+    pool = [c for c in candidates if is_pollable_api_football_fixture_id(c.fixture_id)]
+    batches = [list(pool[i : i + size]) for i in range(0, len(pool), size)]
+    return batches[:limit]
 
 
 def plan_result_sync_slots(
