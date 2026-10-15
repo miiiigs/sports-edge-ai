@@ -40,15 +40,19 @@ MANIFEST_NAME = "manifest.json"
 MANIFEST_SCHEMA = "football_sqlite_backup_v2"
 CHECKSUMS_NAME = "SHA256SUMS"
 
-# Fixed order: auth first, ledger last (its picks reference fixtures/predictions).
+# Fixed copy order. Auth is independent. The Model Pick ledger references
+# fixtures/predictions in the dashboard DB, so it is copied before them: every
+# fixture a copied pick refers to then already exists in the later (newer)
+# dashboard copy. Copying the ledger last could capture picks whose fixtures
+# are missing from the older dashboard copy.
 DATABASES: tuple[str, ...] = (
     "sports_edge_auth.sqlite",
+    "football_model_picks.sqlite",
     # Persistent model history: seeded from the bundled baseline, then refreshed
     # (CSV divisions) and extended by paid API-Football backfills (e.g. FRA1).
     "football_research_live.sqlite",
     "football_dashboard.sqlite",
     "football_paper_trading.sqlite",
-    "football_model_picks.sqlite",
 )
 OPTIONAL_DATABASES: tuple[str, ...] = ("football_high_confidence_shadow.sqlite",)
 SQLITE_SUFFIXES: tuple[str, ...] = (".sqlite", ".sqlite3", ".db")
