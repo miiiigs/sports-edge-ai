@@ -422,10 +422,23 @@ def settle_rows(
     return settled
 
 
-def model_pick_performance(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Independent model-pick metrics. NO ROI/units/CLV."""
+def is_forward_live_issued(row: Mapping[str, Any]) -> bool:
+    """True only for genuine forward picks: LIVE_ISSUED and written before kickoff."""
+    return (
+        str(row.get("record_origin") or "") == RECORD_ORIGIN_LIVE_ISSUED
+        and issuance_timing(row) == ISSUANCE_TIMING_FORWARD
+    )
 
-    def _agg(subset: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+
+def model_pick_performance(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Independent model-pick metrics. NO ROI/units/CLV.
+
+    ``overall`` and the per-market figures count only genuine forward picks
+    (:func:`is_forward_live_issued`). Every other cohort is reported for audit
+    with counts only; no success rate is ever computed from it.
+    """
+
+    def _agg(subset: Sequence[Mapping[str, Any]], *, with_rate: bool = True) -> dict[str, Any]:
         counts = {state: 0 for state in _FINAL_STATES}
         open_count = 0
         issued = 0
@@ -450,21 +463,27 @@ def model_pick_performance(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             "pushes": counts[STATE_PUSH],
             "half_losses": counts[STATE_HALF_LOSS],
             "full_losses": counts[STATE_FULL_LOSS],
-            "weighted_success_rate": weighted,
+            "weighted_success_rate": weighted if with_rate else None,
         }
 
     materialized = list(rows)
+    forward = [r for r in materialized if is_forward_live_issued(r)]
     return {
         "policy_id": PROVIDER_AGNOSTIC_POLICY_LINE_CATALOG,
-        "overall": _agg(materialized),
-        "asian_handicap": _agg([r for r in materialized if str(r.get("market")) == "asian_handicap"]),
-        "corner_total": _agg([r for r in materialized if str(r.get("market")) == "corner_total"]),
+        "headline_cohort": "LIVE_ISSUED_FORWARD",
+        "overall": _agg(forward),
+        "asian_handicap": _agg([r for r in forward if str(r.get("market")) == "asian_handicap"]),
+        "corner_total": _agg([r for r in forward if str(r.get("market")) == "corner_total"]),
+        "excluded_from_headline": len(materialized) - len(forward),
         "by_origin": {
-            origin: _agg([r for r in materialized if str(r.get("record_origin")) == origin])
+            origin: _agg([r for r in materialized if str(r.get("record_origin")) == origin], with_rate=False)
             for origin in sorted(RECORD_ORIGINS)
         },
         "by_issuance_timing": {
-            timing: _agg([r for r in materialized if issuance_timing(r) == timing])
+            timing: _agg(
+                [r for r in materialized if issuance_timing(r) == timing],
+                with_rate=False,
+            )
             for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
         },
     }

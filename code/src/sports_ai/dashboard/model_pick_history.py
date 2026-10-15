@@ -9,10 +9,12 @@ Open picks are classified as ``UPCOMING`` (kickoff in the future) or
 ``RESULT_PENDING`` (kickoff passed, no verified final sporting truth) and are
 never treated as losses.
 
-Only FORWARD picks (ledger row written strictly before kickoff) feed the headline
-``summary``, ``by_market`` and daily history. Retrospective backfills and rows
-with unknown timing are retained and counted in ``by_issuance_timing`` for
-audit, but no success rate is ever computed from them.
+Only genuine forward picks (``LIVE_ISSUED`` and ledger row written strictly
+before kickoff) feed the headline ``summary``, ``by_market``, daily history and
+the "latest issued" label. Reconstructed picks (``LIVE_ISSUED`` but written after
+kickoff by the earlier manual backfill), replay rows and rows with unknown timing
+are retained, counted in ``reconstructed`` / ``by_issuance_timing`` for audit,
+and never given a success rate. Stored rows are never modified.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from ..storage.football_model_pick_ledger import (
     ISSUANCE_TIMING_FORWARD,
     ISSUANCE_TIMING_RETROSPECTIVE,
     ISSUANCE_TIMING_UNKNOWN,
+    is_forward_live_issued,
     issuance_timing,
 )
 
@@ -48,6 +51,12 @@ STATE_HALF_LOSS = "HALF_LOSS"
 STATE_FULL_LOSS = "FULL_LOSS"
 _FINAL_STATES = (STATE_FULL_WIN, STATE_HALF_WIN, STATE_PUSH, STATE_HALF_LOSS, STATE_FULL_LOSS)
 _STATE_ALIASES = {"WON": STATE_FULL_WIN, "LOST": STATE_FULL_LOSS}
+
+RECONSTRUCTED_LABEL = "Reconstructed (written after kickoff)"
+RECONSTRUCTED_DEFINITION = (
+    "record_origin LIVE_ISSUED but the pick row was written at or after kickoff "
+    "(retrospective backfill); kept for audit, excluded from every success rate"
+)
 
 STATE_UPCOMING = "UPCOMING"
 STATE_RESULT_PENDING = "RESULT_PENDING"
@@ -147,6 +156,21 @@ def _timing_cohorts(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, An
     }
 
 
+def _reconstructed(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    subset = [
+        r
+        for r in rows
+        if str(r.get("record_origin") or "") == RECORD_ORIGIN_LIVE_ISSUED
+        and issuance_timing(r) == ISSUANCE_TIMING_RETROSPECTIVE
+    ]
+    return {
+        "label": RECONSTRUCTED_LABEL,
+        "definition": RECONSTRUCTED_DEFINITION,
+        **_aggregate(subset, with_rate=False),
+        "by_market": {m: _aggregate([r for r in subset if r.get("market") == m], with_rate=False) for m in MARKETS},
+    }
+
+
 def _display_row(row: Mapping[str, Any], *, now: datetime, tz: ZoneInfo) -> dict[str, Any]:
     state = normalize_state(row.get("trade_state"))
     if state is None:
@@ -171,7 +195,9 @@ def _display_row(row: Mapping[str, Any], *, now: datetime, tz: ZoneInfo) -> dict
         "result_state": state,
         "record_origin": row.get("record_origin"),
         "issuance_timing": issuance_timing(row),
-        "forward_issued": issuance_timing(row) == ISSUANCE_TIMING_FORWARD,
+        "forward_issued": is_forward_live_issued(row),
+        "reconstructed": str(row.get("record_origin") or "") == RECORD_ORIGIN_LIVE_ISSUED
+        and issuance_timing(row) == ISSUANCE_TIMING_RETROSPECTIVE,
         "prediction_generated_at": row.get("prediction_generated_at"),
     }
 
@@ -235,6 +261,7 @@ def build_model_pick_history_payload(
         "by_issuance_timing": _timing_cohorts([]),
         "forward_by_market": {m: _aggregate([]) for m in MARKETS},
         "excluded_from_headline": 0,
+        "reconstructed": _reconstructed([]),
         "labels": {
             "latest_model_pick_issued_day": None,
             "latest_model_pick_scheduled_kickoff_day": None,
@@ -266,7 +293,7 @@ def build_model_pick_history_payload(
         conn.close()
 
     payload["available"] = True
-    forward = [r for r in rows if issuance_timing(r) == ISSUANCE_TIMING_FORWARD]
+    forward = [r for r in rows if is_forward_live_issued(r)]
     ah = [r for r in forward if r.get("market") == MARKET_ASIAN_HANDICAP]
     corners = [r for r in forward if r.get("market") == MARKET_CORNER_TOTAL]
     payload["summary"] = _aggregate(forward)
@@ -274,8 +301,9 @@ def build_model_pick_history_payload(
     payload["by_issuance_timing"] = _timing_cohorts(rows)
     payload["forward_by_market"] = payload["by_market"]
     payload["excluded_from_headline"] = len(rows) - len(forward)
+    payload["reconstructed"] = _reconstructed(rows)
 
-    issued_days = [d for d in (_local_day(r.get("prediction_generated_at"), tz) for r in rows) if d]
+    issued_days = [d for d in (_local_day(r.get("prediction_generated_at"), tz) for r in forward) if d]
     kickoff_days = [d for d in (_local_day(r.get("kickoff_utc"), tz) for r in rows) if d]
     settled_ah_days = [d for d in (_local_day(r.get("kickoff_utc"), tz) for r in ah if r.get("trade_state")) if d]
     settled_corner_days = [d for d in (_local_day(r.get("kickoff_utc"), tz) for r in corners if r.get("trade_state")) if d]

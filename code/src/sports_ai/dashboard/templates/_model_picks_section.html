@@ -10,7 +10,7 @@
 <span class="mp-badge {{ badge_class.get(state, 'mp-badge--pending') }}">{{ state.replace('_', ' ') }}</span>
 {%- endmacro %}
 {% macro mp_timing(r) -%}
-{% if r.forward_issued %}Forward{% else %}<span class="mp-badge mp-badge--neutral">{{ 'Retrospective backfill' if r.issuance_timing == 'RETROSPECTIVE_BACKFILL' else 'Timing unknown' }}</span>{% endif %}
+{% if r.forward_issued %}Forward{% else %}<span class="mp-badge mp-badge--neutral">{{ 'Reconstructed (written after kickoff)' if r.issuance_timing == 'RETROSPECTIVE_BACKFILL' else 'Timing unknown' }}</span>{% endif %}
 {%- endmacro %}
 <style>
   .mp-section{margin:0 0 28px;}
@@ -41,7 +41,7 @@
     <article class="clean-stat"><span class="clean-stat__label">Corners</span><strong class="clean-stat__value">{{ cn.settled }} / {{ cn.open }}</strong><span class="clean-stat__note">settled / open</span></article>
     <article class="clean-stat"><span class="clean-stat__label">Latest Model Issue</span><strong class="clean-stat__value">{{ mp.labels.latest_model_pick_issued_day or 'N/A' }}</strong><span class="clean-stat__note">latest scheduled {{ mp.labels.latest_model_pick_scheduled_kickoff_day or 'N/A' }}</span></article>
   </div>
-  <p class="mp-explain">Headline figures count only picks recorded before kickoff.{% if mp.excluded_from_headline %} {{ mp.excluded_from_headline }} retrospective backfill picks (recorded after kickoff) are kept for audit and excluded from every success rate.{% endif %}</p>
+  <p class="mp-explain">Headline figures count only picks recorded before kickoff.{% if mp.excluded_from_headline %} {{ mp.excluded_from_headline }} picks are excluded from every success rate{% if mp.reconstructed and mp.reconstructed.issued %}, including {{ mp.reconstructed.issued }} reconstructed picks (written after kickoff by a historical backfill; {{ mp.reconstructed.settled }} settled, {{ mp.reconstructed.open }} open){% endif %}. They are kept unchanged for audit.{% endif %}</p>
   <p class="mp-explain">Model Picks measure the Football model itself. Value Bets are shown separately and only exist when genuine bookmaker market evidence and a qualifying price were available.</p>
 
   {% for key, label in [('asian_handicap', 'Asian Handicap'), ('corner_total', 'Corners')] %}
