@@ -198,8 +198,9 @@ def test_quarter_line_corner_settlement(tmp_path):
 
 def test_model_pick_performance_excludes_pushes_from_rate(tmp_path):
     conn = _ledger_conn(tmp_path)
-    ledger.record_model_pick(conn, _pick(fixture_id="f1", line=-0.5, selection="HOME"), initialize_schema=False)
-    ledger.record_model_pick(conn, _pick(fixture_id="f2", line=0.0, selection="HOME"), initialize_schema=False)
+    issued_at = "2026-09-19T12:00:00+00:00"  # forward: before the 2026-09-20 kickoff
+    ledger.record_model_pick(conn, _pick(fixture_id="f1", line=-0.5, selection="HOME"), now=issued_at, initialize_schema=False)
+    ledger.record_model_pick(conn, _pick(fixture_id="f2", line=0.0, selection="HOME"), now=issued_at, initialize_schema=False)
     conn.commit()
     ledger.settle_rows(conn, {"f1": {"home_goals": 3, "away_goals": 1}, "f2": {"home_goals": 1, "away_goals": 1}}, initialize_schema=False)
     conn.commit()
@@ -209,6 +210,44 @@ def test_model_pick_performance_excludes_pushes_from_rate(tmp_path):
     assert perf["overall"]["pushes"] == 1  # f2 AH 0.0 with a draw pushes
     assert perf["overall"]["weighted_success_rate"] == 1.0  # pushes excluded
     assert "roi" not in {k.lower() for k in perf["overall"]}
+    conn.close()
+
+
+def test_model_pick_performance_headline_excludes_reconstructed_and_replay_rows(tmp_path):
+    conn = _ledger_conn(tmp_path)
+    forward_at = "2026-09-19T12:00:00+00:00"
+    after_kickoff = "2026-10-06T02:15:51+00:00"
+    ledger.record_model_pick(conn, _pick(fixture_id="fwd", line=-0.5, selection="HOME"), now=forward_at, initialize_schema=False)
+    ledger.record_model_pick(conn, _pick(fixture_id="recon", line=-0.5, selection="HOME"), now=after_kickoff, initialize_schema=False)
+    replay = {**_pick(fixture_id="replay", line=-0.5, selection="HOME"), "record_origin": ledger.RECORD_ORIGIN_CURRENT_SYSTEM_REPLAY}
+    ledger.record_model_pick(conn, replay, now=forward_at, initialize_schema=False)
+    conn.commit()
+    ledger.settle_rows(
+        conn,
+        {
+            "fwd": {"home_goals": 0, "away_goals": 1},
+            "recon": {"home_goals": 3, "away_goals": 0},
+            "replay": {"home_goals": 3, "away_goals": 0},
+        },
+        initialize_schema=False,
+    )
+    conn.commit()
+    rows = ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+    before = sorted((r["model_pick_id"], r["record_origin"], r["created_at"]) for r in rows)
+    perf = ledger.model_pick_performance(rows)
+    assert perf["headline_cohort"] == "LIVE_ISSUED_FORWARD"
+    assert perf["overall"]["issued"] == 1
+    assert perf["overall"]["weighted_success_rate"] == 0.0  # reconstructed/replay wins never lift it
+    assert perf["asian_handicap"]["full_wins"] == 0
+    assert perf["excluded_from_headline"] == 2
+    retro = perf["by_issuance_timing"][ledger.ISSUANCE_TIMING_RETROSPECTIVE]
+    assert (retro["issued"], retro["full_wins"], retro["weighted_success_rate"]) == (1, 1, None)
+    assert all(v["weighted_success_rate"] is None for v in perf["by_origin"].values())
+    after = sorted(
+        (r["model_pick_id"], r["record_origin"], r["created_at"])
+        for r in ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+    )
+    assert after == before  # read-only: stored rows untouched
     conn.close()
 
 

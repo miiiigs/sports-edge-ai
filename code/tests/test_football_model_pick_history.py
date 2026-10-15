@@ -185,8 +185,9 @@ def test_section_discloses_retrospective_exclusion(tmp_path):
     env = Environment(loader=FileSystemLoader(str(templates)), autoescape=select_autoescape(["html"]))
     html = env.get_template("_model_picks_section.html").render(payload={"model_pick_history": _seed_cohorts(tmp_path)})
     assert "Forward Model Picks" in html
-    assert "4 retrospective backfill picks" in html
-    assert "Retrospective backfill" in html
+    assert "4 picks are excluded from every success rate" in html
+    assert "including 3 reconstructed picks (written after kickoff" in html
+    assert "Reconstructed (written after kickoff)" in html
     assert "Timing unknown" in html
 
 
@@ -230,3 +231,65 @@ def test_stake_weighted_win_share_is_reported_beside_weighted_success(tmp_path):
     assert s["stake_weighted_win_share"] == round(2.0 / (2.0 + 1.5), 4)  # 0.5714
     retro = payload["by_issuance_timing"]["RETROSPECTIVE_BACKFILL"]
     assert retro["stake_weighted_win_share"] is None  # never a rate for non-forward cohorts
+
+
+def test_reconstructed_cohort_is_reported_separately_without_rate(tmp_path):
+    payload = _seed_cohorts(tmp_path)
+    rec = payload["reconstructed"]
+    assert rec["label"] == "Reconstructed (written after kickoff)"
+    assert (rec["issued"], rec["settled"], rec["open"], rec["full_wins"]) == (3, 2, 1, 2)
+    assert rec["weighted_success_rate"] is None
+    assert rec["stake_weighted_win_share"] is None
+    assert rec["by_market"]["asian_handicap"]["weighted_success_rate"] is None
+    listed = {r["model_pick_id"]: r for r in payload["recent_settled"]}
+    assert listed["retro_win1"]["reconstructed"] is True
+    assert listed["fwd_win"]["reconstructed"] is False
+
+
+def test_replay_rows_written_before_kickoff_never_enter_the_forward_headline(tmp_path):
+    path, conn = _db(tmp_path)
+    rows = [
+        _row(model_pick_id="fwd", fixture_id="f1", trade_state="FULL_LOSS"),
+        _row(model_pick_id="replay", fixture_id="f2", trade_state="FULL_WIN", record_origin="CURRENT_SYSTEM_REPLAY"),
+    ]
+    for row in rows:
+        conn.execute(
+            f"INSERT INTO football_model_pick_entries ({_COLUMNS}) VALUES "
+            "(:model_pick_id,:fixture_id,:canonical_fixture_id,:competition_id,:competition_name,:home_team_name,"
+            ":away_team_name,:kickoff_utc,:market,:selection,:line,:model_probability,:model_fair_price,"
+            ":record_origin,:prediction_generated_at,:trade_state,:created_at)",
+            row,
+        )
+    conn.commit()
+    conn.close()
+    payload = mph.build_model_pick_history_payload(model_pick_db_path=path, timezone_name="UTC", now=_NOW)
+    assert payload["summary"]["issued"] == 1
+    assert payload["summary"]["weighted_success_rate"] == 0.0  # the replay win never lifts the headline
+    assert payload["excluded_from_headline"] == 1
+    listed = {r["model_pick_id"]: r for r in payload["recent_settled"]}
+    assert listed["replay"]["forward_issued"] is False
+
+
+def test_latest_issued_label_ignores_reconstructed_rows(tmp_path):
+    path, conn = _db(tmp_path)
+    forward = _row(model_pick_id="fwd", fixture_id="f1", trade_state="FULL_WIN")
+    late = _row(
+        model_pick_id="late",
+        fixture_id="f2",
+        trade_state="FULL_WIN",
+        prediction_generated_at="2026-10-30T08:00:00+00:00",
+        kickoff_utc="2026-10-30T12:00:00+00:00",
+        created_at="2026-10-30T14:00:00+00:00",
+    )
+    for row in (forward, late):
+        conn.execute(
+            f"INSERT INTO football_model_pick_entries ({_COLUMNS}) VALUES "
+            "(:model_pick_id,:fixture_id,:canonical_fixture_id,:competition_id,:competition_name,:home_team_name,"
+            ":away_team_name,:kickoff_utc,:market,:selection,:line,:model_probability,:model_fair_price,"
+            ":record_origin,:prediction_generated_at,:trade_state,:created_at)",
+            row,
+        )
+    conn.commit()
+    conn.close()
+    payload = mph.build_model_pick_history_payload(model_pick_db_path=path, timezone_name="UTC", now=_NOW)
+    assert payload["labels"]["latest_model_pick_issued_day"] == forward["prediction_generated_at"][:10]
