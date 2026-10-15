@@ -1,7 +1,10 @@
 # Football `/data` backup and restore runbook (M1 release gate)
 
-Status 2026-10-14: **procedure prepared and tested locally; no production backup
-has been taken.** A written procedure is not a backup. Release step 3
+Status 2026-10-15: **procedure prepared and rehearsed locally; no production backup
+has been taken.** 2026-10-15 update: the inventory now includes
+`football_research_live.sqlite`, the backup fails closed on any unrecognised
+SQLite file and on insufficient `/tmp` space, and the copy ships a `SHA256SUMS`
+file for off-volume verification. A written procedure is not a backup. Release step 3
 (`FOOTBALL_M1_RELEASE_CANDIDATE.md` §6) stays open until the owner has run
 section 3 and recorded the evidence in section 5.
 
@@ -21,7 +24,14 @@ section 3 and recorded the evidence in section 5.
 | `football_dashboard.sqlite` | fixtures, predictions, results, runtime state, provider quota/circuit state | internal |
 | `football_paper_trading.sqlite` | market snapshots, paper/value positions | internal |
 | `football_model_picks.sqlite` | Model Pick ledger (immutable fields, triggers) | internal |
+| `football_research_live.sqlite` | persistent model history: seeded once from the bundled baseline, then refreshed (E0–E3, SP1) and extended by paid API-Football backfills (FRA1). Losing it means re-buying the backfill and re-seeding | internal |
 | `football_high_confidence_shadow.sqlite` | only exists once the shadow flag is enabled (it is not) | internal |
+
+2026-10-15: the volume was resized to **30000 MB, 2647 MB used** (1003 MB on
+10-14). The extra ~1.6 GB is not yet explained. Step 1 of section 3 lists every
+SQLite file under `/data` before anything is copied; any file not in the table
+above stops the backup until it is added here and to `DATABASES` (or explicitly
+included with `--include-unknown` / acknowledged with `--skip NAME`).
 
 All databases run in WAL mode, so a file copy of `*.sqlite` alone can miss committed
 rows that are still in `*.sqlite-wal`. **Never copy the files directly.**
@@ -39,9 +49,9 @@ Both are required before the #122 deploy.
 
 ### 3A. Railway volume backup
 
-Blocker found 2026-10-14: Railway caps **manual** backups at 50% of the volume
-size. The volume is at 1003 / 2000 MB (50.2%), so a manual backup will most likely
-be refused. Choose one, with approval because both change production settings or cost:
+Resolved 2026-10-15 (volume now 30000 MB, 2647 MB used, about 9%): Railway caps
+**manual** backups at 50% of the volume size, which blocked a manual backup at
+1003 / 2000 MB on 10-14. Kept for reference, the options were:
 
 1. Grow the volume (e.g. to 3 GB) in Railway → project canvas → click the volume → **Live Resize** (Hobby/Pro, zero downtime, grow-only; the Railway CLI has no resize command). Then take a manual backup. Storage is billed on used GB, not provisioned GB; or
 2. Enable a **Daily** backup schedule (scheduled backups are not subject to the manual cap per Railway's docs; verify in the UI).
@@ -55,6 +65,23 @@ Railway does not document whether a backup pauses a running service, so the slee
 
 ### 3B. Logical copy
 
+Exact sequence (owner, authorised execution window only):
+
+1. **Inventory (read-only):** `inventory --source-dir /data --dest-dir /tmp/fb-<TS>`
+   lists every SQLite file with its size and `-wal` size, and checks free space.
+   Stop if `unknown` is not empty.
+2. **Capacity:** `df -h /data /tmp`. Free space in `/tmp` must be at least
+   1.2 × (all databases + `-wal`) + 64 MB; the tool refuses to start otherwise.
+   With about 2.6 GB on the volume, `/tmp` needs roughly 3.2 GB free.
+3. **Railway volume backup** (layer A, section 3A), taken while SLEEPING.
+4. **Logical backup** into `/tmp/fb-<TS>` (this section).
+5. **Stream out** as `tar | base64` (no extra disk needed in the container).
+6. **Local verify** off-volume: `verify --backup-dir fb-<TS>` (sha256, integrity
+   check on the copy, row counts, every required database present, nothing
+   inventoried but not copied) and `sha256sum -c SHA256SUMS`.
+7. **Delete** `/tmp/fb-<TS>` (and the uploaded module) only after step 6 passes.
+8. **Record** the evidence in section 5.
+
 Needs the container awake. Do not wake it just for this: a wake runs the app's own
 start-up provider sync. Use a natural wake from the GitHub waker
 (`football-production-wake.yml`, about 4–5 a day), polling `railway status --json`
@@ -66,6 +93,9 @@ It is stdlib-only, so run it from this branch:
 ```bash
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 B64=$(base64 -w0 code/src/sports_ai/diagnostics/football_sqlite_backup.py)
+# 0. Inventory and capacity preflight (read-only). Stop on any "unknown" file or a capacity error.
+railway ssh -s sports-edge-ai "df -h /data /tmp"
+railway ssh -s sports-edge-ai "python -c \"import base64;g={'__name__':'fb'};exec(base64.b64decode('$B64').decode(),g);raise SystemExit(g['main'](['inventory','--source-dir','/data','--dest-dir','/tmp/fb-$TS']))\"" > inventory-$TS.json
 # 1. Online backup into the container's ephemeral /tmp (never into /data).
 # (A fresh globals dict keeps the module's __main__ guard from firing; tested locally.)
 railway ssh -s sports-edge-ai "python -c \"import base64;g={'__name__':'fb'};exec(base64.b64decode('$B64').decode(),g);raise SystemExit(g['main'](['backup','--source-dir','/data','--dest-dir','/tmp/fb-$TS']))\"" > manifest-$TS.json
@@ -84,15 +114,19 @@ from native arguments, and some launchers truncate command lines at about 8 KB.
 safely:
 
 - It refuses to start while the service is `SLEEPING` (it never wakes it).
-- It sends the module gzip+base64 inside a quote-free remote command
-  (`echo … | base64 -d | gunzip | python3 - backup …`). Nothing is uploaded, and
-  the copy goes to `/tmp/fb-<TS>`.
+- It sends the module gzip+base64 in quote-free chunks of at most 6000
+  characters to `/tmp/fb-<TS>.mod`, then runs
+  `base64 -d /tmp/fb-<TS>.mod | gunzip | python3 - …`. The copy goes to
+  `/tmp/fb-<TS>`.
+- Step 0 runs `inventory` and stops (removing the module file) if `/data`
+  holds an unrecognised SQLite file or `/tmp` lacks space.
 - It streams the archive back through `Start-Process -RedirectStandardOutput`
   (byte-exact) and decodes it locally in a stream, with whitespace tolerated.
 - It verifies locally: module `verify`, `Get-FileHash` against the manifest,
   and the container manifest equal to the transferred one.
-- Only after verification passes does it remove `/tmp/fb-<TS>` and confirm
-  the directory is gone.
+- It also re-hashes every file listed in `SHA256SUMS`.
+- Only after verification passes does it remove `/tmp/fb-<TS>` and the module
+  file, and confirm both are gone.
 - It refuses a destination inside any Git working tree. It writes to
   `%USERPROFILE%\sports-edge-backups\football\<TS>\`, with the ACL reduced to the
   current user.
@@ -118,10 +152,14 @@ Locally, outside the repository (Bash path):
 ```bash
 base64 -d fb-$TS.tgz.b64 > fb-$TS.tgz && tar -xzf fb-$TS.tgz
 python -m sports_ai.diagnostics.football_sqlite_backup verify --backup-dir fb-$TS
+(cd fb-$TS && sha256sum -c SHA256SUMS)
 ```
 
 `verify` must print `"ok": true`, and the manifest must show
-`"all_integrity_ok": true` with no `missing_required`.
+`"all_integrity_ok": true` with no `missing_required`, `"schema":
+"football_sqlite_backup_v2"`, and `football_research_live.sqlite` among the
+databases. A v1 manifest (taken before 2026-10-15) fails `verify` because it
+lacks the research database.
 
 What the tool guarantees (pinned by `code/tests/test_football_sqlite_backup.py`):
 - **Sources are opened `mode=ro`.** Nothing is written to `/data`: no checkpoint and no schema creation. The `.sqlite` and `-wal` bytes are unchanged; `-shm` is shared memory that readers legitimately update.
@@ -129,8 +167,10 @@ What the tool guarantees (pinned by `code/tests/test_football_sqlite_backup.py`)
 - **Each copy is converted to a self-contained file** (`journal_mode=DELETE`) and integrity-checked.
 - **The manifest holds row counts and hashes only.** No row contents and no source paths.
 - **It refuses** to write inside the source directory or over an existing directory.
+- **It refuses before copying anything** when an unrecognised SQLite file exists under the source directory, or when destination free space is below 1.2 × source bytes + 64 MB.
+- **`reconcile` reads row counts only** on the live side; `--integrity-check` opts in to the heavy full-page check.
 
-**Cross-database consistency.** There is no transaction spanning the four files, so they are copied back to back in a fixed order: auth, dashboard, paper, ledger. Seconds of skew are possible while awake. For an exact set, rely on layer A taken while sleeping. Layer B is for integrity evidence and off-platform survival.
+**Cross-database consistency.** There is no transaction spanning the files, so they are copied back to back in a fixed order: auth, research, dashboard, paper, ledger. Seconds of skew are possible while awake. For an exact set, rely on layer A taken while sleeping. Layer B is for integrity evidence and off-platform survival.
 
 **Exposure.** The /tmp copy holds the auth database briefly inside the production container. Step 3 deletes it, and the container filesystem is discarded on sleep/redeploy anyway.
 
@@ -174,7 +214,10 @@ Last resort, owner-run, needs a maintenance deploy. Replacing a database under a
 | Logical copy timestamp `TS` (3B) | |
 | `verify` result | |
 | `all_integrity_ok` | |
-| Counts: `football_model_pick_entries`, `paper_trade_entries`, `market_snapshots`, `dashboard_predictions`, `dashboard_fixtures` | |
+| Inventory: files under `/data` and total bytes; `unknown` must be empty | |
+| `/tmp` free bytes vs required (manifest `capacity`) | |
+| `SHA256SUMS` check (`sha256sum -c`) | |
+| Counts: `football_model_pick_entries`, `paper_trade_entries`, `market_snapshots`, `dashboard_predictions`, `dashboard_fixtures`, `football_events` | |
 | Storage location (description only) | |
 
 Release step 5 (post-deploy) compares these counts with production. Deploying #122 must not change them.
