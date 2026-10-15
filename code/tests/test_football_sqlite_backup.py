@@ -112,8 +112,9 @@ def test_verify_detects_tampering_and_missing_files(data_dir, tmp_path):
 def test_missing_required_database_fails_the_backup(tmp_path):
     src = tmp_path / "partial"
     src.mkdir()
-    for name in fb.DATABASES[1:]:
-        _wal_db(src / name, "t", 1).close()
+    for name in fb.DATABASES:
+        if name != "sports_edge_auth.sqlite":
+            _wal_db(src / name, "t", 1).close()
     manifest = fb.run_backup(src, tmp_path / "backup")
     assert manifest["missing_required"] == ["sports_edge_auth.sqlite"]
     assert manifest["all_integrity_ok"] is False
@@ -271,3 +272,10 @@ def test_reconcile_skips_live_integrity_check_by_default(data_dir, tmp_path, mon
     calls.clear()
     assert fb.reconcile(out, data_dir, integrity_check=True)["ok"] is True
     assert calls and all(calls)
+
+
+def test_ledger_is_copied_before_the_databases_it_references():
+    order = list(fb.DATABASES)
+    ledger = order.index("football_model_picks.sqlite")
+    assert ledger < order.index("football_dashboard.sqlite")
+    assert ledger < order.index("football_paper_trading.sqlite")

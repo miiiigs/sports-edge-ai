@@ -19,6 +19,13 @@
     Remote commands contain no quotes, so neither PowerShell 5.1 argument passing nor the
     remote shell can mangle them.
 
+    Start it immediately after a natural wake begins: a wake lasts about 6-20 minutes.
+    If the container sleeps mid-run the run fails closed (/data untouched, only the
+    ephemeral /tmp copy is lost); rerun on the next wake.
+
+    The local destination drive must have at least 3x the container-reported source
+    bytes free (base64 stream + .tgz + extracted copy); checked after step 0.
+
     Output goes to <DestRoot>\<TS>\, which must be outside every Git working tree.
     The directory ACL is reduced to the current user. Nothing sensitive is printed:
     only counts, hashes and pass/fail.
@@ -192,6 +199,16 @@ if (@($inventory.unknown).Count -gt 0) {
 }
 Write-Host ("0/5 inventory OK: {0} databases, {1} source bytes, {2} free in /tmp" -f `
     @($inventory.files.PSObject.Properties).Count, $inventory.capacity.source_bytes, $inventory.capacity.free_bytes)
+
+# Local capacity: the base64 stream, the .tgz and the extracted copy coexist, so the
+# destination drive needs at least 3x the container-reported source bytes.
+$localRequired = 3 * [int64]$inventory.capacity.source_bytes
+$localFree = (New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($Out))).AvailableFreeSpace
+if ($localFree -lt $localRequired) {
+    $null = Invoke-Remote "rm -f $RemoteModule" (Join-Path $Out "step0c.stdout.txt") (Join-Path $Out "step0c.stderr.txt")
+    throw "local destination has $localFree bytes free; needs at least $localRequired (3 x source bytes). Free space or pass -DestRoot on another drive."
+}
+Write-Host ("0/5 local capacity OK: {0} free, {1} required" -f $localFree, $localRequired)
 
 # --- 1. Online backup inside the container ----------------------------------------
 $rc = Invoke-Remote "$RunModule backup --source-dir $SourceDir --dest-dir $RemoteDir" $remoteManifest (Join-Path $Out "step1.stderr.txt")
