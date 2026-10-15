@@ -4092,13 +4092,19 @@ class DashboardServices:
                 actual_total_corners = None
                 if fixture.get("home_corners") is not None and fixture.get("away_corners") is not None:
                     actual_total_corners = int(fixture["home_corners"]) + int(fixture["away_corners"])
+                actual_home_goals = None if fixture.get("home_score") is None else int(fixture["home_score"])
+                actual_away_goals = None if fixture.get("away_score") is None else int(fixture["away_score"])
                 try:
+                    if str(row["market"]) != "corner_total" and (actual_home_goals is None or actual_away_goals is None):
+                        # A FINISHED status without a verified score must never be
+                        # graded as 0-0: settled states are terminal.
+                        raise ValueError("final score unavailable")
                     state = football_paper_trading.settlement_state_for_market(
                         market=str(row["market"]),
                         selection=str(row["selection"]),
                         line=None if row.get("line") is None else float(row["line"]),
-                        actual_home_goals=int(fixture.get("home_score") or 0),
-                        actual_away_goals=int(fixture.get("away_score") or 0),
+                        actual_home_goals=actual_home_goals or 0,
+                        actual_away_goals=actual_away_goals or 0,
                         actual_total_corners=actual_total_corners,
                     )
                 except ValueError:
@@ -4126,8 +4132,8 @@ class DashboardServices:
                         trade_state=state,
                         settlement_context={
                             **result_context,
-                            "actual_home_goals": int(fixture.get("home_score") or 0),
-                            "actual_away_goals": int(fixture.get("away_score") or 0),
+                            "actual_home_goals": actual_home_goals,
+                            "actual_away_goals": actual_away_goals,
                             "actual_home_corners": fixture.get("home_corners"),
                             "actual_away_corners": fixture.get("away_corners"),
                             "actual_total_corners": actual_total_corners,
