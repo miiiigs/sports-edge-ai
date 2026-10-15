@@ -873,6 +873,38 @@ class ProductionDashboardServices(DashboardServices):
                 initialize_schema=self._read_requires_schema_init(),
             )
 
+    def _gated_competition_freshness(self) -> dict[str, dict[str, Any]]:
+        """Freshness rows for competitions the current model snapshot can predict.
+
+        Competitions the snapshot does not support (for example FRA1, which only
+        exists as a one-off history backfill) never receive predictions, so their
+        staleness must not degrade the system-wide readiness. Without a snapshot
+        every row gates (fail closed).
+        """
+        snapshot = getattr(self, "snapshot", None)
+        if snapshot is None:
+            return dict(self._competition_model_freshness)
+        supported = {str(value) for value in snapshot.supported_competitions}
+        return {
+            competition: row
+            for competition, row in self._competition_model_freshness.items()
+            if competition in supported
+        }
+
+    def _freshness_summary(self) -> dict[str, Any]:
+        gated = self._gated_competition_freshness()
+        stale = sorted(competition for competition, row in gated.items() if row.get("state") != "FRESH")
+        unsupported_stale = sorted(
+            competition
+            for competition, row in self._competition_model_freshness.items()
+            if competition not in gated and row.get("state") != "FRESH"
+        )
+        return {
+            "state": "READY" if gated and not stale else "DEGRADED",
+            "stale_competitions": stale,
+            "unsupported_stale_competitions": unsupported_stale,
+        }
+
     def _log_production_freshness(self) -> None:
         stale = {
             competition: {
@@ -880,12 +912,13 @@ class ProductionDashboardServices(DashboardServices):
                 "age_days": row.get("age_days"),
                 "max_age_days": row.get("max_age_days"),
             }
-            for competition, row in sorted(self._competition_model_freshness.items())
+            for competition, row in sorted(self._gated_competition_freshness().items())
             if row.get("state") != "FRESH"
         }
         logger.info(
             "football production freshness: research_state=%s last_attempt=%s last_success=%s "
-            "latest_refresh_match=%s successful_divisions=%s failed_divisions=%s stale_competitions=%s",
+            "latest_refresh_match=%s successful_divisions=%s failed_divisions=%s stale_competitions=%s "
+            "unsupported_stale_competitions=%s",
             self._research_refresh_state.get("state"),
             self._research_refresh_state.get("last_attempt_at"),
             self._research_refresh_state.get("last_success_at"),
@@ -893,6 +926,7 @@ class ProductionDashboardServices(DashboardServices):
             self._research_refresh_state.get("successful_divisions"),
             sorted((self._research_refresh_state.get("failed_divisions") or {}).keys()),
             stale,
+            self._freshness_summary()["unsupported_stale_competitions"],
         )
 
     def _persist_production_runtime_state(self) -> None:
@@ -903,10 +937,7 @@ class ProductionDashboardServices(DashboardServices):
         except Exception as exc:
             evidence_summary = {"error": f"{type(exc).__name__}: {exc}"}
         payload = {
-            "state": "READY" if all(
-                row.get("state") == "FRESH"
-                for row in self._competition_model_freshness.values()
-            ) and self._competition_model_freshness else "DEGRADED",
+            "state": self._freshness_summary()["state"],
             "research_refresh": dict(self._research_refresh_state),
             "competition_model_freshness": dict(self._competition_model_freshness),
             "context": {
@@ -938,16 +969,14 @@ class ProductionDashboardServices(DashboardServices):
 
     def _build_system_status(self, **kwargs: Any) -> dict[str, Any]:
         payload = super()._build_system_status(**kwargs)
-        stale_competitions = sorted(
-            competition
-            for competition, row in self._competition_model_freshness.items()
-            if row.get("state") != "FRESH"
-        )
+        summary = self._freshness_summary()
+        stale_competitions = summary["stale_competitions"]
         payload["production_hardening"] = {
-            "state": "READY" if not stale_competitions and self._competition_model_freshness else "DEGRADED",
+            "state": summary["state"],
             "research_refresh": dict(self._research_refresh_state),
             "competition_model_freshness": dict(self._competition_model_freshness),
             "stale_competitions": stale_competitions,
+            "unsupported_stale_competitions": summary["unsupported_stale_competitions"],
             "context_mode": self._context_mode,
             "context_provider_configured": bool(self._context_provider and self._context_provider.configured()),
         }
@@ -958,14 +987,11 @@ class ProductionDashboardServices(DashboardServices):
 
     def get_health_payload(self) -> dict[str, Any]:
         payload = super().get_health_payload()
-        stale_competitions = sorted(
-            competition
-            for competition, row in self._competition_model_freshness.items()
-            if row.get("state") != "FRESH"
-        )
+        summary = self._freshness_summary()
         payload["model_state_freshness"] = {
-            "state": "READY" if not stale_competitions and self._competition_model_freshness else "DEGRADED",
-            "stale_competitions": stale_competitions,
+            "state": summary["state"],
+            "stale_competitions": summary["stale_competitions"],
+            "unsupported_stale_competitions": summary["unsupported_stale_competitions"],
             "competitions": dict(self._competition_model_freshness),
         }
         payload["research_refresh_state"] = self._research_refresh_state.get("state")
