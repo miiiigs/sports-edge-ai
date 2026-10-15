@@ -27,6 +27,15 @@ from ..storage import football_candidate_evidence, football_paper_trading, footb
 from . import services as services_module
 from . import storage
 from .football_context_provider import ApiFootballContextProvider
+from .football_schedule_freshness import (
+    DEFAULT_SCHEDULE_MAX_AGE_DAYS,
+    FRESHNESS_MODE_CALENDAR,
+    FRESHNESS_MODE_ENV_VAR,
+    FRESHNESS_MODE_SCHEDULE,
+    FRESHNESS_MODES,
+    SCHEDULE_MAX_AGE_ENV_VAR,
+    evaluate_schedule_freshness,
+)
 from .models import (
     FIXTURE_LIVE_STATUSES,
     FIXTURE_STATUS_FINISHED,
@@ -93,6 +102,13 @@ def _context_mode() -> str:
     return raw if raw in _CONTEXT_MODES else "shadow"
 
 
+def _model_freshness_mode() -> str:
+    # Default "calendar" keeps the historical 21-day gate byte-for-byte; any
+    # unknown value also falls back to it (fail to the established behaviour).
+    raw = os.environ.get(FRESHNESS_MODE_ENV_VAR, FRESHNESS_MODE_CALENDAR).strip().lower()
+    return raw if raw in FRESHNESS_MODES else FRESHNESS_MODE_CALENDAR
+
+
 def _parse_history_probe_once_spec(raw: str) -> tuple[str, int, int] | None:
     value = str(raw or "").strip()
     if not value:
@@ -145,6 +161,11 @@ class ProductionDashboardServices(DashboardServices):
         self._max_model_state_age_days = _env_int(
             "SPORTS_AI_FOOTBALL_MAX_MODEL_STATE_AGE_DAYS",
             DEFAULT_MAX_MODEL_STATE_AGE_DAYS,
+        )
+        self._model_freshness_mode = _model_freshness_mode()
+        self._schedule_freshness_max_age_days = _env_int(
+            SCHEDULE_MAX_AGE_ENV_VAR,
+            DEFAULT_SCHEDULE_MAX_AGE_DAYS,
         )
         self._context_mode = _context_mode()
         self._context_lookahead_hours = _env_float(
@@ -491,31 +512,74 @@ class ProductionDashboardServices(DashboardServices):
         with football_research_store.connect(path) as conn:
             rows = conn.execute(
                 """
-                SELECT competition_id, MAX(match_date) AS latest_match_date
-                FROM football_events
-                WHERE home_goals IS NOT NULL
-                  AND away_goals IS NOT NULL
-                  AND home_shots IS NOT NULL
-                  AND away_shots IS NOT NULL
-                  AND home_shots_on_target IS NOT NULL
-                  AND away_shots_on_target IS NOT NULL
-                  AND home_corners IS NOT NULL
-                  AND away_corners IS NOT NULL
-                GROUP BY competition_id
+                WITH complete AS (
+                    SELECT competition_id, match_date
+                    FROM football_events
+                    WHERE home_goals IS NOT NULL
+                      AND away_goals IS NOT NULL
+                      AND home_shots IS NOT NULL
+                      AND away_shots IS NOT NULL
+                      AND home_shots_on_target IS NOT NULL
+                      AND away_shots_on_target IS NOT NULL
+                      AND home_corners IS NOT NULL
+                      AND away_corners IS NOT NULL
+                ), latest AS (
+                    SELECT competition_id, MAX(match_date) AS latest_match_date
+                    FROM complete
+                    GROUP BY competition_id
+                )
+                SELECT latest.competition_id,
+                       latest.latest_match_date,
+                       (
+                           SELECT COUNT(*)
+                           FROM complete
+                           WHERE complete.competition_id = latest.competition_id
+                             AND complete.match_date = latest.latest_match_date
+                       ) AS latest_date_matches
+                FROM latest
                 """
             ).fetchall()
+        schedule_mode = self._model_freshness_mode == FRESHNESS_MODE_SCHEDULE
+        fixtures = self._schedule_freshness_fixtures() if schedule_mode else []
+        now = datetime.now(timezone.utc)
         freshness: dict[str, dict[str, Any]] = {}
         for row in rows:
             latest = str(row["latest_match_date"])
             latest_day = date.fromisoformat(latest)
             age_days = max(0, (current_day - latest_day).days)
-            freshness[str(row["competition_id"])] = {
+            entry: dict[str, Any] = {
                 "latest_complete_match_date": latest,
                 "age_days": age_days,
                 "max_age_days": self._max_model_state_age_days,
                 "state": "FRESH" if age_days <= self._max_model_state_age_days else "STALE",
             }
+            if schedule_mode:
+                # Only in the opt-in mode: the extra keys feed the stale
+                # prediction version key, so calendar mode must not emit them.
+                schedule = evaluate_schedule_freshness(
+                    competition_id=str(row["competition_id"]),
+                    latest_complete_match_date=latest,
+                    research_complete_matches_on_latest_date=int(row["latest_date_matches"] or 0),
+                    fixtures=fixtures,
+                    now=now,
+                    max_age_days=self._schedule_freshness_max_age_days,
+                )
+                entry["calendar_state"] = entry["state"]
+                entry["freshness_mode"] = FRESHNESS_MODE_SCHEDULE
+                entry["schedule"] = schedule
+                entry["state"] = schedule["state"]
+            freshness[str(row["competition_id"])] = entry
         self._competition_model_freshness = freshness
+
+    def _schedule_freshness_fixtures(self) -> list[dict[str, Any]]:
+        try:
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                return storage.fetch_all_fixtures(conn, initialize_schema=self._read_requires_schema_init())
+        except Exception:
+            # No schedule evidence -> evaluate_schedule_freshness fails closed
+            # with NO_PROVIDER_SCHEDULE_EVIDENCE.
+            logger.exception("Football schedule freshness could not read fixtures")
+            return []
 
     def _competition_is_fresh(self, competition_id: str) -> bool:
         row = self._competition_model_freshness.get(str(competition_id))
@@ -552,10 +616,7 @@ class ProductionDashboardServices(DashboardServices):
                     "version_key": version_key,
                     "prediction_status": PREDICTION_STATUS_BLOCKED,
                     "blockers": ["MODEL_STATE_STALE"],
-                    "warnings": [
-                        f"Latest complete {fixture.competition_id} model-state match is {latest}; "
-                        f"maximum allowed age is {self._max_model_state_age_days} days."
-                    ],
+                    "warnings": [self._stale_model_state_warning(fixture.competition_id, latest, freshness)],
                     "manager_decision_status": "MODEL_STATE_STALE",
                     "safeguard_status": "BLOCKED",
                     "safeguard_reason": "CURRENT-SEASON MODEL STATE STALE",
@@ -578,6 +639,20 @@ class ProductionDashboardServices(DashboardServices):
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
         return super().ensure_prediction(conn, fixture)
+
+    def _stale_model_state_warning(self, competition_id: str, latest: str, freshness: dict[str, Any]) -> str:
+        schedule = freshness.get("schedule") if isinstance(freshness, dict) else None
+        if isinstance(schedule, dict):
+            return (
+                f"Latest complete {competition_id} model-state match is {latest}; schedule freshness "
+                f"{', '.join(schedule.get('reasons') or []) or 'STALE'} "
+                f"(missing completed matches={schedule.get('completed_matches_missing')}, "
+                f"unverified past fixtures={schedule.get('unverified_past_fixtures')})."
+            )
+        return (
+            f"Latest complete {competition_id} model-state match is {latest}; "
+            f"maximum allowed age is {self._max_model_state_age_days} days."
+        )
 
     def _prediction_eligibility_status(self, prediction: dict[str, Any] | None) -> str:
         blockers = set() if prediction is None else {str(value) for value in prediction.get("blockers") or []}

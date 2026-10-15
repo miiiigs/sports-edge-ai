@@ -88,6 +88,18 @@ def _valid_pre_kickoff(
     return valid
 
 
+def latest_prediction_status(predictions: Sequence[Mapping[str, Any]]) -> str | None:
+    """Status of the most recent prediction version (generated_at, then version_key)."""
+    dated = [
+        (str(row.get("generated_at") or ""), str(row.get("version_key") or row.get("prediction_id") or ""), row)
+        for row in predictions
+    ]
+    if not dated:
+        return None
+    dated.sort(key=lambda item: (item[0], item[1]))
+    return str(dated[-1][2].get("status") or "").upper() or None
+
+
 def resolve_first_issued_prediction(
     predictions: Sequence[Mapping[str, Any]],
     *,
@@ -206,7 +218,14 @@ def build_live_issued_ledger(
     ledger_conn: Any | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:
-    """Phase A. Returns a manifest; writes LIVE_ISSUED rows only when dry_run is False."""
+    """Phase A. Returns a manifest; writes LIVE_ISSUED rows only when dry_run is False.
+
+    ``now`` is the issuance instant (default: current UTC time). A pick is only
+    proposed while ``now`` is strictly before kickoff: a pick written after
+    kickoff would be retrospective, and must never carry ``LIVE_ISSUED``.
+    """
+    issued_at = now or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    issued_at_dt = _parse(issued_at)
     predictions = _load_predictions(dashboard_conn)
     fixtures = _load_fixtures(dashboard_conn)
     results = _load_results(dashboard_conn, fixtures.keys())
@@ -219,6 +238,8 @@ def build_live_issued_ledger(
     diagnostics: list[dict[str, Any]] = []
     pre_kickoff_ready = 0
     post_kickoff_excluded = 0
+    kickoff_passed_not_issued = 0
+    latest_not_ready_not_issued = 0
     duplicate_fixtures = 0
     missing_diag: list[dict[str, Any]] = []
 
@@ -235,6 +256,21 @@ def build_live_issued_ledger(
             diagnostics.append({"fixture_id": fixture_id, "reason": "NO_PRE_KICKOFF_READY_PREDICTION"})
             continue
         pre_kickoff_ready += 1
+        kickoff = _parse(fixture.get("kickoff_utc"))
+        if kickoff is None or issued_at_dt is None or issued_at_dt >= kickoff:
+            kickoff_passed_not_issued += 1
+            diagnostics.append({"fixture_id": fixture_id, "reason": "KICKOFF_PASSED_NOT_FORWARD_ISSUABLE"})
+            continue
+        # The current system must still endorse the fixture: if the latest
+        # prediction version is BLOCKED/SUPERSEDED (e.g. model state went stale),
+        # an older READY version is never used to mint a new forward pick.
+        latest_status = latest_prediction_status(fixture_predictions)
+        if latest_status != "READY":
+            latest_not_ready_not_issued += 1
+            diagnostics.append(
+                {"fixture_id": fixture_id, "reason": "LATEST_PREDICTION_NOT_READY", "latest_status": latest_status}
+            )
+            continue
         chosen = valid[0][2]
         enriched = {**fixture, "canonical_fixture_id": _canonical_id(fixture)}
         rows = _pick_rows_from_prediction(chosen, fixture=enriched)
@@ -253,7 +289,7 @@ def build_live_issued_ledger(
 
         ledger.ensure_schema(ledger_conn)
         for pick in proposed:
-            ledger.record_model_pick(ledger_conn, pick, now=now, initialize_schema=False)
+            ledger.record_model_pick(ledger_conn, pick, now=issued_at, initialize_schema=False)
             written += 1
         ledger_conn.commit()
 
@@ -267,6 +303,9 @@ def build_live_issued_ledger(
         "blocked_predictions": sum(1 for p in predictions if str(p.get("status") or "").upper() == "BLOCKED"),
         "pre_kickoff_ready": pre_kickoff_ready,
         "post_kickoff_excluded": post_kickoff_excluded,
+        "issued_at": issued_at,
+        "kickoff_passed_not_issued": kickoff_passed_not_issued,
+        "latest_not_ready_not_issued": latest_not_ready_not_issued,
         "duplicate_fixtures": duplicate_fixtures,
         "proposed_ah_model_picks": sum(1 for p in proposed if p["market"] == "asian_handicap"),
         "proposed_corner_model_picks": sum(1 for p in proposed if p["market"] == "corner_total"),

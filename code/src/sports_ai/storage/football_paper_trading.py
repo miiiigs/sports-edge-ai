@@ -962,9 +962,25 @@ def fetch_paper_trade_rows(conn: sqlite3.Connection, *, initialize_schema: bool 
     ).fetchall()
     for update in updates:
         updates_by_trade_id.setdefault(str(update["paper_trade_id"]), []).append(update)
+    # Ingestion version of each entry's market snapshot, so reporting surfaces can
+    # tell corrected evidence from legacy evidence. ``None`` when no snapshot is linked.
+    try:
+        entry_ingestion_versions = {
+            str(row["paper_trade_id"]): row["ingestion_version"]
+            for row in conn.execute(
+                """
+                SELECT e.paper_trade_id, s.ingestion_version
+                FROM paper_trade_entries e
+                JOIN market_snapshots s ON s.snapshot_id = e.entry_snapshot_id
+                """
+            ).fetchall()
+        }
+    except sqlite3.OperationalError:
+        entry_ingestion_versions = {}
     merged_rows: list[dict[str, Any]] = []
     for entry in entries:
         merged = dict(entry)
+        merged["entry_ingestion_version"] = entry_ingestion_versions.get(str(entry["paper_trade_id"]))
         merged["trade_state"] = "PENDING"
         merged["gross_return"] = None
         merged["net_pnl"] = None

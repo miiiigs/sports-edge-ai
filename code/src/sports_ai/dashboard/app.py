@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, Query, Request
@@ -12,16 +15,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .auth import AuthSettings, AuthStore, SESSION_COOKIE_NAME, SESSION_DAYS
+from .client_api_token import is_read_only_client_request
 from .client_history import build_client_history_payload
 from .model_pick_history import build_model_pick_history_payload
 from .fixture_provider import FixtureProvider
 from .football_intelligence import build_football_intelligence_payload
+from .football_monitoring import build_football_monitoring_payload
 from ..market_data.providers import MarketProvider as CurrentMarketProvider
 from .services import DashboardConfig, DashboardServices
 
 
 GUEST_COOKIE_NAME = "sports_edge_guest"
 GUEST_COOKIE_VALUE = "1"
+MONITORING_CACHE_SECONDS = 60.0
 
 
 def _template_directory() -> Path:
@@ -97,6 +103,7 @@ def create_app(
     async def auth_guard(request: Request, call_next):
         request.state.user = None
         request.state.guest = False
+        request.state.read_only_client = False
         if not auth_settings.enabled:
             return await call_next(request)
 
@@ -107,6 +114,14 @@ def create_app(
         request.state.guest = guest_access and user is None
         public_path = request.url.path in {"/login", "/signup", "/guest", "/health"} or request.url.path.startswith("/static/")
         if public_path or user is not None:
+            return await call_next(request)
+
+        if is_read_only_client_request(
+            method=request.method,
+            path=request.url.path,
+            authorization_header=request.headers.get("authorization"),
+        ):
+            request.state.read_only_client = True
             return await call_next(request)
 
         if request.state.guest:
@@ -522,11 +537,12 @@ def create_app(
             return JSONResponse({"detail": "Prediction not found"}, status_code=404)
         return JSONResponse(prediction)
 
-    @app.get("/api/candidates")
+    # HEAD is served on the read-only client token allowlist (client_api_token.py).
+    @app.api_route("/api/candidates", methods=["GET", "HEAD"])
     def api_candidates():
         return JSONResponse(resolved_services.get_candidates_payload())
 
-    @app.get("/api/performance")
+    @app.api_route("/api/performance", methods=["GET", "HEAD"])
     def api_performance():
         return JSONResponse(_with_client_history(resolved_services.get_performance_payload()))
 
@@ -534,9 +550,34 @@ def create_app(
     def api_analysis(window: str = Query(default="30")):
         return JSONResponse(_football_intelligence(window))
 
-    @app.get("/api/system/status")
+    @app.api_route("/api/system/status", methods=["GET", "HEAD"])
     def api_system_status():
         return JSONResponse(resolved_services.get_system_status())
+
+    # On the read-only client token allowlist (client_api_token.py): aggregate, DB-only.
+    # Owner session or server token only; guests get 403. Cached briefly because
+    # each build scans the ledgers and market snapshots on the web process.
+    # Never get_health_payload(): that runs the provider-budget quota-day
+    # transition. get_monitoring_runtime_status() reads everything mode=ro.
+    monitoring_cache: dict[str, Any] = {"at": 0.0, "payload": None}
+
+    @app.api_route("/api/monitoring/football", methods=["GET", "HEAD"])
+    def api_football_monitoring(request: Request):
+        if getattr(request.state, "guest", False) and not getattr(request.state, "read_only_client", False):
+            return JSONResponse({"detail": "Sign in required"}, status_code=403)
+        now = time.monotonic()
+        if monitoring_cache["payload"] is None or now - monitoring_cache["at"] >= MONITORING_CACHE_SECONDS:
+            monitoring_cache["payload"] = build_football_monitoring_payload(
+                dashboard_db_path=resolved_services.config.dashboard_db_path,
+                paper_db_path=resolved_services.config.paper_trading_db_path,
+                model_pick_db_path=_model_pick_db_path(),
+                shadow_db_path=resolved_services.high_confidence_shadow_db_path(),
+                runtime_status=resolved_services.get_monitoring_runtime_status(),
+                value_bet_issuance_enabled=bool(resolved_services.config.enable_value_bet_issuance),
+                deployed_commit=os.environ.get("RAILWAY_GIT_COMMIT_SHA"),
+            )
+            monitoring_cache["at"] = now
+        return JSONResponse(monitoring_cache["payload"])
 
     @app.get("/api/reconciliation/report")
     def api_reconciliation_report():

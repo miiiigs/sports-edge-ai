@@ -8,6 +8,11 @@ A MODEL PICK is a model reference line (not a bookmaker line, not a value bet).
 Open picks are classified as ``UPCOMING`` (kickoff in the future) or
 ``RESULT_PENDING`` (kickoff passed, no verified final sporting truth) and are
 never treated as losses.
+
+Only FORWARD picks (ledger row written strictly before kickoff) feed the headline
+``summary``, ``by_market`` and daily history. Retrospective backfills and rows
+with unknown timing are retained and counted in ``by_issuance_timing`` for
+audit, but no success rate is ever computed from them.
 """
 
 from __future__ import annotations
@@ -19,7 +24,14 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-POLICY_ID = "football_model_pick_balanced_line_v1"
+from ..storage.football_model_pick_ledger import (
+    ISSUANCE_TIMING_FORWARD,
+    ISSUANCE_TIMING_RETROSPECTIVE,
+    ISSUANCE_TIMING_UNKNOWN,
+    issuance_timing,
+)
+
+POLICY_ID ="football_model_pick_balanced_line_v1"
 POLICY_VERSION = "v1"
 
 MARKET_ASIAN_HANDICAP = "asian_handicap"
@@ -42,6 +54,10 @@ STATE_RESULT_PENDING = "RESULT_PENDING"
 
 LABEL_WEIGHTED_SUCCESS = "Weighted Success"
 WEIGHTED_SUCCESS_NOTE = "Full win = 1.0, half win = 0.5; pushes excluded."
+STAKE_WEIGHTED_NOTE = (
+    "Stake-weighted win share = (full wins + half of half wins) / (that + full losses + half of half losses); "
+    "pushes excluded. Same basis as the model's win probability (1 / fair price)."
+)
 
 
 def _parse(value: Any) -> datetime | None:
@@ -74,7 +90,24 @@ def _weighted(fw: int, hw: int, hl: int, fl: int) -> float | None:
     return round((fw + 0.5 * hw) / decisive, 4) if decisive else None
 
 
-def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _stake_weighted(fw: int, hw: int, hl: int, fl: int) -> float | None:
+    won = fw + 0.5 * hw
+    lost = fl + 0.5 * hl
+    return round(won / (won + lost), 4) if (won + lost) else None
+
+
+def win_probability_ex_push(model_fair_price: Any) -> float | None:
+    """Push-excluded win probability implied by the model fair price (q = 1 / fair)."""
+    try:
+        fair = float(model_fair_price)
+    except (TypeError, ValueError):
+        return None
+    if not fair > 1.0 or fair == float("inf"):
+        return None
+    return 1.0 / fair
+
+
+def _aggregate(rows: Sequence[Mapping[str, Any]], *, with_rate: bool = True) -> dict[str, Any]:
     counts = dict.fromkeys(_FINAL_STATES, 0)
     open_count = 0
     for row in rows:
@@ -94,7 +127,23 @@ def _aggregate(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "full_losses": counts[STATE_FULL_LOSS],
         "weighted_success_rate": _weighted(
             counts[STATE_FULL_WIN], counts[STATE_HALF_WIN], counts[STATE_HALF_LOSS], counts[STATE_FULL_LOSS]
-        ),
+        )
+        if with_rate
+        else None,
+        "stake_weighted_win_share": _stake_weighted(
+            counts[STATE_FULL_WIN], counts[STATE_HALF_WIN], counts[STATE_HALF_LOSS], counts[STATE_FULL_LOSS]
+        )
+        if with_rate
+        else None,
+    }
+
+
+def _timing_cohorts(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        timing: _aggregate(
+            [r for r in rows if issuance_timing(r) == timing], with_rate=timing == ISSUANCE_TIMING_FORWARD
+        )
+        for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
     }
 
 
@@ -117,9 +166,12 @@ def _display_row(row: Mapping[str, Any], *, now: datetime, tz: ZoneInfo) -> dict
         "line": row.get("line"),
         "line_source": "model_reference_line",
         "model_probability": row.get("model_probability"),
+        "win_probability_ex_push": win_probability_ex_push(row.get("model_fair_price")),
         "model_fair_price": row.get("model_fair_price"),
         "result_state": state,
         "record_origin": row.get("record_origin"),
+        "issuance_timing": issuance_timing(row),
+        "forward_issued": issuance_timing(row) == ISSUANCE_TIMING_FORWARD,
         "prediction_generated_at": row.get("prediction_generated_at"),
     }
 
@@ -179,6 +231,10 @@ def build_model_pick_history_payload(
         "policy": {"policy_id": POLICY_ID, "policy_version": POLICY_VERSION},
         "summary": _aggregate([]),
         "by_market": {m: _aggregate([]) for m in MARKETS},
+        "headline_cohort": ISSUANCE_TIMING_FORWARD,
+        "by_issuance_timing": _timing_cohorts([]),
+        "forward_by_market": {m: _aggregate([]) for m in MARKETS},
+        "excluded_from_headline": 0,
         "labels": {
             "latest_model_pick_issued_day": None,
             "latest_model_pick_scheduled_kickoff_day": None,
@@ -187,6 +243,7 @@ def build_model_pick_history_payload(
         },
         "weighted_success_label": LABEL_WEIGHTED_SUCCESS,
         "weighted_success_note": WEIGHTED_SUCCESS_NOTE,
+        "stake_weighted_note": STAKE_WEIGHTED_NOTE,
         "recent_days": [],
         "recent_settled": [],
         "result_pending": [],
@@ -209,10 +266,14 @@ def build_model_pick_history_payload(
         conn.close()
 
     payload["available"] = True
-    ah = [r for r in rows if r.get("market") == MARKET_ASIAN_HANDICAP]
-    corners = [r for r in rows if r.get("market") == MARKET_CORNER_TOTAL]
-    payload["summary"] = _aggregate(rows)
+    forward = [r for r in rows if issuance_timing(r) == ISSUANCE_TIMING_FORWARD]
+    ah = [r for r in forward if r.get("market") == MARKET_ASIAN_HANDICAP]
+    corners = [r for r in forward if r.get("market") == MARKET_CORNER_TOTAL]
+    payload["summary"] = _aggregate(forward)
     payload["by_market"] = {MARKET_ASIAN_HANDICAP: _aggregate(ah), MARKET_CORNER_TOTAL: _aggregate(corners)}
+    payload["by_issuance_timing"] = _timing_cohorts(rows)
+    payload["forward_by_market"] = payload["by_market"]
+    payload["excluded_from_headline"] = len(rows) - len(forward)
 
     issued_days = [d for d in (_local_day(r.get("prediction_generated_at"), tz) for r in rows) if d]
     kickoff_days = [d for d in (_local_day(r.get("kickoff_utc"), tz) for r in rows) if d]
@@ -225,7 +286,7 @@ def build_model_pick_history_payload(
         "latest_settled_corners_fixture_day": max(settled_corner_days, default=None),
     }
 
-    payload["recent_days"] = _recent_days(rows, now=resolved_now, tz=tz)
+    payload["recent_days"] = _recent_days(forward, now=resolved_now, tz=tz)
     settled = sorted(
         (r for r in rows if normalize_state(r.get("trade_state"))),
         key=lambda r: str(r.get("kickoff_utc") or ""),
