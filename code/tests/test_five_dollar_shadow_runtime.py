@@ -564,3 +564,68 @@ def test_coverage_report_read_error_is_safe():
         [{"fixture_id": "f1", "home_team_name": "a", "away_team_name": "b", "kickoff_utc": "2026-10-10T15:00:00+00:00"}],
     )
     assert report.get("error") == "shadow_market_read_failed"
+
+
+_WINDOW4 = [
+    _fx("p1", "Marseille", "Paris Saint Germain", "2026-10-22T18:45:00+00:00"),
+    _fx("p2", "Lens", "Lyon", "2026-10-23T18:45:00+00:00"),
+    _fx("p3", "Monaco", "Toulouse", "2026-10-24T15:00:00+00:00"),
+    _fx("p4", "Nantes", "Rennes", "2026-10-25T15:00:00+00:00"),
+]
+
+
+def _wake(conn, *, at: str):
+    """One production-like wake: fresh runtime, one cycle, unchanged prices captured now."""
+    quotes = [_quote("asian_handicap", "opening", "HOME", -0.25, 1.95, captured_at=at)]
+    return runtime_mod.FiveDollarShadowRuntime(
+        provider=_FakeProvider(window=_WINDOW4, quotes=quotes),
+        config=runtime_mod.ShadowRuntimeConfig(recent_skip_seconds=3600, max_fixtures_per_cycle=2),
+        conn=conn,
+        now_fn=lambda: datetime.fromisoformat(at),
+    ).run_cycle()
+
+
+def _selected_ids(result):
+    return [row["fixture_id"] for row in result["runtime"]["selected"]]
+
+
+def test_unchanged_prices_still_rotate_selection_across_wakes(monkeypatch, tmp_path):
+    # Production 2026-10-14: every wake re-fetched the same two earliest fixtures
+    # (written=0 reused=16) because dedupe never advanced MAX(captured_at).
+    monkeypatch.setenv(shadow.ENV_SHADOW_ENABLED, "1")
+    monkeypatch.setenv(five.ENV_ENABLED, "1")
+    conn = _db(tmp_path)
+    first_two = [_canon("Marseille", "Paris Saint Germain", "2026-10-22T18:45:00+00:00"),
+                 _canon("Lens", "Lyon", "2026-10-23T18:45:00+00:00")]
+    last_two = [_canon("Monaco", "Toulouse", "2026-10-24T15:00:00+00:00"),
+                _canon("Nantes", "Rennes", "2026-10-25T15:00:00+00:00")]
+
+    assert _selected_ids(_wake(conn, at="2026-10-20T00:00:00+00:00")) == first_two
+    assert _selected_ids(_wake(conn, at="2026-10-20T00:10:00+00:00")) == last_two
+    # Hours later every fixture is due again; the earliest are re-polled with
+    # identical prices (no new rows) ...
+    reobserved = _wake(conn, at="2026-10-20T05:00:00+00:00")
+    assert _selected_ids(reobserved) == first_two
+    assert reobserved["counters"]["snapshots_written"] == 0
+    # ... and the next wake must move on instead of re-fetching them again.
+    assert _selected_ids(_wake(conn, at="2026-10-20T05:10:00+00:00")) == last_two
+    conn.close()
+
+
+def test_reobservation_advances_last_observed_without_rewriting_capture(monkeypatch, tmp_path):
+    monkeypatch.setenv(shadow.ENV_SHADOW_ENABLED, "1")
+    monkeypatch.setenv(five.ENV_ENABLED, "1")
+    conn = _db(tmp_path)
+    _wake(conn, at="2026-10-20T00:00:00+00:00")
+    _wake(conn, at="2026-10-20T05:00:00+00:00")
+
+    rows = conn.execute(
+        "select captured_at, first_observed_at, last_observed_at from market_snapshots "
+        "where provider='5dollar-football-api' and fixture_id = ?",
+        (_canon("Marseille", "Paris Saint Germain", "2026-10-22T18:45:00+00:00"),),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["captured_at"] == "2026-10-20T00:00:00+00:00"
+    assert rows[0]["first_observed_at"] == "2026-10-20T00:00:00+00:00"
+    assert rows[0]["last_observed_at"] == "2026-10-20T05:00:00+00:00"
+    conn.close()

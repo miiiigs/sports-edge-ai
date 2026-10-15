@@ -204,10 +204,14 @@ class FiveDollarShadowCollector:
         written = reused = 0
         for quote in quotes:
             stored = quote.to_stored_snapshot()
-            if paper.find_identical_market_snapshot(self._conn, stored) is not None:
+            identical = paper.find_identical_market_snapshot(self._conn, stored) is not None
+            # For an identical price state this only advances the row's
+            # last_observed_at (captured_at/provider_timestamp stay authoritative);
+            # the runtime's recency rotation relies on that re-observation time.
+            paper.record_market_snapshot(self._conn, stored)
+            if identical:
                 reused += 1
             else:
-                paper.record_market_snapshot(self._conn, stored)
                 written += 1
         return written, reused
 
