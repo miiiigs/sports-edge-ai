@@ -99,8 +99,8 @@ Volume `sports-edge-ai-volume` is mounted at `/data`:
 | `football_high_confidence_shadow.sqlite` | shadow lane (created only when enabled) | shadow hook |
 
 **Backup (before step 4, and before each flag step).** The exact procedure is `docs/FOOTBALL_M1_BACKUP_RUNBOOK.md`:
-1. Railway volume backup, taken while the service is SLEEPING. **Blocker:** manual backups are capped at 50% of volume size, and `/data` is at 1003 / 2000 MB. Grow the volume or enable a scheduled backup first; both need owner approval.
-2. Independent logical copy with `sports_ai.diagnostics.football_sqlite_backup`: online backup API from `mode=ro` sources, integrity check, row counts and sha256 manifest. Stored off-repo, encrypted, owner-only.
+1. Railway volume backup, taken while the service is SLEEPING. The 50% manual-backup cap no longer blocks it: the volume is 30000 MB with 2647 MB used (2026-10-15).
+2. Independent logical copy with `sports_ai.diagnostics.football_sqlite_backup`: inventory of every SQLite file under `/data` (fails closed on unrecognised files), `/tmp` capacity preflight, online backup API from `mode=ro` sources, integrity check, row counts, sha256 manifest and `SHA256SUMS`. Covers auth, research (`football_research_live.sqlite`), dashboard, paper and ledger. Stored off-repo, encrypted, owner-only.
 3. `verify` passes, and the counts are recorded in runbook §5.
 
 **Restore** (corruption only, never to "undo" valid forward records):
@@ -130,7 +130,7 @@ This is the reviewed release sequence. Each step must pass its check before the 
 |---|---|---|---|
 | 1 | Final PR #122 review | Independent review done 2026-10-14: no blocking defects. M1 (closing window), M2 (guest access, uncached scans) and L1 (overlap) were fixed in this branch. L2 (mixed `Z` / `+00:00` sort) and L3 (UK date at 23:00–24:00 UTC kickoffs) were fixed in the corrective pass. The monitoring read-side quota reset found by the second review is fixed and pinned by tests. | – |
 | 2 | CI and security | GitHub `football-ci` and GitGuardian green on the **final** head. The token allowlist is unchanged at 4 paths. Monitoring tests prove there is no error text or path in the payload, and that guests get 403. | – |
-| 3 | `/data` backup and restore readiness | `FOOTBALL_M1_BACKUP_RUNBOOK.md`: Railway volume backup (resolve the 50% manual-backup cap first) plus the logical copy. `verify` ok, and counts recorded **before** step 4. A written procedure is not a backup. | **owner runs the backup** (volume growth/schedule needs approval) |
+| 3 | `/data` backup and restore readiness | `FOOTBALL_M1_BACKUP_RUNBOOK.md`: Railway volume backup plus the logical copy (v2 manifest, including `football_research_live.sqlite`). `verify` ok, and counts recorded **before** step 4. A written procedure is not a backup. | **owner runs the backup** (volume growth/schedule needs approval) |
 | 4 | Code-only merge and deploy | One merge of #122. Close #115, mark #107–#114, #118 and #120 as included. Railway auto-deploys **with every flag unset**. | **merge/deploy approval** |
 | 5 | Production health and ledger checks | `/health`: issuance, refresh and shadow report `disabled`. `RAILWAY_GIT_COMMIT_SHA` equals the merge SHA. Row counts in all 4 DBs equal the step 3 counts (no writes from the deploy). Paper headline is 820. The Model Pick headline is forward-only. `/api/monitoring/football` returns 200 signed in, 401 anonymous, 403 guest. | – |
 | 6 | Model freshness | `/api/monitoring/football` `operational` plus `model_snapshot_state`: every supported competition is FRESH, and `model_as_of` is ≥ the last completed matchday. 0 `MODEL_STATE_NOT_BEFORE_KICKOFF` blocks for upcoming fixtures. READY rate ≥ 80% of fixtures in the next 72 h. | – |
