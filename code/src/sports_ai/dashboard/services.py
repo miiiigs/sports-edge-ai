@@ -803,6 +803,12 @@ class DashboardConfig:
         )
 
 
+
+def _closing_lookup_fixture_ids(rows: list[dict[str, Any]]) -> set[str]:
+    """Fixtures whose rows may still need a closing price attached from stored snapshots."""
+    return {str(row["fixture_id"]) for row in rows if row.get("closing_odds") is None}
+
+
 class DashboardServices:
     """Coordinates fixture sync, prediction generation, and read APIs."""
 
@@ -4165,12 +4171,6 @@ class DashboardServices:
         fixture_rows = {str(row["fixture_id"]): row for row in rows_with_predictions}
         now_utc = datetime.now(timezone.utc)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
-            snapshot_rows_by_fixture: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for snapshot_row in football_paper_trading.fetch_market_snapshots(
-                conn,
-                initialize_schema=self._read_requires_schema_init(),
-            ):
-                snapshot_rows_by_fixture[str(snapshot_row["fixture_id"])].append(snapshot_row)
             # Settle corners-dependent rows first so mixed-market update ordering stays deterministic
             # when one market can still remain unresolved after a finished fixture.
             paper_rows = sorted(
@@ -4183,6 +4183,13 @@ class DashboardServices:
                     str(row.get("decision_timestamp") or ""),
                     str(row.get("paper_trade_id") or ""),
                 ),
+            )
+            # Snapshots are only consulted to attach a missing closing price, so load
+            # just those fixtures instead of every stored snapshot.
+            snapshot_rows_by_fixture = football_paper_trading.fetch_market_snapshots_by_fixture(
+                conn,
+                _closing_lookup_fixture_ids(paper_rows),
+                initialize_schema=self._read_requires_schema_init(),
             )
             for row in paper_rows:
                 fixture = self._resolve_fixture_for_paper_settlement(row=row, fixture_rows=fixture_rows)

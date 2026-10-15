@@ -52,7 +52,7 @@ from .production_research import (
     prepare_persistent_research_db,
     refresh_current_season_events,
 )
-from .services import DashboardConfig, DashboardServices
+from .services import DashboardConfig, DashboardServices, _closing_lookup_fixture_ids
 
 logger = logging.getLogger(__name__)
 
@@ -836,12 +836,11 @@ class ProductionDashboardServices(DashboardServices):
         now_utc = datetime.now(timezone.utc)
         with football_paper_trading.connect(self.config.paper_trading_db_path) as conn:
             observations = football_candidate_evidence.fetch_observations(conn, active_only=True)
-            snapshots_by_fixture: dict[str, list[dict[str, Any]]] = {}
-            for snapshot in football_paper_trading.fetch_market_snapshots(
+            snapshots_by_fixture = football_paper_trading.fetch_market_snapshots_by_fixture(
                 conn,
+                _closing_lookup_fixture_ids(observations),
                 initialize_schema=self._read_requires_schema_init(),
-            ):
-                snapshots_by_fixture.setdefault(str(snapshot["fixture_id"]), []).append(snapshot)
+            )
 
             for row in observations:
                 fixture = self._resolve_fixture_for_paper_settlement(row=row, fixture_rows=fixture_rows)
