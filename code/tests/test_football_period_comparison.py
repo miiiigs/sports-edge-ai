@@ -118,3 +118,36 @@ def test_bad_snapshot_timestamp_fails_closed(tmp_path, capsys):
     ])
     assert rc == 2
     assert json.loads(capsys.readouterr().out)["reason"] == "INVALID_SNAPSHOT_TIMESTAMP"
+
+
+def test_integrity_failed_rows_are_reported_but_never_counted():
+    good = pick("good", "2026-10-10T12:00:00Z", "FULL_WIN", issued="2026-10-06T00:00:00Z")
+    late_model = pick("late_model", "2026-10-10T12:00:00Z", "FULL_LOSS", issued="2026-10-06T00:00:00Z")
+    late_model["model_as_of"] = "2026-10-11T00:00:00Z"
+    bad_state = pick("bad_state", "2026-10-10T12:00:00Z", "MYSTERY", issued="2026-10-06T00:00:00Z")
+    r = audit.audit([good, late_model, bad_state])
+    assert r["status"] == "INTEGRITY_BLOCKED"
+    s = r["periods"]["weekend_october_10_11"]["summary"]
+    assert (s["issued"], s["full_wins"], s["full_losses"]) == (1, 1, 0)
+    assert s["invalid_result_states"] == {}
+    assert r["forward_rows_all_dates"] == 1
+
+
+def test_canonical_duplicate_keeps_earliest_issued_row_regardless_of_input_order():
+    early = pick("z_early", "2026-10-10T12:00:00Z", "FULL_WIN", canonical="same", issued="2026-10-06T00:00:00Z")
+    later = pick("a_later", "2026-10-10T12:00:00Z", "FULL_LOSS", canonical="same", issued="2026-10-07T00:00:00Z")
+    for rows in ([early, later], [later, early]):
+        r = audit.audit(rows)
+        assert r["integrity_failures"] == [{"id": "a_later", "reason": "DUPLICATE_CANONICAL_MATCH_MARKET"}]
+        assert r["periods"]["weekend_october_10_11"]["summary"]["full_wins"] == 1
+
+
+def test_pending_split_into_upcoming_and_overdue_by_snapshot_time():
+    overdue = pick("overdue", "2026-10-10T14:00:00Z", None, issued="2026-10-06T00:00:00Z")
+    upcoming = pick("upcoming", "2026-10-13T19:00:00Z", None, issued="2026-10-06T00:00:00Z")
+    rows = [overdue, upcoming]
+    as_of = audit.instant("2026-10-13T03:34:00Z")
+    total = audit.audit(rows, as_of=as_of)["periods"]["october_1_14_overlapping_total"]["summary"]
+    assert (total["pending"], total["pending_upcoming"], total["pending_overdue"]) == (2, 1, 1)
+    unclassified = audit.audit(rows)["periods"]["october_1_14_overlapping_total"]["summary"]
+    assert (unclassified["pending_unclassified"], unclassified["pending_overdue"]) == (2, 0)

@@ -54,7 +54,12 @@ def read_offline_copy(path: Path) -> list[dict]:
         conn.execute("PRAGMA query_only=ON")
         if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("INVALID_LEDGER_INTEGRITY")
-        return [dict(row) for row in conn.execute("SELECT * FROM football_model_pick_entries")]
+        return [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM football_model_pick_entries ORDER BY created_at, model_pick_id"
+            )
+        ]
     finally:
         conn.close()
 
@@ -67,6 +72,12 @@ def summary(rows: list[dict]) -> dict:
     return {
         "issued": len(rows), "settled": fw + hw + push + hl + fl,
         "pending": sum(states[s] for s in PENDING),
+        # Split by the attested snapshot time: kickoff still ahead vs result overdue
+        # (stale sporting truth, cancelled/postponed fixtures). Unclassified when no
+        # snapshot time is supplied.
+        "pending_upcoming": sum(row.get("pending_kind") == "upcoming" for row in rows),
+        "pending_overdue": sum(row.get("pending_kind") == "overdue" for row in rows),
+        "pending_unclassified": sum(row.get("pending_kind") == "unclassified" for row in rows),
         "void": states["VOID"], "invalid_result_states": {k: v for k, v in states.items() if k not in RESULTS and k not in PENDING and k != "VOID"},
         "full_wins": fw, "half_wins": hw, "pushes": push,
         "half_losses": hl, "full_losses": fl,
@@ -79,8 +90,11 @@ def summary(rows: list[dict]) -> dict:
     }
 
 
-def audit(rows: list[dict], timezone_name="Europe/London") -> dict:
+def audit(rows: list[dict], timezone_name="Europe/London", as_of: datetime | None = None) -> dict:
     tz = ZoneInfo(timezone_name)
+    # Deterministic: when two rows collide on canonical match+market, the
+    # earliest-issued one (then lowest id) is kept regardless of input order.
+    rows = sorted(rows, key=lambda row: (str(row.get("created_at") or ""), str(row.get("model_pick_id") or "")))
     accepted = []
     excluded = Counter()
     failures = []
@@ -125,18 +139,27 @@ def audit(rows: list[dict], timezone_name="Europe/London") -> dict:
 
         generated = instant(raw.get("prediction_generated_at"))
         model_as_of = instant(raw.get("model_as_of"))
-        if generated is not None and generated >= kickoff:
-            failures.append({"id": pick_id, "reason": "PREDICTION_NOT_PREKICKOFF"})
-        if model_as_of is not None and model_as_of >= kickoff:
-            failures.append({"id": pick_id, "reason": "MODEL_STATE_NOT_PREKICKOFF"})
         state = ALIASES.get(str(raw.get("trade_state") or ""), str(raw.get("trade_state") or ""))
+        row_failures = []
+        if generated is not None and generated >= kickoff:
+            row_failures.append("PREDICTION_NOT_PREKICKOFF")
+        if model_as_of is not None and model_as_of >= kickoff:
+            row_failures.append("MODEL_STATE_NOT_PREKICKOFF")
         if state not in RESULTS and state not in PENDING and state != "VOID":
-            failures.append({"id": pick_id, "reason": "UNKNOWN_RESULT_STATE"})
+            row_failures.append("UNKNOWN_RESULT_STATE")
+        if row_failures:
+            # Fail closed: an integrity-failed row is reported, never counted.
+            failures.extend({"id": pick_id, "reason": reason} for reason in row_failures)
+            continue
+        pending_kind = None
+        if state in PENDING:
+            pending_kind = "unclassified" if as_of is None else ("upcoming" if kickoff > as_of else "overdue")
         accepted.append({
             "id": pick_id, "market": market,
             "competition": str(raw.get("competition_id") or "UNKNOWN"),
             "kickoff_day": kickoff.astimezone(tz).date().isoformat(),
             "state": state, "lead_hours": (kickoff - created).total_seconds() / 3600,
+            "pending_kind": pending_kind,
         })
 
     def cohort(data):
@@ -189,7 +212,7 @@ def main(argv=None) -> int:
         print(json.dumps({"status": "BLOCKED", "reason": "INVALID_SNAPSHOT_TIMESTAMP"}))
         return 2
     try:
-        report = audit(read_offline_copy(args.ledger_copy))
+        report = audit(read_offline_copy(args.ledger_copy), as_of=instant(args.snapshot_as_of))
     except (OSError, sqlite3.Error, ValueError) as err:
         print(json.dumps({"status": "BLOCKED", "reason": type(err).__name__}))
         return 2
