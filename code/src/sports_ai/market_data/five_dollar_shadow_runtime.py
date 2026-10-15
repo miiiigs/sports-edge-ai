@@ -295,9 +295,13 @@ class FiveDollarShadowRuntime:
         return selected
 
     def _persisted_latest_capture(self, fixture_ids: Sequence[str]) -> dict[str, str]:
-        """Latest 5Dollar ``captured_at`` per fixture_id, read-only.
+        """Latest 5Dollar observation per fixture_id, read-only.
 
-        This is the durable, restart-safe source of recent-collection state.
+        This is the durable, restart-safe source of recent-collection state. An
+        unchanged price is deduplicated (no new row), so recency must use the
+        re-observation time (``last_observed_at``), not only ``captured_at``;
+        otherwise the earliest-kickoff fixtures whose prices never move are
+        re-selected every cycle and later fixtures are never refreshed.
         """
         if self._conn is None:
             return {}
@@ -310,7 +314,8 @@ class FiveDollarShadowRuntime:
             part = ids[start : start + chunk]
             placeholders = ",".join("?" for _ in part)
             rows = self._conn.execute(
-                f"SELECT fixture_id, MAX(captured_at) AS latest FROM market_snapshots "
+                f"SELECT fixture_id, MAX(MAX(captured_at), MAX(COALESCE(last_observed_at, captured_at))) AS latest "
+                f"FROM market_snapshots "
                 f"WHERE provider = ? AND fixture_id IN ({placeholders}) GROUP BY fixture_id",
                 [FIVE_DOLLAR_PROVIDER, *part],
             ).fetchall()
