@@ -22,6 +22,7 @@ from ..agents.football.route_a_classifier import (
 )
 from ..locking import canonical_hash
 from .models import TeamResolution, normalize_text_key, slugify, utc_now_iso
+from .football_transition_maturity import identify_transition_team
 from .team_aliases import classify_unresolved_team, resolve_provider_team_alias, suggest_canonical_candidates
 
 try:
@@ -121,6 +122,36 @@ class CurrentFootballModelSnapshot:
             model_history_reason=model_history_reason,
         )
 
+    def _catalog_name_for_alias_match(
+        self,
+        *,
+        competition_id: str,
+        provider_team_name: str,
+        canonical_team_name: str,
+    ) -> str:
+        """Map an approved transition identity onto the name the model state uses.
+
+        The transition baseline's display name can differ from the research
+        source's spelling (e.g. "Lincoln City" vs "Lincoln"). Without this, the
+        club resolves to an id with no model state and stays blocked with
+        MODEL_HISTORY_MISSING forever. Only the baseline's own approved aliases
+        are tried, in order, so no fuzzy matching is introduced.
+        """
+        candidates = self.team_catalog.get(competition_id, {})
+        if normalize_text_key(canonical_team_name) in candidates:
+            return canonical_team_name
+        transition_team = identify_transition_team(
+            competition_id=competition_id,
+            team_name=provider_team_name,
+        )
+        if transition_team is None:
+            return canonical_team_name
+        for name in (transition_team.canonical_name, *transition_team.aliases):
+            exact = candidates.get(normalize_text_key(name))
+            if exact is not None:
+                return str(exact["canonical_team_name"])
+        return canonical_team_name
+
     def resolve_team(
         self,
         *,
@@ -144,7 +175,11 @@ class CurrentFootballModelSnapshot:
                 provider_team_id=provider_team_id,
                 provider_team_name=provider_team_name,
                 normalized_team_name=normalized_team_name,
-                canonical_team_name=str(alias_match["canonical_team_name"]),
+                canonical_team_name=self._catalog_name_for_alias_match(
+                    competition_id=competition_id,
+                    provider_team_name=provider_team_name,
+                    canonical_team_name=str(alias_match["canonical_team_name"]),
+                ),
                 resolution_kind=str(alias_match["resolution_kind"]),
                 confidence=1.0,
                 reason=str(alias_match["reason"]),
