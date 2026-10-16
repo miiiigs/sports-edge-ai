@@ -198,8 +198,9 @@ def test_quarter_line_corner_settlement(tmp_path):
 
 def test_model_pick_performance_excludes_pushes_from_rate(tmp_path):
     conn = _ledger_conn(tmp_path)
-    ledger.record_model_pick(conn, _pick(fixture_id="f1", line=-0.5, selection="HOME"), initialize_schema=False)
-    ledger.record_model_pick(conn, _pick(fixture_id="f2", line=0.0, selection="HOME"), initialize_schema=False)
+    issued_at = "2026-09-19T12:00:00+00:00"  # forward: before the 2026-09-20 kickoff
+    ledger.record_model_pick(conn, _pick(fixture_id="f1", line=-0.5, selection="HOME"), now=issued_at, initialize_schema=False)
+    ledger.record_model_pick(conn, _pick(fixture_id="f2", line=0.0, selection="HOME"), now=issued_at, initialize_schema=False)
     conn.commit()
     ledger.settle_rows(conn, {"f1": {"home_goals": 3, "away_goals": 1}, "f2": {"home_goals": 1, "away_goals": 1}}, initialize_schema=False)
     conn.commit()
@@ -212,7 +213,49 @@ def test_model_pick_performance_excludes_pushes_from_rate(tmp_path):
     conn.close()
 
 
+def test_model_pick_performance_headline_excludes_reconstructed_and_replay_rows(tmp_path):
+    conn = _ledger_conn(tmp_path)
+    forward_at = "2026-09-19T12:00:00+00:00"
+    after_kickoff = "2026-10-06T02:15:51+00:00"
+    ledger.record_model_pick(conn, _pick(fixture_id="fwd", line=-0.5, selection="HOME"), now=forward_at, initialize_schema=False)
+    ledger.record_model_pick(conn, _pick(fixture_id="recon", line=-0.5, selection="HOME"), now=after_kickoff, initialize_schema=False)
+    replay = {**_pick(fixture_id="replay", line=-0.5, selection="HOME"), "record_origin": ledger.RECORD_ORIGIN_CURRENT_SYSTEM_REPLAY}
+    ledger.record_model_pick(conn, replay, now=forward_at, initialize_schema=False)
+    conn.commit()
+    ledger.settle_rows(
+        conn,
+        {
+            "fwd": {"home_goals": 0, "away_goals": 1},
+            "recon": {"home_goals": 3, "away_goals": 0},
+            "replay": {"home_goals": 3, "away_goals": 0},
+        },
+        initialize_schema=False,
+    )
+    conn.commit()
+    rows = ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+    before = sorted((r["model_pick_id"], r["record_origin"], r["created_at"]) for r in rows)
+    perf = ledger.model_pick_performance(rows)
+    assert perf["headline_cohort"] == "LIVE_ISSUED_FORWARD"
+    assert perf["overall"]["issued"] == 1
+    assert perf["overall"]["weighted_success_rate"] == 0.0  # reconstructed/replay wins never lift it
+    assert perf["asian_handicap"]["full_wins"] == 0
+    assert perf["excluded_from_headline"] == 2
+    retro = perf["by_issuance_timing"][ledger.ISSUANCE_TIMING_RETROSPECTIVE]
+    assert (retro["issued"], retro["full_wins"], retro["weighted_success_rate"]) == (1, 1, None)
+    assert all(v["weighted_success_rate"] is None for v in perf["by_origin"].values())
+    after = sorted(
+        (r["model_pick_id"], r["record_origin"], r["created_at"])
+        for r in ledger.fetch_model_pick_rows(conn, initialize_schema=False)
+    )
+    assert after == before  # read-only: stored rows untouched
+    conn.close()
+
+
 # --------------------------------------------------------------------------- reconciliation
+# Issuance instant for fixtures kicking off 2026-09-20T15:00Z: picks are forward-only.
+PRE_KICKOFF_ISSUANCE = "2026-09-19T12:00:00+00:00"
+
+
 def _dashboard_conn(tmp_path):
     conn = sqlite3.connect(tmp_path / "dash.sqlite")
     conn.row_factory = sqlite3.Row
@@ -263,7 +306,7 @@ def test_first_issued_prediction_chosen_and_post_kickoff_rejected(tmp_path):
     _add_prediction(dash, prediction_id="p_early", fixture_id="fx1", status="READY", generated_at="2026-09-19T10:00:00+00:00", model_as_of="2026-09-18T23:59:59+00:00", version_key="a")
     _add_prediction(dash, prediction_id="p_post", fixture_id="fx1", status="READY", generated_at="2026-09-20T16:00:00+00:00", model_as_of="2026-09-20T15:30:00+00:00", version_key="b")
     dash.commit()
-    manifest = recon.build_live_issued_ledger(dash, dry_run=True)
+    manifest = recon.build_live_issued_ledger(dash, dry_run=True, now=PRE_KICKOFF_ISSUANCE)
     assert manifest["pre_kickoff_ready"] == 1
     assert manifest["post_kickoff_excluded"] == 1
     assert manifest["proposed_ah_model_picks"] == 1
@@ -281,7 +324,7 @@ def test_blocked_prediction_is_not_a_pick(tmp_path):
     )
     _add_prediction(dash, prediction_id="p_blocked", fixture_id="fx1", status="BLOCKED", generated_at="2026-09-19T10:00:00+00:00", model_as_of=None, version_key="b", payload={"market_rows": []})
     dash.commit()
-    manifest = recon.build_live_issued_ledger(dash, dry_run=True)
+    manifest = recon.build_live_issued_ledger(dash, dry_run=True, now=PRE_KICKOFF_ISSUANCE)
     assert manifest["blocked_predictions"] == 1
     assert manifest["proposed_ah_model_picks"] == 0
     assert manifest["proposed_corner_model_picks"] == 0
@@ -297,10 +340,10 @@ def test_dry_run_writes_nothing_and_write_is_idempotent(tmp_path):
     _add_prediction(dash, prediction_id="p1", fixture_id="fx1", status="READY", generated_at="2026-09-19T10:00:00+00:00", model_as_of="2026-09-18T23:59:59+00:00", version_key="a")
     dash.commit()
     led = _ledger_conn(tmp_path)
-    recon.build_live_issued_ledger(dash, dry_run=True, ledger_conn=led)
+    recon.build_live_issued_ledger(dash, dry_run=True, ledger_conn=led, now=PRE_KICKOFF_ISSUANCE)
     assert led.execute("select count(*) from football_model_pick_entries").fetchone()[0] == 0
-    recon.build_live_issued_ledger(dash, dry_run=False, ledger_conn=led)
-    recon.build_live_issued_ledger(dash, dry_run=False, ledger_conn=led)
+    recon.build_live_issued_ledger(dash, dry_run=False, ledger_conn=led, now=PRE_KICKOFF_ISSUANCE)
+    recon.build_live_issued_ledger(dash, dry_run=False, ledger_conn=led, now=PRE_KICKOFF_ISSUANCE)
     assert led.execute("select count(*) from football_model_pick_entries").fetchone()[0] == 2  # AH + corners, deduped
     led.close()
     dash.close()
@@ -500,17 +543,17 @@ def test_maintenance_dry_run_is_zero_writes_and_hash_parity(tmp_path):
     _add_prediction(dash, prediction_id="p1", fixture_id="fx1", status="READY", generated_at="2026-09-19T10:00:00+00:00", model_as_of="2026-09-18T23:59:59+00:00", version_key="a")
     dash.commit()
 
-    dry = maintenance.run_dry_run(dash)
+    dry = maintenance.run_dry_run(dash, now=PRE_KICKOFF_ISSUANCE)
     assert dry["proposed_rows"] == 2
     assert dry["ah"] == 1 and dry["corners"] == 1
     assert dry["manifest_hash"]
 
     led = _ledger_conn(tmp_path)
-    applied = maintenance.apply_live_issued(dash, led)
+    applied = maintenance.apply_live_issued(dash, led, now=PRE_KICKOFF_ISSUANCE)
     assert applied["manifest_hash"] == dry["manifest_hash"]  # DRY_RUN_HASH == APPLY_HASH
     assert applied["rows_written"] == 2
     # idempotent re-apply writes nothing new
-    again = maintenance.apply_live_issued(dash, led)
+    again = maintenance.apply_live_issued(dash, led, now=PRE_KICKOFF_ISSUANCE)
     assert again["rows_written"] == 0
     led.close()
     dash.close()
@@ -533,7 +576,7 @@ def test_maintenance_apply_rolls_back_on_conflict(tmp_path):
     led.commit()
     before = led.execute("select count(*) from football_model_pick_entries").fetchone()[0]
     with pytest.raises(sqlite3.IntegrityError, match="MODEL_PICK_IMMUTABLE_CONFLICT"):
-        maintenance.apply_live_issued(dash, led)
+        maintenance.apply_live_issued(dash, led, now=PRE_KICKOFF_ISSUANCE)
     after = led.execute("select count(*) from football_model_pick_entries").fetchone()[0]
     assert after == before  # whole apply rolled back, no partial rows
     led.close()

@@ -29,6 +29,36 @@ RECORD_ORIGIN_LIVE_ISSUED = "LIVE_ISSUED"
 RECORD_ORIGIN_CURRENT_SYSTEM_REPLAY = "CURRENT_SYSTEM_REPLAY"
 RECORD_ORIGINS = frozenset({RECORD_ORIGIN_LIVE_ISSUED, RECORD_ORIGIN_CURRENT_SYSTEM_REPLAY})
 
+# Read-time issuance timing. ``record_origin`` is immutable, so picks written
+# after kickoff by the earlier manual backfill keep ``LIVE_ISSUED``; this derived
+# classification keeps them from being presented as forward picks.
+ISSUANCE_TIMING_FORWARD = "FORWARD"
+ISSUANCE_TIMING_RETROSPECTIVE = "RETROSPECTIVE_BACKFILL"
+ISSUANCE_TIMING_UNKNOWN = "UNKNOWN"
+
+
+def issuance_timing(row: Mapping[str, Any]) -> str:
+    """FORWARD when the pick row was written strictly before kickoff."""
+    created = _parse_utc(row.get("created_at"))
+    kickoff = _parse_utc(row.get("kickoff_utc"))
+    if created is None or kickoff is None:
+        return ISSUANCE_TIMING_UNKNOWN
+    return ISSUANCE_TIMING_FORWARD if created < kickoff else ISSUANCE_TIMING_RETROSPECTIVE
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if value in {None, ""}:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 # Settlement states (existing engine returns WON/LOST; normalised to FULL_*).
 STATE_FULL_WIN = "FULL_WIN"
 STATE_HALF_WIN = "HALF_WIN"
@@ -148,6 +178,28 @@ def _ensure_schema_if_requested(conn: sqlite3.Connection, *, initialize_schema: 
 
 def model_pick_id(*, policy_id: str, fixture_id: str, market: str) -> str:
     return "model_pick_" + canonical_hash({"policy_id": policy_id, "fixture_id": fixture_id, "market": market})
+
+
+def canonical_pick_holder(
+    conn: sqlite3.Connection, *, policy_id: str, canonical_fixture_id: str, market: str, fixture_id: str
+) -> str | None:
+    """Fixture id of another provider row already holding this canonical match + market, if any.
+
+    Writers call this inside their write transaction (``BEGIN IMMEDIATE``) so two
+    concurrent issuers can never both pick the same match under different ids.
+    """
+    row = conn.execute(
+        "SELECT fixture_id FROM football_model_pick_entries WHERE policy_id = ? AND canonical_fixture_id = ? "
+        "AND market = ? AND fixture_id != ? ORDER BY created_at, fixture_id LIMIT 1",
+        (policy_id, canonical_fixture_id, market, fixture_id),
+    ).fetchone()
+    return None if row is None else str(row[0])
+
+
+def begin_immediate(conn: sqlite3.Connection) -> None:
+    """Take the SQLite write lock now, so checks made before the insert stay true."""
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
 
 
 def normalize_settlement_state(state: str | None) -> str | None:
@@ -370,10 +422,23 @@ def settle_rows(
     return settled
 
 
-def model_pick_performance(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Independent model-pick metrics. NO ROI/units/CLV."""
+def is_forward_live_issued(row: Mapping[str, Any]) -> bool:
+    """True only for genuine forward picks: LIVE_ISSUED and written before kickoff."""
+    return (
+        str(row.get("record_origin") or "") == RECORD_ORIGIN_LIVE_ISSUED
+        and issuance_timing(row) == ISSUANCE_TIMING_FORWARD
+    )
 
-    def _agg(subset: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+
+def model_pick_performance(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Independent model-pick metrics. NO ROI/units/CLV.
+
+    ``overall`` and the per-market figures count only genuine forward picks
+    (:func:`is_forward_live_issued`). Every other cohort is reported for audit
+    with counts only; no success rate is ever computed from it.
+    """
+
+    def _agg(subset: Sequence[Mapping[str, Any]], *, with_rate: bool = True) -> dict[str, Any]:
         counts = {state: 0 for state in _FINAL_STATES}
         open_count = 0
         issued = 0
@@ -398,17 +463,27 @@ def model_pick_performance(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             "pushes": counts[STATE_PUSH],
             "half_losses": counts[STATE_HALF_LOSS],
             "full_losses": counts[STATE_FULL_LOSS],
-            "weighted_success_rate": weighted,
+            "weighted_success_rate": weighted if with_rate else None,
         }
 
     materialized = list(rows)
+    forward = [r for r in materialized if is_forward_live_issued(r)]
     return {
         "policy_id": PROVIDER_AGNOSTIC_POLICY_LINE_CATALOG,
-        "overall": _agg(materialized),
-        "asian_handicap": _agg([r for r in materialized if str(r.get("market")) == "asian_handicap"]),
-        "corner_total": _agg([r for r in materialized if str(r.get("market")) == "corner_total"]),
+        "headline_cohort": "LIVE_ISSUED_FORWARD",
+        "overall": _agg(forward),
+        "asian_handicap": _agg([r for r in forward if str(r.get("market")) == "asian_handicap"]),
+        "corner_total": _agg([r for r in forward if str(r.get("market")) == "corner_total"]),
+        "excluded_from_headline": len(materialized) - len(forward),
         "by_origin": {
-            origin: _agg([r for r in materialized if str(r.get("record_origin")) == origin])
+            origin: _agg([r for r in materialized if str(r.get("record_origin")) == origin], with_rate=False)
             for origin in sorted(RECORD_ORIGINS)
+        },
+        "by_issuance_timing": {
+            timing: _agg(
+                [r for r in materialized if issuance_timing(r) == timing],
+                with_rate=False,
+            )
+            for timing in (ISSUANCE_TIMING_FORWARD, ISSUANCE_TIMING_RETROSPECTIVE, ISSUANCE_TIMING_UNKNOWN)
         },
     }

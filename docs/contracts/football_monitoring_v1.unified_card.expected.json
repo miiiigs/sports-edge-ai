@@ -1,0 +1,99 @@
+{
+  "alerts": [
+    "ALL_ODDS_STALE",
+    "PROVIDER_STATE_UNKNOWN",
+    "READY_FIXTURES_WITHOUT_PICK",
+    "SCHEDULER_STALE",
+    "SETTLEMENT_LAG"
+  ],
+  "card_schema_version": "sports_edge_monitoring_card_v1",
+  "coverage": {
+    "ready": 1,
+    "settlement_backlog": 1,
+    "upcoming_fixtures": 3
+  },
+  "deployed_commit": "0000000000000000000000000000000000000000",
+  "generated_at": "2026-10-13T12:00:00+00:00",
+  "health": "RED",
+  "initialized": true,
+  "model_picks": {
+    "average_displayed": 0.6254,
+    "calibration_gap": 0.0889,
+    "ci95": [
+      0.2567,
+      0.9476
+    ],
+    "excluded_from_headline": {
+      "current_system_replay": 1,
+      "live_issued_not_forward": 1
+    },
+    "hit_rate_basis": "STAKE_WEIGHTED_PUSH_EXCLUDED",
+    "insufficient_sample": true,
+    "label": "Forward Model Picks (issued before kickoff)",
+    "min_sample": 100,
+    "observed_hit_rate": 0.7143,
+    "pending": 1,
+    "picks": 6,
+    "pushes": 1,
+    "scored": 4,
+    "voids": 0
+  },
+  "reason": null,
+  "schedulers": {
+    "high_confidence_shadow": {
+      "enabled": false,
+      "last_success_at": null,
+      "stale": false
+    },
+    "market_collection": {
+      "enabled": false,
+      "last_success_at": null,
+      "stale": false
+    },
+    "model_pick_issuance": {
+      "enabled": true,
+      "last_success_at": "2026-10-11T00:00:00+00:00",
+      "stale": true
+    },
+    "model_pick_settlement": {
+      "enabled": false,
+      "last_success_at": null,
+      "stale": false
+    },
+    "prediction_refresh": {
+      "enabled": false,
+      "last_success_at": null,
+      "stale": false
+    },
+    "result_sync": {
+      "enabled": true,
+      "last_success_at": "2026-10-13T11:50:00+00:00",
+      "stale": false
+    },
+    "value_evaluation": {
+      "enabled": false,
+      "last_success_at": null,
+      "stale": false
+    }
+  },
+  "shadow": {
+    "available": false,
+    "enabled": false,
+    "issued": null,
+    "settled": null,
+    "win_share": null
+  },
+  "source_schema_version": "football_monitoring_v1",
+  "sport": "football",
+  "value_bets": {
+    "available": true,
+    "average_clv": null,
+    "insufficient_sample": true,
+    "issuance_enabled": false,
+    "open": 0,
+    "profitability_claim": "NONE",
+    "roi": null,
+    "settled": 0,
+    "value_bets": 0
+  }
+}

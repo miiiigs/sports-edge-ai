@@ -20,6 +20,7 @@ from ..storage import (
     football_paper_trading,
     football_portfolio_selection,
 )
+from .paper_market_evidence import partition_counted_paper_rows
 from .portfolio_selection import (
     PORTFOLIO_POLICY_ID_V1,
     PORTFOLIO_POLICY_VERSION_V1,
@@ -230,11 +231,7 @@ def build_client_history_payload(
         with _read_only_connect(paper_db_path) as conn:
             paper_rows = football_paper_trading.fetch_paper_trade_rows(conn, initialize_schema=False)
             excluded = football_canonical_fixture.fetch_excluded_paper_trade_ids(conn, initialize_schema=False)
-            counted_rows = [
-                row
-                for row in paper_rows
-                if str(row.get("paper_trade_id") or "") not in excluded
-            ]
+            counted_rows, _quarantined = partition_counted_paper_rows(paper_rows, excluded)
             fixture_ids = {
                 str(row.get("fixture_id") or "")
                 for row in counted_rows

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -609,6 +610,16 @@ def _is_same_or_later(current: Any, candidate: Any) -> bool:
     return str(current) >= str(candidate)
 
 
+_MARKET_SNAPSHOT_SELECT = """
+        SELECT snapshot_id, fixture_id, provider, bookmaker, market, selection, line, odds,
+               provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
+               provider_fixture_id, home_team_name, away_team_name, competition_id, competition_name,
+               kickoff_utc, freshness_state, first_observed_at, last_observed_at
+        FROM market_snapshots
+    """
+_FIXTURE_ID_CHUNK_SIZE = 500
+
+
 def fetch_market_snapshots(
     conn: sqlite3.Connection,
     *,
@@ -616,19 +627,37 @@ def fetch_market_snapshots(
     initialize_schema: bool = True,
 ) -> list[dict[str, Any]]:
     _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
-    sql = """
-        SELECT snapshot_id, fixture_id, provider, bookmaker, market, selection, line, odds,
-               provider_market_id, provider_timestamp, captured_at, is_pre_match, ingestion_version,
-               provider_fixture_id, home_team_name, away_team_name, competition_id, competition_name,
-               kickoff_utc, freshness_state, first_observed_at, last_observed_at
-        FROM market_snapshots
-    """
+    sql = _MARKET_SNAPSHOT_SELECT
     params: list[Any] = []
     if fixture_id is not None:
         sql += " WHERE fixture_id = ?"
         params.append(fixture_id)
     sql += " ORDER BY captured_at, snapshot_id"
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def fetch_market_snapshots_by_fixture(
+    conn: sqlite3.Connection,
+    fixture_ids: Iterable[str],
+    *,
+    initialize_schema: bool = True,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return snapshots for only the given fixtures, grouped by fixture_id.
+
+    Each group keeps the ``captured_at, snapshot_id`` order of
+    ``fetch_market_snapshots``, so it equals that function's output filtered to
+    one fixture, without loading every stored snapshot into memory.
+    """
+    _ensure_schema_if_requested(conn, initialize_schema=initialize_schema)
+    ids = sorted({str(fixture_id) for fixture_id in fixture_ids})
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for start in range(0, len(ids), _FIXTURE_ID_CHUNK_SIZE):
+        chunk = ids[start : start + _FIXTURE_ID_CHUNK_SIZE]
+        placeholders = ", ".join("?" for _ in chunk)
+        sql = f"{_MARKET_SNAPSHOT_SELECT} WHERE fixture_id IN ({placeholders}) ORDER BY captured_at, snapshot_id"
+        for row in conn.execute(sql, chunk):
+            grouped.setdefault(str(row["fixture_id"]), []).append(dict(row))
+    return grouped
 
 
 def persisted_snapshot_reader(db_path: str | Path):
@@ -962,9 +991,25 @@ def fetch_paper_trade_rows(conn: sqlite3.Connection, *, initialize_schema: bool 
     ).fetchall()
     for update in updates:
         updates_by_trade_id.setdefault(str(update["paper_trade_id"]), []).append(update)
+    # Ingestion version of each entry's market snapshot, so reporting surfaces can
+    # tell corrected evidence from legacy evidence. ``None`` when no snapshot is linked.
+    try:
+        entry_ingestion_versions = {
+            str(row["paper_trade_id"]): row["ingestion_version"]
+            for row in conn.execute(
+                """
+                SELECT e.paper_trade_id, s.ingestion_version
+                FROM paper_trade_entries e
+                JOIN market_snapshots s ON s.snapshot_id = e.entry_snapshot_id
+                """
+            ).fetchall()
+        }
+    except sqlite3.OperationalError:
+        entry_ingestion_versions = {}
     merged_rows: list[dict[str, Any]] = []
     for entry in entries:
         merged = dict(entry)
+        merged["entry_ingestion_version"] = entry_ingestion_versions.get(str(entry["paper_trade_id"]))
         merged["trade_state"] = "PENDING"
         merged["gross_return"] = None
         merged["net_pnl"] = None

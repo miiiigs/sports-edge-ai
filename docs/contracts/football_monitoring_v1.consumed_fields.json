@@ -1,0 +1,84 @@
+{
+  "deployed_commit": [
+    "string",
+    "null"
+  ],
+  "generated_at": [
+    "string"
+  ],
+  "high_confidence_shadow.available": [
+    "boolean"
+  ],
+  "high_confidence_shadow.enabled": [
+    "boolean"
+  ],
+  "model_performance.excluded_from_headline": [
+    "object"
+  ],
+  "model_performance.forward.calibration_gap": [
+    "number",
+    "null"
+  ],
+  "model_performance.forward.ci95": [
+    "array"
+  ],
+  "model_performance.forward.insufficient_sample": [
+    "boolean"
+  ],
+  "model_performance.forward.issued": [
+    "integer"
+  ],
+  "model_performance.forward.mean_q": [
+    "number",
+    "null"
+  ],
+  "model_performance.forward.min_sample": [
+    "integer"
+  ],
+  "model_performance.forward.open": [
+    "integer"
+  ],
+  "model_performance.forward.settled": [
+    "integer"
+  ],
+  "model_performance.forward.states": [
+    "object"
+  ],
+  "model_performance.forward.win_share_stake_weighted": [
+    "number",
+    "null"
+  ],
+  "operational.alerts": [
+    "array"
+  ],
+  "operational.prediction_coverage.latest_ready": [
+    "integer"
+  ],
+  "operational.prediction_coverage.upcoming_fixtures": [
+    "integer"
+  ],
+  "operational.schedulers": [
+    "object"
+  ],
+  "operational.settlement_backlog.open_past_kickoff": [
+    "integer"
+  ],
+  "qualified_betting.available": [
+    "boolean"
+  ],
+  "qualified_betting.profitability_claim": [
+    "string"
+  ],
+  "read_only": [
+    "boolean"
+  ],
+  "schema_version": [
+    "string"
+  ],
+  "sources.model_pick_db": [
+    "boolean"
+  ],
+  "sport": [
+    "string"
+  ]
+}

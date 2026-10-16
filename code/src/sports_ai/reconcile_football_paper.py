@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from sports_ai.dashboard import storage as dashboard_storage
+from sports_ai.dashboard.paper_market_evidence import partition_counted_paper_rows
 from sports_ai.storage import football_canonical_fixture, football_paper_trading
 
 
@@ -73,8 +74,11 @@ def _print_report(paper_rows: list[dict[str, Any]], identity: dict[str, dict[str
     plan = football_canonical_fixture.build_reconciliation_plan(
         paper_rows, identity, kickoff_tolerance_seconds=tolerance
     )
-    before = football_canonical_fixture.summarize_performance(paper_rows)
-    after = football_canonical_fixture.summarize_performance(plan.counted_rows(paper_rows))
+    # Duplicate detection needs every row; P/L counts only trusted evidence.
+    before_counted, before_quarantined = partition_counted_paper_rows(paper_rows, set())
+    after_counted, after_quarantined = partition_counted_paper_rows(plan.counted_rows(paper_rows), set())
+    before = football_canonical_fixture.summarize_performance(before_counted)
+    after = football_canonical_fixture.summarize_performance(after_counted)
     print("=" * 64)
     print("CANONICAL FIXTURE RECONCILIATION REPORT (dry-run projection)")
     print("=" * 64)
@@ -88,6 +92,7 @@ def _print_report(paper_rows: list[dict[str, Any]], identity: dict[str, dict[str
     print(f"unresolved fixtures:         {len(plan.unresolved_fixture_ids)}")
     print(f"settlement conflicts:        {len(plan.conflicts)}")
     print(f"settlement inconsistencies:  {len(plan.inconsistencies)}")
+    print(f"quarantined (excluded from P/L): before={len(before_quarantined)} after={len(after_quarantined)}")
     print("-" * 64)
     print(f"BEFORE  total={before['total']} open={before['open']} settled={before['settled']} "
           f"W={before['won']} L={before['lost']} P={before['push']} HW={before['half_win']} HL={before['half_loss']} "
