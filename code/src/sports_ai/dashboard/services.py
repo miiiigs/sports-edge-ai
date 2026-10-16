@@ -1821,8 +1821,12 @@ class DashboardServices:
         rows = self._raw_paper_positions()
         identity = self._paper_fixture_identity_map()
         plan = football_canonical_fixture.build_reconciliation_plan(rows, identity)
-        before = football_canonical_fixture.summarize_performance(rows)
-        after = football_canonical_fixture.summarize_performance(plan.counted_rows(rows))
+        # The plan needs every row (duplicate detection); the P/L summaries count
+        # only trusted evidence, like every other reporting surface.
+        before_counted, before_quarantined = partition_counted_paper_rows(rows, set())
+        after_counted, after_quarantined = partition_counted_paper_rows(plan.counted_rows(rows), set())
+        before = football_canonical_fixture.summarize_performance(before_counted)
+        after = football_canonical_fixture.summarize_performance(after_counted)
 
         by_match: dict[str, dict[str, Any]] = {}
         for group in plan.duplicate_groups:
@@ -1888,6 +1892,8 @@ class DashboardServices:
             "cross_provider_fixture_groups": plan.cross_provider_fixture_groups,
             "before": before,
             "after_projected": after,
+            "before_quarantine": quarantine_summary(before_quarantined),
+            "after_projected_quarantine": quarantine_summary(after_quarantined),
             "by_match": by_match,
         }
 
@@ -2453,11 +2459,11 @@ class DashboardServices:
             conn,
             initialize_schema=self._read_requires_schema_init(),
         )
+        trusted_rows, _ = partition_counted_paper_rows(paper_rows, excluded)
         counted_rows = [
             row
-            for row in paper_rows
-            if str(row.get("paper_trade_id") or "") not in excluded
-            and self._portfolio_policy_applies_to_timestamp(row.get("decision_timestamp"), policy)
+            for row in trusted_rows
+            if self._portfolio_policy_applies_to_timestamp(row.get("decision_timestamp"), policy)
         ]
         canonical_fixture_id_by_fixture_id = football_canonical_fixture.fetch_canonical_fixture_ids_for_fixture_ids(
             conn,

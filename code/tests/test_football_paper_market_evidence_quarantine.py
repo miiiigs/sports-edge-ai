@@ -357,3 +357,85 @@ def test_resolved_osasuna_getafe_positions_are_counted_and_untouched(tmp_path):
     with pt.connect(tmp_path / "paper.sqlite") as conn:
         after = [tuple(row) for row in conn.execute("SELECT * FROM paper_trade_updates ORDER BY rowid")]
     assert before == after  # nothing regraded
+
+
+# Remaining surfaces (2026-10-15 audit): the reconciliation report, the offline
+# reconciliation/audit CLIs and the portfolio candidate rows must never count
+# legacy AH positions as trusted P/L either.
+
+
+def _trusted_ids(ids: dict[str, str]) -> set[str]:
+    return {ids["ah_v2"], ids["ah_odds_api"], ids["corner_v1"]}
+
+
+def test_reconciliation_report_excludes_and_discloses_quarantined_positions(tmp_path):
+    _seed_mixed_ledger(tmp_path / "paper.sqlite")
+    services = _services(tmp_path)
+
+    report = services.get_reconciliation_report()
+
+    # The plan still sees every ledger row; P/L sees trusted rows only.
+    assert report["total_rows"] == 5
+    for key in ("before", "after_projected"):
+        summary = report[key]
+        assert summary["total"] == 3
+        assert summary["won"] == 1 and summary["lost"] == 2
+        assert summary["pl"] == pytest.approx(1.6 - 2.0)
+    for key in ("before_quarantine", "after_projected_quarantine"):
+        assert report[key]["market_evidence_quarantined_positions"] == 2
+        assert report[key]["market_evidence_quarantined_by_market"] == {"asian_handicap": 2}
+
+
+def test_reconcile_cli_report_excludes_quarantined_positions(tmp_path, capsys):
+    from sports_ai import reconcile_football_paper
+
+    _seed_mixed_ledger(tmp_path / "paper.sqlite")
+    with pt.connect(tmp_path / "paper.sqlite") as conn:
+        rows = pt.fetch_paper_trade_rows(conn)
+
+    reconcile_football_paper._print_report(rows, {}, 0)
+    out = capsys.readouterr().out
+
+    assert "total paper rows:            5" in out
+    assert "BEFORE  total=3 " in out and "AFTER   total=3 " in out
+    assert "W=1 L=2" in out
+    assert "P/L=-0.4 " in out
+    assert "quarantined (excluded from P/L): before=2 after=2" in out
+
+
+def test_market_performance_audit_excludes_quarantined_positions(tmp_path):
+    from sports_ai.experiments import football_market_performance_audit as audit
+
+    ids = _seed_mixed_ledger(tmp_path / "paper.sqlite")
+
+    counted, conn = audit._load_counted_rows(tmp_path / "paper.sqlite")
+    conn.close()
+    result = audit.audit_market_performance(tmp_path / "paper.sqlite")
+
+    assert {row["paper_trade_id"] for row in counted} == _trusted_ids(ids)
+    assert result["raw_counted_rows"] == 3
+    ah = result["raw"]["by_market"]["asian_handicap"]
+    assert ah["positions"] == 2
+    assert ah["wins"] == 0 and ah["losses"] == 2
+
+
+def test_portfolio_candidate_rows_exclude_quarantined_positions(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from sports_ai.dashboard import services as services_module
+
+    ids = _seed_mixed_ledger(tmp_path / "paper.sqlite")
+    services = _services(tmp_path)
+    monkeypatch.setattr(
+        services_module.football_canonical_fixture,
+        "fetch_canonical_fixture_ids_for_fixture_ids",
+        lambda conn, fixture_ids, **_: {str(f): f"canon:{f}" for f in fixture_ids},
+    )
+    policy = SimpleNamespace(effective_from="2026-01-01T00:00:00+00:00")
+
+    with pt.connect(tmp_path / "paper.sqlite") as conn:
+        rows_by_trade_id, canonical_by_trade_id = services._counted_portfolio_paper_rows(conn, policy=policy)
+
+    # Trusted rows are unchanged; legacy AH rows never reach portfolio selection.
+    assert set(rows_by_trade_id) == _trusted_ids(ids)
+    assert set(canonical_by_trade_id) == _trusted_ids(ids)
