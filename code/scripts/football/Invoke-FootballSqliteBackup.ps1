@@ -6,7 +6,9 @@
 .DESCRIPTION
     1. Refuses to run unless the Railway service is already awake (it never wakes it).
     2. Streams sports_ai.diagnostics.football_sqlite_backup into the container over
-       stdin-free `railway ssh` (base64 on the command line, no files uploaded) and runs
+       stdin-free `railway ssh` (base64 on the command line, no files uploaded). First runs
+       `inventory` (every SQLite file under /data, with sizes, plus a free-space check on
+       /tmp) and stops if an unrecognised database exists or /tmp is too small. Then runs
        `backup` against /data. Sources are opened mode=ro; copies go to /tmp/fb-<TS>.
     3. Streams /tmp/fb-<TS> back as tar.gz+base64, written byte-for-byte by
        Start-Process (no PowerShell re-encoding), and decodes it locally.
@@ -16,6 +18,13 @@
 
     Remote commands contain no quotes, so neither PowerShell 5.1 argument passing nor the
     remote shell can mangle them.
+
+    Start it immediately after a natural wake begins: a wake lasts about 6-20 minutes.
+    If the container sleeps mid-run the run fails closed (/data untouched, only the
+    ephemeral /tmp copy is lost); rerun on the next wake.
+
+    The local destination drive must have at least 3x the container-reported source
+    bytes free (base64 stream + .tgz + extracted copy); checked after step 0.
 
     Output goes to <DestRoot>\<TS>\, which must be outside every Git working tree.
     The directory ACL is reduced to the current user. Nothing sensitive is printed:
@@ -53,6 +62,7 @@ $ReconciledTables = @{
     "football_dashboard.sqlite"     = @("dashboard_fixtures", "dashboard_predictions", "dashboard_fixture_results")
     "football_paper_trading.sqlite" = @("paper_trade_entries", "paper_trade_updates", "market_snapshots")
     "football_model_picks.sqlite"   = @("football_model_pick_entries")
+    "football_research_live.sqlite" = @("football_events")
 }
 
 function Invoke-Remote {
@@ -71,6 +81,9 @@ function Invoke-Remote {
         -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath
     $null = $p.Handle  # PS 5.1: keep the handle so ExitCode is populated
     $p.WaitForExit()
+    # PS 5.1 occasionally reports a null ExitCode for a process that exits very quickly.
+    for ($n = 0; $null -eq $p.ExitCode -and $n -lt 50; $n++) { Start-Sleep -Milliseconds 100; $p.Refresh() }
+    if ($null -eq $p.ExitCode) { throw "exit code unavailable for remote command" }
     return $p.ExitCode
 }
 
@@ -154,17 +167,51 @@ New-Item -ItemType Directory -Path $Out | Out-Null
 Invoke-Native { & icacls $Out /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" } | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Out" }
 
-# --- 1. Online backup inside the container ----------------------------------------
-# gzip first: the plain base64 (~10 KB) gets truncated on the ~8 KB command lines some launchers allow.
+# --- Module transfer --------------------------------------------------------------
+# gzip+base64, sent in chunks: some launchers truncate command lines at about 8 KB.
+# The chunks go to /tmp/fb-<TS>.mod (outside the backup dir) and are removed in step 4.
 $gzBuffer = New-Object System.IO.MemoryStream
 $gz = New-Object System.IO.Compression.GZipStream($gzBuffer, [System.IO.Compression.CompressionMode]::Compress)
 $moduleBytes = [System.IO.File]::ReadAllBytes($ModulePath)
 $gz.Write($moduleBytes, 0, $moduleBytes.Length); $gz.Dispose()
 $b64Module = [Convert]::ToBase64String($gzBuffer.ToArray())
+$RemoteModule = "/tmp/fb-$TS.mod"
+$ChunkSize = 6000
+for ($i = 0; $i -lt $b64Module.Length; $i += $ChunkSize) {
+    $chunk = $b64Module.Substring($i, [Math]::Min($ChunkSize, $b64Module.Length - $i))
+    $redirect = if ($i -eq 0) { ">" } else { ">>" }
+    $rc = Invoke-Remote "echo $chunk $redirect $RemoteModule" (Join-Path $Out "module.stdout.txt") (Join-Path $Out "module.stderr.txt")
+    if ($rc -ne 0) { throw "module transfer failed (exit $rc)" }
+}
+$RunModule = "base64 -d $RemoteModule | gunzip | $RemotePython -"
 $remoteManifest = Join-Path $Out "container-manifest.json"
-$cmd = "echo $b64Module | base64 -d | gunzip | $RemotePython - backup --source-dir $SourceDir --dest-dir $RemoteDir"
-if ($cmd.Length -gt 7000) { throw "remote command too long ($($cmd.Length) chars)" }
-$rc = Invoke-Remote $cmd $remoteManifest (Join-Path $Out "step1.stderr.txt")
+
+# --- 0. Inventory and capacity preflight (read-only) -------------------------------
+$inventoryPath = Join-Path $Out "inventory.json"
+$rc = Invoke-Remote "$RunModule inventory --source-dir $SourceDir --dest-dir $RemoteDir" $inventoryPath (Join-Path $Out "step0.stderr.txt")
+$inventory = Get-Content $inventoryPath -Raw | ConvertFrom-Json
+if ($rc -ne 0 -or @($inventory.unknown).Count -gt 0) {
+    $null = Invoke-Remote "rm -f $RemoteModule" (Join-Path $Out "step0b.stdout.txt") (Join-Path $Out "step0b.stderr.txt")
+}
+if ($rc -ne 0) { throw "preflight failed (exit $rc): $($inventory.capacity.error)" }
+if (@($inventory.unknown).Count -gt 0) {
+    throw "unrecognised SQLite files in ${SourceDir}: $($inventory.unknown -join ', '). Add them to the inventory before backing up."
+}
+Write-Host ("0/5 inventory OK: {0} databases, {1} source bytes, {2} free in /tmp" -f `
+    @($inventory.files.PSObject.Properties).Count, $inventory.capacity.source_bytes, $inventory.capacity.free_bytes)
+
+# Local capacity: the base64 stream, the .tgz and the extracted copy coexist, so the
+# destination drive needs at least 3x the container-reported source bytes.
+$localRequired = 3 * [int64]$inventory.capacity.source_bytes
+$localFree = (New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($Out))).AvailableFreeSpace
+if ($localFree -lt $localRequired) {
+    $null = Invoke-Remote "rm -f $RemoteModule" (Join-Path $Out "step0c.stdout.txt") (Join-Path $Out "step0c.stderr.txt")
+    throw "local destination has $localFree bytes free; needs at least $localRequired (3 x source bytes). Free space or pass -DestRoot on another drive."
+}
+Write-Host ("0/5 local capacity OK: {0} free, {1} required" -f $localFree, $localRequired)
+
+# --- 1. Online backup inside the container ----------------------------------------
+$rc = Invoke-Remote "$RunModule backup --source-dir $SourceDir --dest-dir $RemoteDir" $remoteManifest (Join-Path $Out "step1.stderr.txt")
 if ($rc -ne 0) { throw "remote backup failed (exit $rc); see step1.stderr.txt. Remote dir: $RemoteDir" }
 Write-Host "1/5 container backup OK -> $RemoteDir"
 
@@ -193,6 +240,11 @@ $problems = New-Object System.Collections.Generic.List[string]
 if ($verifyRc -ne 0 -or -not $verify.ok) { $problems.Add("verify: $($verify.problems -join '; ')") }
 if (-not $manifest.all_integrity_ok) { $problems.Add("manifest: all_integrity_ok=false") }
 if (@($manifest.missing_required).Count -gt 0) { $problems.Add("missing: $($manifest.missing_required -join ',')") }
+foreach ($line in Get-Content (Join-Path $BackupDir "SHA256SUMS")) {
+    $parts = $line -split "  ", 2
+    $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $BackupDir $parts[1])).Hash.ToLower()
+    if ($hash -ne $parts[0]) { $problems.Add("$($parts[1]): SHA256SUMS mismatch") }
+}
 if (($containerManifest | ConvertTo-Json -Depth 10 -Compress) -ne ($manifest | ConvertTo-Json -Depth 10 -Compress)) {
     $problems.Add("container manifest differs from transferred manifest")
 }
@@ -216,9 +268,9 @@ Write-Host "3/5 local verify OK (sha256, integrity_check, row counts, manifest m
 
 # --- 4. Remove the container copy -------------------------------------------------
 if (-not $KeepRemoteCopy) {
-    $rc = Invoke-Remote "rm -rf $RemoteDir" (Join-Path $Out "step4.stdout.txt") (Join-Path $Out "step4.stderr.txt")
+    $rc = Invoke-Remote "rm -rf $RemoteDir $RemoteModule" (Join-Path $Out "step4.stdout.txt") (Join-Path $Out "step4.stderr.txt")
     if ($rc -ne 0) { throw "remote cleanup failed (exit $rc) for $RemoteDir" }
-    $rc = Invoke-Remote "test ! -e $RemoteDir" (Join-Path $Out "step4b.stdout.txt") (Join-Path $Out "step4b.stderr.txt")
+    $rc = Invoke-Remote "test ! -e $RemoteDir -a ! -e $RemoteModule" (Join-Path $Out "step4b.stdout.txt") (Join-Path $Out "step4b.stderr.txt")
     if ($rc -ne 0) { throw "remote copy still present: $RemoteDir" }
     Write-Host "4/5 container copy removed"
 }
@@ -227,6 +279,7 @@ if (-not $KeepRemoteCopy) {
 $summary = [ordered]@{
     ts = $TS; started_at = $manifest.started_at; completed_at = $manifest.completed_at
     verify_ok = $true; all_integrity_ok = $manifest.all_integrity_ok
+    source_bytes = $manifest.capacity.source_bytes; tmp_free_bytes = $manifest.capacity.free_bytes
     tgz_sha256 = (Get-FileHash -Algorithm SHA256 $tgz).Hash.ToLower()
     databases = $evidence
 }

@@ -29,6 +29,7 @@ def data_dir(tmp_path):
         _wal_db(src / "football_dashboard.sqlite", "dashboard_fixtures", 50),
         _wal_db(src / "football_paper_trading.sqlite", "market_snapshots", 400),
         _wal_db(src / "football_model_picks.sqlite", "football_model_pick_entries", 30),
+        _wal_db(src / "football_research_live.sqlite", "football_events", 70),
     ]
     for table, db in (("dashboard_predictions", "football_dashboard.sqlite"), ("dashboard_fixture_results", "football_dashboard.sqlite"),
                       ("paper_trade_entries", "football_paper_trading.sqlite"), ("paper_trade_updates", "football_paper_trading.sqlite")):
@@ -111,8 +112,9 @@ def test_verify_detects_tampering_and_missing_files(data_dir, tmp_path):
 def test_missing_required_database_fails_the_backup(tmp_path):
     src = tmp_path / "partial"
     src.mkdir()
-    for name in fb.DATABASES[1:]:
-        _wal_db(src / name, "t", 1).close()
+    for name in fb.DATABASES:
+        if name != "sports_edge_auth.sqlite":
+            _wal_db(src / name, "t", 1).close()
     manifest = fb.run_backup(src, tmp_path / "backup")
     assert manifest["missing_required"] == ["sports_edge_auth.sqlite"]
     assert manifest["all_integrity_ok"] is False
@@ -152,3 +154,128 @@ def test_cli_exit_codes(data_dir, tmp_path, capsys):
     assert fb.main(["verify", "--backup-dir", str(out)]) == 0
     capsys.readouterr()
     assert fb.main(["reconcile", "--backup-dir", str(out), "--live-dir", str(data_dir)]) == 0
+
+
+def test_research_db_is_required_and_backed_up(data_dir, tmp_path):
+    assert "football_research_live.sqlite" in fb.DATABASES
+    manifest = fb.run_backup(data_dir, tmp_path / "backup")
+    assert manifest["databases"]["football_research_live.sqlite"]["row_counts"]["football_events"] == 70
+    assert manifest["schema"] == "football_sqlite_backup_v2"
+    research = next(r for r in fb.reconcile(tmp_path / "backup", data_dir)["tables"] if r["table"] == "football_events")
+    assert research == {"database": "football_research_live.sqlite", "table": "football_events", "backup": 70, "live": 70, "ok": True}
+
+
+def test_missing_research_db_fails_closed(tmp_path):
+    src = tmp_path / "no-research"
+    src.mkdir()
+    for name in fb.DATABASES:
+        if name != "football_research_live.sqlite":
+            _wal_db(src / name, "t", 1).close()
+    manifest = fb.run_backup(src, tmp_path / "backup")
+    assert manifest["missing_required"] == ["football_research_live.sqlite"]
+    assert manifest["all_integrity_ok"] is False
+    assert fb.verify_backup(tmp_path / "backup")["ok"] is False
+
+
+def test_unknown_sqlite_file_fails_closed_before_copying(data_dir, tmp_path):
+    (data_dir / "nested").mkdir()
+    _wal_db(data_dir / "nested" / "mystery.sqlite", "t", 3).close()
+    out = tmp_path / "backup"
+    with pytest.raises(fb.UnknownDatabaseError, match="nested/mystery.sqlite"):
+        fb.run_backup(data_dir, out)
+    assert not out.exists()  # nothing copied
+
+    assert fb.main(["backup", "--source-dir", str(data_dir), "--dest-dir", str(out)]) == 1
+    assert not out.exists()
+
+
+def test_unknown_sqlite_file_can_be_included_or_acknowledged(data_dir, tmp_path):
+    _wal_db(data_dir / "mystery.sqlite", "t", 3).close()
+    included = fb.run_backup(data_dir, tmp_path / "with", include_unknown=True)
+    assert included["unknown_included"] == ["mystery.sqlite"]
+    assert included["databases"]["mystery.sqlite"]["row_counts"] == {"t": 3}
+    assert fb.verify_backup(tmp_path / "with")["ok"] is True
+
+    skipped = fb.run_backup(data_dir, tmp_path / "skip", skip=["mystery.sqlite"])
+    assert skipped["skipped_acknowledged"] == ["mystery.sqlite"]
+    assert "mystery.sqlite" not in skipped["databases"]
+    assert skipped["inventory"]["mystery.sqlite"]["known"] is False
+    assert fb.verify_backup(tmp_path / "skip")["ok"] is True
+
+    with pytest.raises(ValueError):
+        fb.run_backup(data_dir, tmp_path / "bad", skip=["football_research_live.sqlite"])
+
+
+def test_inventory_counts_wal_bytes(data_dir):
+    found = fb.inventory(data_dir)
+    assert found["unknown"] == []
+    assert set(found["files"]) == set(fb.DATABASES)
+    assert found["files"]["football_paper_trading.sqlite"]["wal_bytes"] > 0
+
+
+def test_insufficient_space_fails_closed_before_copying(data_dir, tmp_path, monkeypatch):
+    real = fb.shutil.disk_usage
+    monkeypatch.setattr(fb.shutil, "disk_usage", lambda path: real(path)._replace(free=1024))
+    out = tmp_path / "backup"
+    with pytest.raises(fb.InsufficientSpaceError):
+        fb.run_backup(data_dir, out)
+    assert not out.exists()
+    assert fb.main(["inventory", "--source-dir", str(data_dir), "--dest-dir", str(out)]) == 1
+
+
+def test_capacity_is_recorded(data_dir, tmp_path):
+    manifest = fb.run_backup(data_dir, tmp_path / "backup")
+    capacity = manifest["capacity"]
+    expected = sum(f["bytes"] + f["wal_bytes"] for f in manifest["inventory"].values())
+    assert capacity["source_bytes"] == expected
+    assert capacity["required_free_bytes"] == int(expected * fb.CAPACITY_SAFETY_FACTOR) + fb.CAPACITY_MARGIN_BYTES
+    assert capacity["free_bytes"] >= capacity["required_free_bytes"]
+
+
+def test_checksums_file_matches_copies(data_dir, tmp_path):
+    out = tmp_path / "backup"
+    manifest = fb.run_backup(data_dir, out)
+    raw = (out / fb.CHECKSUMS_NAME).read_bytes()
+    assert b"\r" not in raw  # `sha256sum -c` format on every platform
+    lines = raw.decode("utf-8").splitlines()
+    parsed = dict(reversed(line.split("  ", 1)) for line in lines)
+    assert parsed == {name: info["sha256"] for name, info in manifest["databases"].items()}
+    for name, digest in parsed.items():
+        assert fb._sha256(out / name) == digest
+
+
+def test_verify_rejects_manifest_without_research_db(data_dir, tmp_path):
+    out = tmp_path / "backup"
+    fb.run_backup(data_dir, out)
+    manifest = json.loads((out / fb.MANIFEST_NAME).read_text(encoding="utf-8"))
+    del manifest["databases"]["football_research_live.sqlite"]
+    del manifest["inventory"]["football_research_live.sqlite"]
+    (out / fb.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+    result = fb.verify_backup(out)
+    assert result["ok"] is False
+    assert "football_research_live.sqlite: required database absent from manifest" in result["problems"]
+
+
+def test_reconcile_skips_live_integrity_check_by_default(data_dir, tmp_path, monkeypatch):
+    out = tmp_path / "backup"
+    fb.run_backup(data_dir, out)
+    calls: list[bool] = []
+    real = fb.describe
+
+    def spy(path, *, integrity_check=True):
+        calls.append(integrity_check)
+        return real(path, integrity_check=integrity_check)
+
+    monkeypatch.setattr(fb, "describe", spy)
+    assert fb.reconcile(out, data_dir)["ok"] is True
+    assert calls and not any(calls)
+    calls.clear()
+    assert fb.reconcile(out, data_dir, integrity_check=True)["ok"] is True
+    assert calls and all(calls)
+
+
+def test_ledger_is_copied_before_the_databases_it_references():
+    order = list(fb.DATABASES)
+    ledger = order.index("football_model_picks.sqlite")
+    assert ledger < order.index("football_dashboard.sqlite")
+    assert ledger < order.index("football_paper_trading.sqlite")
