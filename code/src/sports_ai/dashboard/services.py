@@ -1180,6 +1180,27 @@ class DashboardServices:
             "updated_at": evidence.get("updated_at"),
         }
 
+    def _public_wake_evidence_summary(self) -> dict[str, Any]:
+        """Minimal public wake telemetry: never expose raw failures or quotas.
+
+        The comprehensive durable operational record is available to the
+        scheduler/operator from internal storage. /health and /health/wake are
+        intentionally unauthenticated for the cron, so use an allowlist.
+        """
+        source = self.get_wake_evidence_summary()
+        safe_keys = (
+            "process_role",
+            "evidence_process_role",
+            "startup_sync_state",
+            "last_cycle_state",
+            "last_cycle_completed_at",
+            "last_useful_cycle_at",
+            "forward_predictions_new_ready_last_cycle",
+            "forward_predictions_noop_reason",
+            "useful_cycle",
+        )
+        return {key: source.get(key) for key in safe_keys}
+
     def get_wake_status(
         self,
         *,
@@ -1221,16 +1242,26 @@ class DashboardServices:
                 last_useful_dt = None
         verified = last_useful_dt is not None and last_useful_dt >= since_dt
         failed_after_since = False
+        most_recent_failure: datetime | None = None
         for key in ("last_cycle_completed_at", "startup_sync_completed_at"):
             raw = evidence.get(key)
             state_key = "last_cycle_state" if key == "last_cycle_completed_at" else "startup_sync_state"
             if str(evidence.get(state_key) or "") != "FAILED" or not raw:
                 continue
             try:
-                if parse_iso_datetime(str(raw)) >= since_dt:
+                failure_at = parse_iso_datetime(str(raw))
+                if failure_at >= since_dt:
                     failed_after_since = True
+                    if most_recent_failure is None or failure_at > most_recent_failure:
+                        most_recent_failure = failure_at
             except ValueError:
                 continue
+        # Do not let an earlier good cycle mask a later failed scheduler
+        # attempt in the same observation window.
+        if most_recent_failure is not None and (
+            last_useful_dt is None or most_recent_failure > last_useful_dt
+        ):
+            verified = False
         if verified:
             status = "ok"
             message = "useful scheduler cycle completed after the requested wake time"
@@ -1247,7 +1278,7 @@ class DashboardServices:
                 "checked_since": since_dt.isoformat(),
                 "checked_at": now.isoformat(),
                 "message": message,
-                "evidence": evidence,
+                "evidence": self._public_wake_evidence_summary(),
             },
             200 if verified else 503,
         )
@@ -8475,7 +8506,7 @@ class DashboardServices:
             "scheduler_execution_mode": scheduler_execution_mode,
             "timestamp_utc": utc_now_iso(),
             "process_started_at": self._process_started_at,
-            "wake_evidence": self.get_wake_evidence_summary(),
+            "wake_evidence": self._public_wake_evidence_summary(),
             "startup_sync_state": self._startup_sync_state["state"],
             "startup_sync_started_at": self._startup_sync_state["started_at"],
             "startup_sync_completed_at": self._startup_sync_state["completed_at"],
