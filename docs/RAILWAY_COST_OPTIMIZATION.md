@@ -15,6 +15,36 @@ Production can keep Railway sleeping enabled and use `.github/workflows/football
 
 The wake request itself does not perform provider work. Starting the container launches the existing scheduler worker, whose normal startup path runs one full fixture/prediction synchronization and persists the result to `/data`. Railway can then return the service to sleep after the idle window.
 
+`GET /health` is a liveness response from the read-only web child. It can return HTTP 200 before the scheduler process starts, while the startup sync is still running, or after the startup sync failed. Do not treat HTTP 200 alone as evidence of a useful wake.
+
+Use `GET /health/wake?since=<ISO-8601>` to verify useful processing. The scheduler persists a durable `wake_evidence_state` record after every cycle with:
+
+- `startup_sync_state` and completion/error timestamps;
+- `last_cycle_state` (`RUNNING`, `COMPLETED`, `DEGRADED`, `FAILED`, `SKIPPED`);
+- fixture and prediction counts;
+- `forward_predictions_new_last_cycle` and `forward_predictions_new_ready_last_cycle`;
+- an explicit `forward_predictions_noop_reason` when no new forward prediction was needed;
+- a compact provider-budget snapshot.
+
+`/health/wake` returns HTTP 200 only when a useful cycle completed at or after `since`; otherwise it returns HTTP 503 with `status=pending` or `status=failed`. It is read-only, makes zero provider requests, and does not trigger a sync.
+
+### Verified Railway cron command
+
+The legacy `football-hourly-wake-v2` service uses `alpine:3.20`, whose default command is `/bin/sh`. The observed hourly `Starting Container`-only logs are consistent with Railway passing the configured start command as arguments to that image command: a start command beginning with `sh` becomes `/bin/sh sh -ec '...'`, which exits with `can't open 'sh'` before `wake-start` is printed and before any HTTP request is made. That argument form was reproduced locally with the same Alpine image and produces exactly the missing-log/no-request behaviour.
+
+For the existing Alpine image, configure the start command without the leading `sh` and verify the run logs show `wake-start` and `wake-ok`:
+
+```text
+-ec 'echo wake-start; wget -S -T 90 -O /dev/null https://sports-edge-ai-production.up.railway.app/health; echo wake-ok'
+```
+
+The reliable option is the repo-contained runner, which also waits for `/health/wake` instead of stopping at HTTP 200:
+
+- Dockerfile: `ops/football_wake/Dockerfile`
+- script: `ops/football_wake/wake_and_verify.sh`
+
+Point the cron service at this repository, set the Dockerfile path to `ops/football_wake/Dockerfile`, keep `20 * * * *`, and clear the custom start command. Each run then logs `wake-start`, `wake-http-ok`, polling results and `wake-ok`/`wake-failed`, and exits non-zero when a useful cycle was not verified. This is a production Railway configuration change and requires owner approval.
+
 Recommended serverless production controls:
 
 - keep Railway `sleepApplication=true`
