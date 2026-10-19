@@ -331,7 +331,11 @@ def test_public_wake_and_health_never_publish_raw_failures_or_provider_budget(tm
         "provider_budget": {"secret_quota": "sensitive-private-budget"},
     })
     scheduler._persist_wake_evidence()
-    web = _service(tmp_path, role=RUNTIME_ROLE_WEB)
+    # The public routes execute in the lightweight web child. Using the
+    # full scheduler here would require an unrelated research football_events DB.
+    web = LowMemoryWebDashboardServices(config=_config(tmp_path, role=RUNTIME_ROLE_WEB))
+    web._provider_budget = _FakeBudget()  # type: ignore[assignment]
+    web._edge_desk_available = False
     app = create_app(services=web)
     with TestClient(app) as client:
         status = client.get("/health/wake?since=" + _valid_since())
