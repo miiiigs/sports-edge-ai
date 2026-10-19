@@ -215,7 +215,8 @@ def test_failed_cycle_is_not_verified_and_reports_failure(tmp_path: Path):
     assert payload["wake_verified"] is False
     assert payload["status"] == "failed"
     assert payload["evidence"]["last_cycle_state"] == "FAILED"
-    assert "TimeoutError" in payload["evidence"]["last_cycle_error"]
+    assert "last_cycle_error" not in payload["evidence"]
+    assert "TimeoutError" in service.get_wake_evidence_summary()["last_cycle_error"]
     assert payload["evidence"]["last_useful_cycle_at"] is None
 
 
@@ -318,3 +319,74 @@ def test_invalid_since_is_rejected(tmp_path: Path):
     assert status_code == 400
     assert payload["error"] == "invalid_since"
     assert payload["wake_verified"] is False
+
+
+def test_public_wake_and_health_never_publish_raw_failures_or_provider_budget(tmp_path: Path):
+    scheduler = _service(tmp_path)
+    scheduler._wake_evidence_state.update({
+        "last_cycle_state": "FAILED",
+        "last_cycle_completed_at": utc_now_iso(),
+        "last_cycle_error": "API_TOKEN=private-token server=https://internal",
+        "startup_sync_last_error": "PASSWORD=private-password",
+        "provider_budget": {"secret_quota": "sensitive-private-budget"},
+    })
+    scheduler._persist_wake_evidence()
+    web = _service(tmp_path, role=RUNTIME_ROLE_WEB)
+    app = create_app(services=web)
+    with TestClient(app) as client:
+        status = client.get("/health/wake?since=" + _valid_since())
+        assert status.status_code == 503
+        health = client.get("/health")
+        assert health.status_code == 200
+        for response in (status, health):
+            body = response.text
+            assert "private-token" not in body
+            assert "private-password" not in body
+            assert "sensitive-private-budget" not in body
+            assert "last_cycle_error" not in response.json()["evidence"] if response is status else (
+                "last_cycle_error" not in response.json()["wake_evidence"]
+            )
+
+
+def test_later_failed_cycle_cannot_be_masked_by_earlier_verified_success(tmp_path: Path):
+    scheduler = _service(tmp_path)
+    scheduler._prediction_state.update({"ready_fixture_count": 3, "blocked_fixture_count": 0})
+    since = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    started_at = utc_now_iso()
+    scheduler._begin_sync_cycle(sync_kind="startup", started_at=started_at)
+    scheduler._finish_sync_cycle(
+        started_at=started_at, sync_kind="startup", result=_completed_result()
+    )
+    # Explicit separation avoids relying on wall-clock subsecond timing.
+    scheduler._wake_evidence_state["last_useful_cycle_at"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=2)
+    ).isoformat()
+    scheduler._persist_wake_evidence()
+    failed_start = utc_now_iso()
+    scheduler._begin_sync_cycle(sync_kind="startup", started_at=failed_start)
+    scheduler._finish_sync_cycle_failed(
+        started_at=failed_start, sync_kind="startup",
+        exc=TimeoutError("provider unavailable"),
+    )
+    payload, status_code = scheduler.get_wake_status(since=since)
+    assert status_code == 503
+    assert payload["wake_verified"] is False
+    assert payload["status"] == "failed"
+
+
+def test_railway_dockerfile_uses_repository_root_context():
+    root = Path(__file__).resolve().parents[2]
+    dockerfile = (root / "ops/football_wake/Dockerfile").read_text(encoding="utf-8")
+    assert "COPY ops/football_wake/wake_and_verify.sh" in dockerfile
+    assert (root / "ops/football_wake/wake_and_verify.sh").exists()
+
+
+def test_wake_shell_does_not_log_public_health_response_bodies():
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "ops/football_wake/wake_and_verify.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "HEALTH_OUTPUT" not in source
+    assert 'body=${WAKE_BODY}' not in source
+    assert "wake-http-failed" in source
+    assert "wake-failed" in source
