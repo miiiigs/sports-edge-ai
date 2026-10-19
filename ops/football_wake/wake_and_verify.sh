@@ -21,18 +21,18 @@ SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo "wake-start ts=${SINCE} target=${BASE_URL}"
 
-HEALTH_OUTPUT="$(wget -S -T 90 -O - "${BASE_URL}/health" 2>&1)" || {
+# Do not emit potentially sensitive response bodies or headers to public
+# build/deploy logs. The transport failure is visible by exit status.
+if ! wget -q -T 90 -O /dev/null "${BASE_URL}/health"; then
     echo "wake-http-failed"
-    echo "${HEALTH_OUTPUT}"
     exit 1
-}
+fi
 echo "wake-http-ok"
-echo "${HEALTH_OUTPUT}"
 
 ELAPSED=0
 while [ "${ELAPSED}" -lt "${MAX_WAIT_SECONDS}" ]; do
-    WAKE_BODY="$(wget -q -T 30 -O - "${BASE_URL}/health/wake?since=${SINCE}" 2>/dev/null)" && WAKE_RC=0 || WAKE_RC=$?
-    echo "wake-poll elapsed_seconds=${ELAPSED} http_rc=${WAKE_RC} body=${WAKE_BODY}"
+    wget -q -T 30 -O /dev/null "${BASE_URL}/health/wake?since=${SINCE}" && WAKE_RC=0 || WAKE_RC=$?
+    echo "wake-poll elapsed_seconds=${ELAPSED} http_rc=${WAKE_RC}"
     if [ "${WAKE_RC}" -eq 0 ]; then
         echo "wake-ok"
         exit 0
