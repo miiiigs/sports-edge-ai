@@ -414,3 +414,38 @@ def test_public_health_allowlist_does_not_bypass_auth_for_prefix_lookalikes(tmp_
             response = client.get(spoofed_path)
             assert response.status_code in (302, 303, 307)
             assert response.headers["location"].startswith("/login")
+
+
+def test_useful_ready_wake_and_empty_settlement_do_not_publish_picks(tmp_path: Path):
+    """A useful READY cycle and successful settlement are not issuance actions."""
+    service = _service(tmp_path)
+    service.config = replace(service.config, enable_model_pick_settlement_scheduler=True)
+    service._prediction_state.update({"ready_fixture_count": 1, "blocked_fixture_count": 0})
+    started = utc_now_iso()
+    service._begin_sync_cycle(sync_kind="startup", started_at=started)
+    service._record_new_prediction({
+        "prediction_id": "pred-ready-only",
+        "fixture_id": "fake:ready-only",
+        "prediction_status": PREDICTION_STATUS_READY,
+    })
+    service._finish_sync_cycle(
+        started_at=started,
+        sync_kind="startup",
+        result=_completed_result(),
+    )
+    wake, code = service.get_wake_status(since=_valid_since())
+    assert code == 200
+    assert wake["wake_verified"] is True
+    assert wake["evidence"]["forward_predictions_new_ready_last_cycle"] == 1
+
+    result = service.run_model_pick_settlement_cycle()
+    assert result["state"] == "MODEL_PICK_SETTLEMENT"
+    assert result["examined"] == 0
+    assert result["applied"] == 0
+    assert not service.config.model_pick_db_path.exists()
+    assert not service.config.paper_trading_db_path.exists()
+    with storage.connect(service.config.dashboard_db_path) as conn:
+        wake_evidence = storage.get_runtime_state(conn, WAKE_EVIDENCE_STATE_KEY)
+        settlement_evidence = storage.get_runtime_state(conn, "model_pick_settlement_state")
+    assert wake_evidence["useful_cycle"] is True
+    assert settlement_evidence["model_pick_settlement_applied_last_cycle"] == 0
