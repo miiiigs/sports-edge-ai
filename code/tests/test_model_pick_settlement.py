@@ -403,3 +403,112 @@ def test_module_has_no_provider_or_historical_references():
     source = inspect.getsource(mps)
     for forbidden in ("httpx", "requests", "urllib", "market_snapshots", "?date=", "the-odds-api", "5dollar"):
         assert forbidden not in source
+
+
+# --------------------------------------------------------------------------- status checkpoint lock regression
+def test_dashboard_status_lock_retries_without_resettling_pick(tmp_path, monkeypatch):
+    """Actual WAL writer contention: the status UPSERT retries, not the ledger."""
+    config = _config(tmp_path)
+    _seed_dashboard_fixture(config, _fixture("api-football:1", home=2, away=0))
+    pick_id = _seed_pick(config, "api-football:1", "asian_handicap", "HOME", -0.5)
+    services = _services(config)
+    # Production initializes the schema before concurrent runtime loops start.
+    services._schema_initialized = True
+
+    # A different scheduler thread can hold a dashboard-DB writer transaction
+    # while the Model Pick ledger (another DB) has already committed.
+    writer = sqlite3.connect(config.dashboard_db_path)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute(
+        "INSERT INTO dashboard_runtime_state (state_key, state_value_json, updated_at) "
+        "VALUES ('simulated_other_scheduler', '{}', '2026-10-08T12:00:00Z')"
+    )
+    original_put = storage.put_runtime_state
+    attempts = []
+    writer_state = {"closed": False}
+
+    def put_with_first_attempt_contended(conn, *, state_key, **kwargs):
+        if state_key == "model_pick_settlement_state":
+            attempts.append(len(attempts) + 1)
+            if len(attempts) == 1:
+                conn.execute("PRAGMA busy_timeout = 20")
+                try:
+                    return original_put(conn, state_key=state_key, **kwargs)
+                finally:
+                    # Release the simulated other scheduler after the first
+                    # failed attempt. An unrelated SQLITE error would still fail.
+                    writer.rollback()
+                    writer.close()
+                    writer_state["closed"] = True
+        return original_put(conn, state_key=state_key, **kwargs)
+
+    monkeypatch.setattr(storage, "put_runtime_state", put_with_first_attempt_contended)
+    try:
+        outcome = services.run_model_pick_settlement_cycle()
+    finally:
+        if not writer_state["closed"]:
+            writer.rollback()
+            writer.close()
+
+    assert attempts == [1, 2]
+    assert outcome["applied"] == 1
+    assert outcome["error"] is None
+    settled = _ledger_row(config, pick_id)
+    assert settled["trade_state"] == "FULL_WIN"
+    first_settlement_time = settled["updated_at"]
+    with storage.connect(config.dashboard_db_path) as conn:
+        status = storage.get_runtime_state(conn, "model_pick_settlement_state", initialize_schema=False)
+    assert status["model_pick_settlement_applied_last_cycle"] == 1
+
+    second = services.run_model_pick_settlement_cycle()
+    assert second["applied"] == 0
+    assert _ledger_row(config, pick_id)["updated_at"] == first_settlement_time
+    assert not config.paper_trading_db_path.exists()
+
+
+def test_permanent_status_lock_exhausts_without_reapplying_ledger(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    _seed_dashboard_fixture(config, _fixture("api-football:2", home=2, away=0))
+    pick_id = _seed_pick(config, "api-football:2", "asian_handicap", "HOME", -0.5)
+    services = _services(config)
+    original_put = storage.put_runtime_state
+    attempts = []
+
+    def always_locked(conn, *, state_key, **kwargs):
+        if state_key == "model_pick_settlement_state":
+            attempts.append(1)
+            raise sqlite3.OperationalError("database is locked")
+        return original_put(conn, state_key=state_key, **kwargs)
+
+    monkeypatch.setattr(storage, "put_runtime_state", always_locked)
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        services.run_model_pick_settlement_cycle()
+    assert len(attempts) == 3
+    settled = _ledger_row(config, pick_id)
+    assert settled["trade_state"] == "FULL_WIN"
+    original_time = settled["updated_at"]
+
+    monkeypatch.setattr(storage, "put_runtime_state", original_put)
+    retry_cycle = services.run_model_pick_settlement_cycle()
+    assert retry_cycle["applied"] == 0
+    assert _ledger_row(config, pick_id)["updated_at"] == original_time
+
+
+def test_status_non_lock_operational_error_not_retried(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    _seed_dashboard_fixture(config, _fixture("api-football:3", home=2, away=0))
+    _seed_pick(config, "api-football:3", "asian_handicap", "HOME", -0.5)
+    services = _services(config)
+    original_put = storage.put_runtime_state
+    attempts = []
+
+    def schema_failure(conn, *, state_key, **kwargs):
+        if state_key == "model_pick_settlement_state":
+            attempts.append(1)
+            raise sqlite3.OperationalError("no such table: dashboard_runtime_state")
+        return original_put(conn, state_key=state_key, **kwargs)
+
+    monkeypatch.setattr(storage, "put_runtime_state", schema_failure)
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        services.run_model_pick_settlement_cycle()
+    assert len(attempts) == 1
