@@ -412,6 +412,8 @@ def test_dashboard_status_lock_retries_without_resettling_pick(tmp_path, monkeyp
     _seed_dashboard_fixture(config, _fixture("api-football:1", home=2, away=0))
     pick_id = _seed_pick(config, "api-football:1", "asian_handicap", "HOME", -0.5)
     services = _services(config)
+    # Production initializes the schema before concurrent runtime loops start.
+    services._schema_initialized = True
 
     # A different scheduler thread can hold a dashboard-DB writer transaction
     # while the Model Pick ledger (another DB) has already committed.
