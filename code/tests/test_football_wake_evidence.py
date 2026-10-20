@@ -394,3 +394,23 @@ def test_wake_shell_does_not_log_public_health_response_bodies():
     assert 'body=${WAKE_BODY}' not in source
     assert "wake-http-failed" in source
     assert "wake-failed" in source
+
+
+def test_public_health_allowlist_does_not_bypass_auth_for_prefix_lookalikes(tmp_path: Path, monkeypatch):
+    """Only the real wake endpoints are unauthenticated, not all /health* URLs."""
+    monkeypatch.setenv("SPORTS_AI_AUTH_ENABLED", "1")
+    monkeypatch.setenv("SPORTS_AI_AUTH_DB_PATH", str(tmp_path / "auth.sqlite"))
+    monkeypatch.setenv("SPORTS_AI_AUTH_COOKIE_SECURE", "0")
+    service = LowMemoryWebDashboardServices(config=_config(tmp_path, role=RUNTIME_ROLE_WEB))
+    service._provider_budget = _FakeBudget()  # type: ignore[assignment]
+    service._edge_desk_available = False
+    with storage.connect(service.config.dashboard_db_path) as conn:
+        storage.initialize_database(conn)
+    app = create_app(services=service)
+    with TestClient(app, follow_redirects=False) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/health/wake").status_code == 503
+        for spoofed_path in ("/health-internal", "/healthcheck", "/health/private"):
+            response = client.get(spoofed_path)
+            assert response.status_code in (302, 303, 307)
+            assert response.headers["location"].startswith("/login")
