@@ -423,6 +423,7 @@ def test_dashboard_status_lock_retries_without_resettling_pick(tmp_path, monkeyp
     )
     original_put = storage.put_runtime_state
     attempts = []
+    writer_state = {"closed": False}
 
     def put_with_first_attempt_contended(conn, *, state_key, **kwargs):
         if state_key == "model_pick_settlement_state":
@@ -436,13 +437,14 @@ def test_dashboard_status_lock_retries_without_resettling_pick(tmp_path, monkeyp
                     # failed attempt. An unrelated SQLITE error would still fail.
                     writer.rollback()
                     writer.close()
+                    writer_state["closed"] = True
         return original_put(conn, state_key=state_key, **kwargs)
 
     monkeypatch.setattr(storage, "put_runtime_state", put_with_first_attempt_contended)
     try:
         outcome = services.run_model_pick_settlement_cycle()
     finally:
-        if writer.in_transaction:
+        if not writer_state["closed"]:
             writer.rollback()
             writer.close()
 
