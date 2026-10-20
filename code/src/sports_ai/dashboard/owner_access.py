@@ -53,7 +53,7 @@ async def owner_access_policy(request: Request, call_next):
         not allow_guest
         and request.cookies.get(GUEST_COOKIE_NAME) == GUEST_COOKIE_VALUE
         and path != "/login"
-        and not path.startswith("/health")
+        and path not in {"/health", "/health/wake"}
         and not path.startswith("/static/")
     ):
         response = RedirectResponse("/login", status_code=303)
