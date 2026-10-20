@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
@@ -5582,6 +5583,40 @@ class DashboardServices:
             initialize_schema=self._read_requires_schema_init(),
         )
 
+    def _persist_model_pick_settlement_state_with_busy_retry(self) -> None:
+        """Retry ONLY the separate dashboard status checkpoint after SQLite contention.
+
+        The Model Pick ledger is committed before this checkpoint. Re-running the
+        settlement cycle to fix a failed status write would be unsafe; instead,
+        retry the single idempotent dashboard-runtime-state UPSERT on a fresh
+        connection. A permanent lock must still surface to the scheduler.
+        """
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            conn = storage.connect(self.config.dashboard_db_path)
+            try:
+                with conn:
+                    self._persist_model_pick_settlement_state(conn)
+                return
+            except sqlite3.OperationalError as exc:
+                sqlite_code = getattr(exc, "sqlite_errorcode", None)
+                is_busy = (
+                    isinstance(sqlite_code, int)
+                    and (sqlite_code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+                ) or (
+                    sqlite_code is None
+                    and str(exc).lower() in ("database is locked", "database table is locked")
+                )
+                if not is_busy or attempt + 1 >= max_attempts:
+                    raise
+                logger.warning(
+                    "model pick settlement status checkpoint busy; retrying attempt=%d/%d",
+                    attempt + 2, max_attempts,
+                )
+            finally:
+                conn.close()
+            time.sleep(0.2 * (attempt + 1))
+
     def run_model_pick_settlement_cycle(self) -> dict[str, Any]:
         """Settle open LIVE_ISSUED Model Picks from already-persisted verified truth.
 
@@ -5652,8 +5687,7 @@ class DashboardServices:
                 "model_pick_settlement_action_hash_last_cycle": None if plan is None else plan.action_hash,
             }
         )
-        with storage.connect(self.config.dashboard_db_path) as conn:
-            self._persist_model_pick_settlement_state(conn)
+        self._persist_model_pick_settlement_state_with_busy_retry()
         if error:
             logger.warning("model pick settlement cycle error: %s", error)
         return {
