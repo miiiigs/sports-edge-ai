@@ -105,7 +105,11 @@ def create_app(
         guest_access = request.cookies.get(GUEST_COOKIE_NAME) == GUEST_COOKIE_VALUE
         request.state.user = user
         request.state.guest = guest_access and user is None
-        public_path = request.url.path in {"/login", "/signup", "/guest", "/health"} or request.url.path.startswith("/static/")
+        public_path = (
+            request.url.path in {"/login", "/signup", "/guest"}
+            or request.url.path in {"/health", "/health/wake"}
+            or request.url.path.startswith("/static/")
+        )
         if public_path or user is not None:
             return await call_next(request)
 
@@ -546,6 +550,17 @@ def create_app(
     @app.get("/health")
     def api_health():
         return JSONResponse(resolved_services.get_health_payload())
+
+    @app.get("/health/wake")
+    def api_wake_health(
+        since: str | None = Query(default=None),
+        max_age_seconds: int = Query(default=3600, ge=1, le=86400),
+    ):
+        payload, status_code = resolved_services.get_wake_status(
+            since=since,
+            max_age_seconds=max_age_seconds,
+        )
+        return JSONResponse(payload, status_code=status_code)
 
     @app.post("/api/fixtures/refresh")
     async def api_refresh_fixtures():

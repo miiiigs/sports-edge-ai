@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sqlite3
+import time as runtime_time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
@@ -189,6 +190,14 @@ RUNTIME_ROLE_COMBINED = "combined"
 RUNTIME_ROLE_WEB = "web"
 RUNTIME_ROLE_SCHEDULER = "scheduler"
 RUNTIME_ROLES = {RUNTIME_ROLE_COMBINED, RUNTIME_ROLE_WEB, RUNTIME_ROLE_SCHEDULER}
+
+# Durable wake/cycle evidence shared by the scheduler and the read-only web
+# process. The web process never writes this state; it reads the scheduler's
+# last committed record so an external wake check can distinguish "HTTP 200"
+# from "a useful fixture/prediction cycle completed".
+WAKE_EVIDENCE_STATE_KEY = "wake_evidence_state"
+WAKE_EVIDENCE_SCHEMA_VERSION = 1
+WAKE_VERIFY_DEFAULT_MAX_AGE_SECONDS = 3600
 
 logger = logging.getLogger(__name__)
 PAPER_ACTIVE_STATES = {"PENDING", "OPEN", "UNSETTLED"}
@@ -909,6 +918,371 @@ class DashboardServices:
             "completed_at": None,
             "last_error": None,
         }
+        self._process_started_at = utc_now_iso()
+        self._sync_cycle_active = False
+        self._cycle_new_predictions: list[dict[str, Any]] = []
+        self._wake_evidence_state: dict[str, Any] = {
+            "schema_version": WAKE_EVIDENCE_SCHEMA_VERSION,
+            "process_role": self.config.runtime_role,
+            "process_started_at": self._process_started_at,
+            "startup_sync_state": "IDLE",
+            "startup_sync_started_at": None,
+            "startup_sync_completed_at": None,
+            "startup_sync_last_error": None,
+            "last_cycle_state": None,
+            "last_cycle_started_at": None,
+            "last_cycle_completed_at": None,
+            "last_cycle_duration_seconds": None,
+            "last_cycle_error": None,
+            "last_sync_kind": None,
+            "provider_state": None,
+            "fixtures_considered": 0,
+            "predictions_ready_total": 0,
+            "predictions_blocked_total": 0,
+            "forward_predictions_new_last_cycle": 0,
+            "forward_predictions_new_ready_last_cycle": 0,
+            "forward_predictions_noop_reason": None,
+            "useful_cycle": False,
+            "last_useful_cycle_at": None,
+            "provider_requests_last_cycle": 0,
+            "provider_budget": {},
+            "updated_at": None,
+        }
+
+    def _compact_provider_budget(self) -> dict[str, Any]:
+        try:
+            snapshot = self._provider_budget.snapshot()
+        except (AttributeError, KeyError, OSError, TypeError, ValueError, sqlite3.Error):
+            return {"state": "UNAVAILABLE"}
+        quota = dict(snapshot.get("quota") or {})
+        circuit = dict(snapshot.get("circuit") or {})
+        return {
+            "paid_provider_calls_allowed": snapshot.get("paid_provider_calls_allowed"),
+            "quota_state": quota.get("state"),
+            "daily_remaining": quota.get("daily_remaining"),
+            "effective_remaining": quota.get("effective_remaining"),
+            "operational_remaining": quota.get("operational_remaining"),
+            "requests_used": quota.get("requests_used"),
+            "circuit_state": circuit.get("state"),
+            "captured_at": quota.get("captured_at"),
+        }
+
+    def _persist_wake_evidence(self) -> None:
+        if self.config.runtime_role == RUNTIME_ROLE_WEB:
+            return
+        updated_at = utc_now_iso()
+        self._wake_evidence_state["updated_at"] = updated_at
+        try:
+            with storage.connect(self.config.dashboard_db_path) as conn:
+                storage.put_runtime_state(
+                    conn,
+                    state_key=WAKE_EVIDENCE_STATE_KEY,
+                    state_value=self._wake_evidence_state,
+                    updated_at=updated_at,
+                    initialize_schema=self._read_requires_schema_init(),
+                )
+        except Exception:
+            logger.exception("failed to persist Football wake evidence")
+
+    def _begin_sync_cycle(self, *, sync_kind: str, started_at: str) -> None:
+        self._sync_cycle_active = True
+        self._cycle_new_predictions = []
+        self._wake_evidence_state.update(
+            {
+                "last_cycle_state": "RUNNING",
+                "last_cycle_started_at": started_at,
+                "last_cycle_completed_at": None,
+                "last_cycle_duration_seconds": None,
+                "last_cycle_error": None,
+                "last_sync_kind": sync_kind,
+                "useful_cycle": False,
+                "forward_predictions_new_last_cycle": 0,
+                "forward_predictions_new_ready_last_cycle": 0,
+                "forward_predictions_noop_reason": None,
+            }
+        )
+        self._persist_wake_evidence()
+
+    def _finish_sync_cycle(
+        self,
+        *,
+        started_at: str,
+        sync_kind: str,
+        result: dict[str, Any],
+    ) -> None:
+        self._sync_cycle_active = False
+        completed_at = utc_now_iso()
+        new_predictions = list(self._cycle_new_predictions)
+        self._cycle_new_predictions = []
+        new_ready = sum(
+            1
+            for prediction in new_predictions
+            if str(prediction.get("prediction_status")) == PREDICTION_STATUS_READY
+        )
+        provider_state = str(result.get("state") or self._provider_state.get("state") or "")
+        counts = dict(result.get("last_counts") or {})
+        fixtures_considered = int(counts.get("normalized") or 0)
+        ready_total = int(self._prediction_state.get("ready_fixture_count") or 0)
+        blocked_total = int(self._prediction_state.get("blocked_fixture_count") or 0)
+        useful_cycle = provider_state == "CONNECTED" and (
+            new_ready > 0 or (fixtures_considered > 0 and ready_total > 0)
+        )
+        if provider_state == "CONNECTED":
+            cycle_state = "COMPLETED"
+        elif provider_state == "DEGRADED":
+            cycle_state = "DEGRADED"
+        elif provider_state in {"NOT_CONFIGURED", PAID_PROVIDER_DISABLED_STATE}:
+            cycle_state = "SKIPPED"
+        else:
+            cycle_state = provider_state or "UNKNOWN"
+        noop_reason: str | None = None
+        if new_ready == 0:
+            if provider_state != "CONNECTED":
+                noop_reason = f"PROVIDER_{provider_state or 'UNKNOWN'}"
+            elif fixtures_considered == 0:
+                noop_reason = "NO_FORWARD_FIXTURES"
+            elif ready_total == 0:
+                noop_reason = "NO_READY_FORWARD_PREDICTIONS"
+            elif new_predictions:
+                noop_reason = "NEW_PREDICTIONS_NOT_READY"
+            else:
+                noop_reason = "FORWARD_PREDICTIONS_ALREADY_PERSISTED"
+        try:
+            duration_seconds: float | None = round(
+                (parse_iso_datetime(completed_at) - parse_iso_datetime(started_at)).total_seconds(),
+                3,
+            )
+        except ValueError:
+            duration_seconds = None
+        self._wake_evidence_state.update(
+            {
+                "last_cycle_state": cycle_state,
+                "last_cycle_started_at": started_at,
+                "last_cycle_completed_at": completed_at,
+                "last_cycle_duration_seconds": duration_seconds,
+                "last_cycle_error": result.get("last_error"),
+                "last_sync_kind": sync_kind,
+                "provider_state": provider_state or None,
+                "fixtures_considered": fixtures_considered,
+                "predictions_ready_total": ready_total,
+                "predictions_blocked_total": blocked_total,
+                "forward_predictions_new_last_cycle": len(new_predictions),
+                "forward_predictions_new_ready_last_cycle": new_ready,
+                "forward_predictions_noop_reason": noop_reason,
+                "useful_cycle": useful_cycle,
+                "provider_requests_last_cycle": int(
+                    (result.get("sync_diagnostics") or {}).get("query_count") or 0
+                ),
+                "provider_budget": self._compact_provider_budget(),
+            }
+        )
+        if useful_cycle:
+            self._wake_evidence_state["last_useful_cycle_at"] = completed_at
+        self._persist_wake_evidence()
+        logger.info(
+            "wake cycle evidence: kind=%s state=%s useful=%s fixtures=%s new_predictions=%s "
+            "new_ready=%s ready_total=%s blocked_total=%s noop_reason=%s duration_seconds=%s",
+            sync_kind,
+            cycle_state,
+            useful_cycle,
+            fixtures_considered,
+            len(new_predictions),
+            new_ready,
+            ready_total,
+            blocked_total,
+            noop_reason,
+            duration_seconds,
+        )
+
+    def _finish_sync_cycle_failed(
+        self,
+        *,
+        started_at: str,
+        sync_kind: str,
+        exc: BaseException,
+    ) -> None:
+        self._sync_cycle_active = False
+        self._cycle_new_predictions = []
+        completed_at = utc_now_iso()
+        error = f"{type(exc).__name__}: {exc}"
+        try:
+            duration_seconds: float | None = round(
+                (parse_iso_datetime(completed_at) - parse_iso_datetime(started_at)).total_seconds(),
+                3,
+            )
+        except ValueError:
+            duration_seconds = None
+        self._wake_evidence_state.update(
+            {
+                "last_cycle_state": "FAILED",
+                "last_cycle_started_at": started_at,
+                "last_cycle_completed_at": completed_at,
+                "last_cycle_duration_seconds": duration_seconds,
+                "last_cycle_error": error,
+                "last_sync_kind": sync_kind,
+                "useful_cycle": False,
+                "forward_predictions_new_last_cycle": 0,
+                "forward_predictions_new_ready_last_cycle": 0,
+                "forward_predictions_noop_reason": None,
+            }
+        )
+        self._persist_wake_evidence()
+        logger.error(
+            "wake cycle failed: kind=%s duration_seconds=%s error=%s",
+            sync_kind,
+            duration_seconds,
+            error,
+        )
+
+    def _record_new_prediction(self, payload: dict[str, Any]) -> None:
+        if not self._sync_cycle_active:
+            return
+        self._cycle_new_predictions.append(
+            {
+                "prediction_id": str(payload.get("prediction_id") or ""),
+                "fixture_id": str(payload.get("fixture_id") or ""),
+                "prediction_status": str(payload.get("prediction_status") or ""),
+            }
+        )
+
+    def get_wake_evidence_summary(self) -> dict[str, Any]:
+        evidence = self._wake_evidence_state
+        return {
+            "schema_version": evidence.get("schema_version"),
+            "process_role": self.config.runtime_role,
+            "evidence_process_role": evidence.get("process_role"),
+            "process_started_at": self._process_started_at,
+            "scheduler_process_started_at": evidence.get("process_started_at"),
+            "startup_sync_state": evidence.get("startup_sync_state"),
+            "startup_sync_started_at": evidence.get("startup_sync_started_at"),
+            "startup_sync_completed_at": evidence.get("startup_sync_completed_at"),
+            "startup_sync_last_error": evidence.get("startup_sync_last_error"),
+            "last_cycle_state": evidence.get("last_cycle_state"),
+            "last_cycle_started_at": evidence.get("last_cycle_started_at"),
+            "last_cycle_completed_at": evidence.get("last_cycle_completed_at"),
+            "last_cycle_duration_seconds": evidence.get("last_cycle_duration_seconds"),
+            "last_cycle_error": evidence.get("last_cycle_error"),
+            "last_sync_kind": evidence.get("last_sync_kind"),
+            "provider_state": evidence.get("provider_state"),
+            "fixtures_considered": int(evidence.get("fixtures_considered") or 0),
+            "predictions_ready_total": int(evidence.get("predictions_ready_total") or 0),
+            "predictions_blocked_total": int(evidence.get("predictions_blocked_total") or 0),
+            "forward_predictions_new_last_cycle": int(
+                evidence.get("forward_predictions_new_last_cycle") or 0
+            ),
+            "forward_predictions_new_ready_last_cycle": int(
+                evidence.get("forward_predictions_new_ready_last_cycle") or 0
+            ),
+            "forward_predictions_noop_reason": evidence.get("forward_predictions_noop_reason"),
+            "useful_cycle": bool(evidence.get("useful_cycle")),
+            "last_useful_cycle_at": evidence.get("last_useful_cycle_at"),
+            "provider_requests_last_cycle": int(evidence.get("provider_requests_last_cycle") or 0),
+            "provider_budget": dict(evidence.get("provider_budget") or {}),
+            "updated_at": evidence.get("updated_at"),
+        }
+
+    def _public_wake_evidence_summary(self) -> dict[str, Any]:
+        """Minimal public wake telemetry: never expose raw failures or quotas.
+
+        The comprehensive durable operational record is available to the
+        scheduler/operator from internal storage. /health and /health/wake are
+        intentionally unauthenticated for the cron, so use an allowlist.
+        """
+        source = self.get_wake_evidence_summary()
+        safe_keys = (
+            "process_role",
+            "evidence_process_role",
+            "startup_sync_state",
+            "last_cycle_state",
+            "last_cycle_completed_at",
+            "last_useful_cycle_at",
+            "forward_predictions_new_ready_last_cycle",
+            "forward_predictions_noop_reason",
+            "useful_cycle",
+        )
+        return {key: source.get(key) for key in safe_keys}
+
+    def get_wake_status(
+        self,
+        *,
+        since: str | None = None,
+        max_age_seconds: int = WAKE_VERIFY_DEFAULT_MAX_AGE_SECONDS,
+    ) -> tuple[dict[str, Any], int]:
+        """Verify that a useful cycle completed after the requested wake time.
+
+        This is deliberately read-only and provider-free. ``/health`` remains a
+        liveness endpoint; this endpoint answers the stronger question "did the
+        wake actually produce useful processing?".
+        """
+        self._refresh_persisted_runtime_state_for_web()
+        now = datetime.now(timezone.utc)
+        if since:
+            try:
+                # Query-string '+' offsets are often decoded as spaces.
+                since_dt = parse_iso_datetime(str(since).strip().replace(" ", "+"))
+            except (TypeError, ValueError):
+                return (
+                    {
+                        "status": "error",
+                        "wake_verified": False,
+                        "error": "invalid_since",
+                        "message": "since must be an ISO-8601 timestamp",
+                    },
+                    400,
+                )
+        else:
+            bounded_max_age = max(1, min(int(max_age_seconds), 86400))
+            since_dt = now - timedelta(seconds=bounded_max_age)
+        evidence = self.get_wake_evidence_summary()
+        last_useful_raw = evidence.get("last_useful_cycle_at")
+        last_useful_dt: datetime | None = None
+        if last_useful_raw:
+            try:
+                last_useful_dt = parse_iso_datetime(str(last_useful_raw))
+            except ValueError:
+                last_useful_dt = None
+        verified = last_useful_dt is not None and last_useful_dt >= since_dt
+        failed_after_since = False
+        most_recent_failure: datetime | None = None
+        for key in ("last_cycle_completed_at", "startup_sync_completed_at"):
+            raw = evidence.get(key)
+            state_key = "last_cycle_state" if key == "last_cycle_completed_at" else "startup_sync_state"
+            if str(evidence.get(state_key) or "") != "FAILED" or not raw:
+                continue
+            try:
+                failure_at = parse_iso_datetime(str(raw))
+                if failure_at >= since_dt:
+                    failed_after_since = True
+                    if most_recent_failure is None or failure_at > most_recent_failure:
+                        most_recent_failure = failure_at
+            except ValueError:
+                continue
+        # Do not let an earlier good cycle mask a later failed scheduler
+        # attempt in the same observation window.
+        if most_recent_failure is not None and (
+            last_useful_dt is None or most_recent_failure > last_useful_dt
+        ):
+            verified = False
+        if verified:
+            status = "ok"
+            message = "useful scheduler cycle completed after the requested wake time"
+        elif failed_after_since:
+            status = "failed"
+            message = "a scheduler cycle failed after the requested wake time"
+        else:
+            status = "pending"
+            message = "no useful scheduler cycle has completed since the requested wake time"
+        return (
+            {
+                "status": status,
+                "wake_verified": verified,
+                "checked_since": since_dt.isoformat(),
+                "checked_at": now.isoformat(),
+                "message": message,
+                "evidence": self._public_wake_evidence_summary(),
+            },
+            200 if verified else 503,
+        )
 
     async def initialize(self) -> None:
         ensure_operational_data_dir(self.config.operational_data_dir)
@@ -1000,25 +1374,52 @@ class DashboardServices:
                 "last_error": None,
             }
         )
+        self._wake_evidence_state.update(
+            {
+                "startup_sync_state": "RUNNING",
+                "startup_sync_started_at": started_at,
+                "startup_sync_completed_at": None,
+                "startup_sync_last_error": None,
+            }
+        )
+        self._persist_wake_evidence()
         try:
             await self.sync_once(sync_kind="startup", include_schedule=True)
         except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
             self._startup_sync_state.update(
                 {
                     "state": "FAILED",
                     "completed_at": utc_now_iso(),
-                    "last_error": f"{type(exc).__name__}: {exc}",
+                    "last_error": error,
                 }
             )
-            logger.exception("dashboard startup sync failed: %s", exc)
+            self._wake_evidence_state.update(
+                {
+                    "startup_sync_state": "FAILED",
+                    "startup_sync_completed_at": utc_now_iso(),
+                    "startup_sync_last_error": error,
+                }
+            )
+            self._persist_wake_evidence()
+            logger.exception("dashboard startup sync failed")
             raise
+        completed_at = utc_now_iso()
         self._startup_sync_state.update(
             {
                 "state": "COMPLETED",
-                "completed_at": utc_now_iso(),
+                "completed_at": completed_at,
                 "last_error": None,
             }
         )
+        self._wake_evidence_state.update(
+            {
+                "startup_sync_state": "COMPLETED",
+                "startup_sync_completed_at": completed_at,
+                "startup_sync_last_error": None,
+            }
+        )
+        self._persist_wake_evidence()
 
     def _load_runtime_state(self, conn: Any) -> None:
         provider_state = storage.get_runtime_state(conn, "provider_state", initialize_schema=False)
@@ -1033,6 +1434,7 @@ class DashboardServices:
         )
         storage_runtime_state = storage.get_runtime_state(conn, "storage_runtime_state", initialize_schema=False)
         one_shot_sync_state = storage.get_runtime_state(conn, "one_shot_sync_state", initialize_schema=False)
+        wake_evidence_state = storage.get_runtime_state(conn, WAKE_EVIDENCE_STATE_KEY, initialize_schema=False)
         if isinstance(provider_state, dict):
             merged_provider_state = dict(self._provider_state)
             merged_provider_state.update(provider_state)
@@ -1069,6 +1471,10 @@ class DashboardServices:
             self._storage_runtime_state.update(storage_runtime_state)
         if isinstance(one_shot_sync_state, dict):
             self._one_shot_sync_state.update(one_shot_sync_state)
+        if isinstance(wake_evidence_state, dict) and self.config.runtime_role == RUNTIME_ROLE_WEB:
+            # The web child is a read-only consumer of scheduler evidence. It must
+            # never overwrite the scheduler's committed wake/cycle record.
+            self._wake_evidence_state.update(wake_evidence_state)
 
     def _refresh_persisted_runtime_state_for_web(self) -> None:
         if self.config.runtime_role != RUNTIME_ROLE_WEB:
@@ -3453,6 +3859,25 @@ class DashboardServices:
         sync_kind: str = "manual",
         include_schedule: bool = True,
     ) -> dict[str, Any]:
+        started_at = utc_now_iso()
+        self._begin_sync_cycle(sync_kind=sync_kind, started_at=started_at)
+        try:
+            result = self._sync_once_blocking_impl(
+                sync_kind=sync_kind,
+                include_schedule=include_schedule,
+            )
+        except Exception as exc:
+            self._finish_sync_cycle_failed(started_at=started_at, sync_kind=sync_kind, exc=exc)
+            raise
+        self._finish_sync_cycle(started_at=started_at, sync_kind=sync_kind, result=result)
+        return result
+
+    def _sync_once_blocking_impl(
+        self,
+        *,
+        sync_kind: str = "manual",
+        include_schedule: bool = True,
+    ) -> dict[str, Any]:
         now_utc = datetime.now(timezone.utc)
         attempted_at = utc_now_iso()
         sync_started = datetime.now(timezone.utc)
@@ -5582,6 +6007,40 @@ class DashboardServices:
             initialize_schema=self._read_requires_schema_init(),
         )
 
+    def _persist_model_pick_settlement_state_with_busy_retry(self) -> None:
+        """Retry ONLY the separate dashboard status checkpoint after SQLite contention.
+
+        The Model Pick ledger is committed before this checkpoint. Re-running the
+        settlement cycle to fix a failed status write would be unsafe; instead,
+        retry the single idempotent dashboard-runtime-state UPSERT on a fresh
+        connection. A permanent lock must still surface to the scheduler.
+        """
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            conn = storage.connect(self.config.dashboard_db_path)
+            try:
+                with conn:
+                    self._persist_model_pick_settlement_state(conn)
+                return
+            except sqlite3.OperationalError as exc:
+                sqlite_code = getattr(exc, "sqlite_errorcode", None)
+                is_busy = (
+                    isinstance(sqlite_code, int)
+                    and (sqlite_code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+                ) or (
+                    sqlite_code is None
+                    and str(exc).lower() in ("database is locked", "database table is locked")
+                )
+                if not is_busy or attempt + 1 >= max_attempts:
+                    raise
+                logger.warning(
+                    "model pick settlement status checkpoint busy; retrying attempt=%d/%d",
+                    attempt + 2, max_attempts,
+                )
+            finally:
+                conn.close()
+            runtime_time.sleep(0.2 * (attempt + 1))
+
     def run_model_pick_settlement_cycle(self) -> dict[str, Any]:
         """Settle open LIVE_ISSUED Model Picks from already-persisted verified truth.
 
@@ -5652,8 +6111,7 @@ class DashboardServices:
                 "model_pick_settlement_action_hash_last_cycle": None if plan is None else plan.action_hash,
             }
         )
-        with storage.connect(self.config.dashboard_db_path) as conn:
-            self._persist_model_pick_settlement_state(conn)
+        self._persist_model_pick_settlement_state_with_busy_retry()
         if error:
             logger.warning("model pick settlement cycle error: %s", error)
         return {
@@ -5850,6 +6308,7 @@ class DashboardServices:
                 updated_at=utc_now_iso(),
                 initialize_schema=self._read_requires_schema_init(),
             )
+            self._record_new_prediction(payload)
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
@@ -5905,6 +6364,7 @@ class DashboardServices:
                 updated_at=utc_now_iso(),
                 initialize_schema=self._read_requires_schema_init(),
             )
+            self._record_new_prediction(payload)
             self._record_edge_desk_shadow(conn, fixture=fixture, prediction=payload)
             return payload
 
@@ -5926,6 +6386,7 @@ class DashboardServices:
             updated_at=utc_now_iso(),
             initialize_schema=self._read_requires_schema_init(),
         )
+        self._record_new_prediction(prediction)
         self._record_edge_desk_shadow(conn, fixture=fixture, prediction=prediction)
         return prediction
 
@@ -8078,6 +8539,8 @@ class DashboardServices:
             "runtime_role": self.config.runtime_role,
             "scheduler_execution_mode": scheduler_execution_mode,
             "timestamp_utc": utc_now_iso(),
+            "process_started_at": self._process_started_at,
+            "wake_evidence": self._public_wake_evidence_summary(),
             "startup_sync_state": self._startup_sync_state["state"],
             "startup_sync_started_at": self._startup_sync_state["started_at"],
             "startup_sync_completed_at": self._startup_sync_state["completed_at"],

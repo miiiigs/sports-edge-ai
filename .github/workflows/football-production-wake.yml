@@ -15,9 +15,49 @@ concurrency:
 jobs:
   wake:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
+    env:
+      BASE_URL: https://sports-edge-ai-production.up.railway.app
+      MAX_WAIT_SECONDS: "300"
+      POLL_SECONDS: "15"
     steps:
-      - name: Wake Railway and verify health
+      - name: Wake Railway and verify a useful cycle
         shell: bash
         run: |
-          curl             --fail             --silent             --show-error             --location             --retry 2             --retry-delay 5             --max-time 90             "https://sports-edge-ai-production.up.railway.app/health"
+          set -euo pipefail
+          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "wake-start ts=${since} target=${BASE_URL}"
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 2 \
+            --retry-delay 5 \
+            --max-time 90 \
+            "${BASE_URL}/health"
+          echo
+          echo "wake-http-ok"
+
+          elapsed=0
+          while [ "${elapsed}" -lt "${MAX_WAIT_SECONDS}" ]; do
+            status="$(curl \
+              --silent \
+              --show-error \
+              --location \
+              --max-time 30 \
+              --output /tmp/wake.json \
+              --write-out '%{http_code}' \
+              "${BASE_URL}/health/wake?since=${since}")"
+            body="$(cat /tmp/wake.json)"
+            echo "wake-poll elapsed_seconds=${elapsed} http_status=${status} body=${body}"
+            if [ "${status}" = "200" ]; then
+              echo "wake-ok"
+              exit 0
+            fi
+            sleep "${POLL_SECONDS}"
+            elapsed=$((elapsed + POLL_SECONDS))
+          done
+
+          echo "::error::wake-failed reason=cycle-not-verified timeout_seconds=${MAX_WAIT_SECONDS}"
+          exit 1
