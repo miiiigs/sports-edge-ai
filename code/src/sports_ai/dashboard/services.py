@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import sqlite3
-import time
+import time as runtime_time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
@@ -5615,7 +5615,7 @@ class DashboardServices:
                 )
             finally:
                 conn.close()
-            time.sleep(0.2 * (attempt + 1))
+            runtime_time.sleep(0.2 * (attempt + 1))
 
     def run_model_pick_settlement_cycle(self) -> dict[str, Any]:
         """Settle open LIVE_ISSUED Model Picks from already-persisted verified truth.
