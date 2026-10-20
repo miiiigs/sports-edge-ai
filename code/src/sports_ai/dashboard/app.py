@@ -107,7 +107,7 @@ def create_app(
         request.state.guest = guest_access and user is None
         public_path = (
             request.url.path in {"/login", "/signup", "/guest"}
-            or request.url.path.startswith("/health")
+            or request.url.path in {"/health", "/health/wake"}
             or request.url.path.startswith("/static/")
         )
         if public_path or user is not None:
